@@ -231,3 +231,33 @@ func TestNewMessageFollowsOnlyACursorAtTheEnd(t *testing.T) {
 		t.Errorf("own send: selected %q, want the placeholder selected and shown:\n%s", got, strings.Join(f, "\n"))
 	}
 }
+
+// The user's own messages never start the unread section, and sending
+// counts as reading up to the message sent: the "── new ──" line goes
+// only above a later message by someone else.
+func TestNewLineNeverAboveTheUsersOwnMessage(t *testing.T) {
+	m := anchorPane(t)
+	m.SetCurrentUser("USELF")
+	m.SetLastReadTS("20.000000")
+	m.InsertLocal(MessageItem{TS: LocalTS(1), UserID: "USELF", UserName: "me", Text: "mine"})
+	if f := paneFrame(m); frameHas(f, "── new ──") {
+		t.Errorf("a new line shows above the user's own sending message:\n%s", joinRows(f))
+	}
+	m.Settle(LocalTS(1), MessageItem{TS: "21.000000", UserID: "USELF", UserName: "me", Text: "mine"})
+	if f := paneFrame(m); frameHas(f, "── new ──") {
+		t.Errorf("a new line shows above the user's own sent message:\n%s", joinRows(f))
+	}
+	m.AppendMessage(MessageItem{TS: "22.000000", UserID: "UOTHER", UserName: "them", Text: "reply-from-them"})
+	f := paneFrame(m)
+	for i, r := range f {
+		if r == "── new ──" || (len(r) > 0 && frameHas([]string{r}, "── new ──")) {
+			if i+2 >= len(f) || !frameHas(f[i:], "reply-from-them") || frameHas(f[i:], "mine") {
+				t.Errorf("the new line is not right above their reply:\n%s", joinRows(f))
+			}
+			return
+		}
+	}
+	t.Errorf("no new line above their reply:\n%s", joinRows(f))
+}
+
+func joinRows(f []string) string { return strings.Join(f, "\n") }

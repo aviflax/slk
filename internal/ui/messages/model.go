@@ -1667,7 +1667,7 @@ func (m *Model) buildCache(width int) {
 	}
 
 	var lastDate string
-	newMsgLandmarkInserted := false
+	unreadStart := UnreadStart(m.messages, m.lastReadTS, m.currentUserID)
 	for i, msg := range m.messages {
 		msgDate := DateFromTS(msg.TS)
 		if msgDate != "" && msgDate != lastDate {
@@ -1681,13 +1681,12 @@ func (m *Model) buildCache(width int) {
 		}
 
 		// New message landmark: insert before the first unread message
-		if m.lastReadTS != "" && !newMsgLandmarkInserted && msg.TS > m.lastReadTS {
+		if i == unreadStart {
 			newStr := "── new ──"
 			label := lipgloss.NewStyle().Background(styles.Background).Foreground(styles.Error).Bold(true).
 				Width(width).Align(lipgloss.Center).
 				Render(newStr)
 			appendSeparator(label)
-			newMsgLandmarkInserted = true
 		}
 
 		e, p := m.renderMessageEntry(i, width, cs, stats)

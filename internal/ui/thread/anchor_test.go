@@ -198,3 +198,24 @@ func TestNewReplyFollowsOnlyACursorAtTheEnd(t *testing.T) {
 		t.Errorf("own reply: selected %q, want the placeholder selected and shown", got)
 	}
 }
+
+// The user's own replies never start the thread's unread section.
+func TestThreadNewLineNeverAboveTheUsersOwnReply(t *testing.T) {
+	var replies []messages.MessageItem
+	for i := 10; i <= 20; i++ {
+		replies = append(replies, messages.MessageItem{TS: fmt.Sprintf("%d.000000", i), UserName: "u", Text: fmt.Sprintf("r%d", i)})
+	}
+	m := New()
+	m.SetThread(messages.MessageItem{TS: "9.500000", UserName: "p", Text: "parent"}, replies, "C1", "9.500000")
+	_ = m.View(anchorH, anchorW)
+	m.SetCurrentUser("USELF")
+	m.SetLastReadTS("20.000000")
+	m.InsertLocal(messages.MessageItem{TS: messages.LocalTS(1), UserID: "USELF", UserName: "me", Text: "mine"})
+	if f := threadFrame(m); frameHas(f, "── new ──") {
+		t.Errorf("a new line shows above the user's own sending reply:\n%s", strings.Join(f, "\n"))
+	}
+	m.Settle(messages.LocalTS(1), messages.MessageItem{TS: "21.000000", UserID: "USELF", UserName: "me", Text: "mine"})
+	if f := threadFrame(m); frameHas(f, "── new ──") {
+		t.Errorf("a new line shows above the user's own sent reply:\n%s", strings.Join(f, "\n"))
+	}
+}

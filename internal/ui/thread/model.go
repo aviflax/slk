@@ -1364,15 +1364,14 @@ func (m *Model) viewInternal(height, width int, applySelection bool) string {
 	entries := make([]entrylist.Entry, 0, 2*len(m.replyEntries)+2)
 	entries = append(entries, parent)
 	lastDate := messages.DateFromTS(m.parent.TS)
-	landmarkInserted := false
+	unreadStart := messages.UnreadStart(m.replies, m.unreadBoundaryTS, m.currentUserID)
 	for i, e := range m.replyEntries {
 		if replyDate := messages.DateFromTS(m.replies[i].TS); replyDate != "" && replyDate != lastDate {
 			entries = append(entries, decoration(dateSeparatorStyle.Render("── "+messages.FormatDateSeparator(replyDate)+" ──")))
 			lastDate = replyDate
 		}
-		if !landmarkInserted && newLandmark != "" && m.replies[i].TS > m.unreadBoundaryTS {
+		if i == unreadStart {
 			entries = append(entries, decoration(newLandmark))
-			landmarkInserted = true
 		}
 		entries = append(entries, e)
 		if i < len(m.replyEntries)-1 {

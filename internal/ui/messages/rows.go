@@ -334,3 +334,28 @@ func Settle(rows []MessageItem, localTS string, item MessageItem) ([]MessageItem
 	}
 	return rows, RowChange{Op: RowMoved, Index: ch.Index, From: i}
 }
+
+// UnreadStart is the index of the first unread row, above which a pane
+// draws its "── new ──" line, or -1 for none (or no read cursor). A row
+// is unread when Slack knows it (KnownToSlack) and its TS is after
+// lastRead (CompareTS). The user's own rows (author selfID) and
+// placeholders never start the section, and posting counts as reading
+// up to the message posted, as Slack's own cursor does: only rows after
+// the user's last one can be unread.
+func UnreadStart(rows []MessageItem, lastRead, selfID string) int {
+	if lastRead == "" {
+		return -1
+	}
+	from := 0
+	for i, r := range rows {
+		if IsLocalTS(r.TS) || (selfID != "" && r.UserID == selfID) {
+			from = i + 1
+		}
+	}
+	for i := from; i < len(rows); i++ {
+		if KnownToSlack(rows[i]) && CompareTS(rows[i].TS, lastRead) > 0 {
+			return i
+		}
+	}
+	return -1
+}
