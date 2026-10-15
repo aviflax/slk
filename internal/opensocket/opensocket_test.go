@@ -1,4 +1,4 @@
-//go:build !windows
+//go:build darwin || linux || freebsd || netbsd || openbsd || dragonfly
 
 package opensocket
 
@@ -234,5 +234,108 @@ func TestRegularFileIsNotRemoved(t *testing.T) {
 func TestSendWithNothingListening(t *testing.T) {
 	if err := Send(sockPath(t), permalink); !errors.Is(err, ErrNotRunning) {
 		t.Errorf("Send = %v, want ErrNotRunning", err)
+	}
+}
+
+func TestPathIsInAPrivateSubdirectory(t *testing.T) {
+	if got, want := Path("/data/slk"), filepath.Join("/data/slk", DirName, FileName); got != want {
+		t.Errorf("Path = %q, want %q", got, want)
+	}
+}
+
+// The directory, not the socket's own mode, is what keeps other users
+// out: it applies from the moment the socket exists, and on every
+// platform. A directory that already exists with a wider mode is
+// narrowed.
+func TestExistingSocketDirIsMadePrivate(t *testing.T) {
+	path := sockPath(t)
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	listenT(t, path, (&recorder{}).handle)
+	di, err := os.Stat(filepath.Dir(path))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if perm := di.Mode().Perm(); perm != 0o700 {
+		t.Errorf("directory mode %o, want 700", perm)
+	}
+}
+
+// Several instances starting at once over a stale socket: exactly one
+// gets it, the rest see ErrInUse, and the winner still answers.
+func TestConcurrentStartsOverStaleSocket(t *testing.T) {
+	path := sockPath(t)
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	ln, err := net.Listen("unix", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ln.(*net.UnixListener).SetUnlinkOnClose(false)
+	_ = ln.Close()
+
+	const n = 8
+	var (
+		wg      sync.WaitGroup
+		mu      sync.Mutex
+		servers []*Server
+		inUse   int
+	)
+	for i := 0; i < n; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			s, err := Listen(path, (&recorder{}).handle)
+			mu.Lock()
+			defer mu.Unlock()
+			switch {
+			case err == nil:
+				servers = append(servers, s)
+			case errors.Is(err, ErrInUse):
+				inUse++
+			default:
+				t.Errorf("Listen: %v", err)
+			}
+		}()
+	}
+	wg.Wait()
+	for _, s := range servers {
+		t.Cleanup(func() { _ = s.Close() })
+	}
+	if len(servers) != 1 || inUse != n-1 {
+		t.Fatalf("%d listeners, %d ErrInUse; want 1 and %d", len(servers), inUse, n-1)
+	}
+	if err := Send(path, permalink); err != nil {
+		t.Errorf("winner not answering: %v", err)
+	}
+}
+
+// An instance whose socket file was replaced by another's must not
+// delete the replacement when it exits.
+func TestCloseLeavesAnotherInstancesSocket(t *testing.T) {
+	path := sockPath(t)
+	first, err := Listen(path, (&recorder{}).handle)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(path); err != nil {
+		t.Fatal(err)
+	}
+	second := &recorder{}
+	listenT(t, path, second.handle)
+
+	if err := first.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := Send(path, permalink); err != nil {
+		t.Fatalf("second instance's socket gone after the first closed: %v", err)
+	}
+	if len(second.got()) != 1 {
+		t.Errorf("second listener got %q", second.got())
 	}
 }

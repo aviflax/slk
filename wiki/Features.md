@@ -129,8 +129,8 @@ already running, the same way `o` does:
 slk open 'https://example-workspace.slack.com/archives/C054JFCBN69/p1779284733270139'
 ```
 
-It talks to the running TUI over `slk.sock` in the data directory
-(`~/.local/share/slk/slk.sock`, or under `$XDG_DATA_HOME`), so a URL
+It talks to the running TUI over `run/slk.sock` in the data directory
+(`~/.local/share/slk/run/slk.sock`, or under `$XDG_DATA_HOME`), so a URL
 handler or script can try slk first and fall back to the browser:
 
 ```sh

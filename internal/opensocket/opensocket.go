@@ -8,8 +8,8 @@
 // at most MaxRequest bytes.
 //
 // Listen is the server end (started by the TUI), Send the client end
-// (the `slk open` subcommand). On Windows Listen returns
-// errors.ErrUnsupported and Send reports ErrNotRunning.
+// (the `slk open` subcommand). Where flock is unavailable (Windows)
+// Listen returns errors.ErrUnsupported and Send reports ErrNotRunning.
 package opensocket
 
 import (
@@ -26,7 +26,11 @@ import (
 	"github.com/gammons/slk/internal/slackurl"
 )
 
-// FileName is the socket's name inside slk's data directory.
+// DirName is the private (0700) subdirectory of slk's data directory
+// that holds the socket and its lock file.
+const DirName = "run"
+
+// FileName is the socket's name inside DirName.
 const FileName = "slk.sock"
 
 // MaxRequest caps the bytes the server reads from one connection,
@@ -55,40 +59,44 @@ func (r *Rejected) Error() string { return r.Reason }
 // error replies "error: " plus its message.
 type Handler func(url string) error
 
-// Path returns the socket path inside dataDir.
-func Path(dataDir string) string { return filepath.Join(dataDir, FileName) }
+// Path returns the socket path for dataDir: dataDir/run/slk.sock.
+func Path(dataDir string) string { return filepath.Join(dataDir, DirName, FileName) }
 
 // Server is a running listener. Close stops it and removes the socket.
 type Server struct {
 	ln      net.Listener
+	stop    func() error
 	handle  Handler
 	wg      sync.WaitGroup
 	closeMu sync.Once
 }
 
-// Listen takes the socket at path and serves it until Close. It returns
-// ErrInUse when another process answers on path, and an error without
-// touching the file when something other than a socket is there. A
-// socket nobody answers on is left over from a crashed instance and is
-// replaced.
+// Listen takes the socket at path and serves it until Close. The
+// socket's directory is created or narrowed to 0700 and must belong to
+// this user. Listen returns ErrInUse when another process answers on
+// path, and an error without touching the file when something other
+// than a socket is there. A socket nobody answers on is left over from
+// a crashed instance and is replaced; instances starting together
+// serialize on a lock file beside the socket, so only one replaces it.
 func Listen(path string, handle Handler) (*Server, error) {
-	ln, err := listen(path)
+	ln, stop, err := listen(path)
 	if err != nil {
 		return nil, err
 	}
-	s := &Server{ln: ln, handle: handle}
+	s := &Server{ln: ln, stop: stop, handle: handle}
 	s.wg.Add(1)
 	go s.serve()
 	return s, nil
 }
 
-// Close stops accepting, removes the socket file and waits for the
+// Close stops accepting, removes the socket file if it is still the one
+// this Server bound (never a later instance's), and waits for the
 // accept loop to exit. Connections already accepted finish on their own
 // deadline.
 func (s *Server) Close() error {
 	var err error
 	s.closeMu.Do(func() {
-		err = s.ln.Close()
+		err = s.stop()
 		s.wg.Wait()
 	})
 	return err

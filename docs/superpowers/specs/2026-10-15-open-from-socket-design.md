@@ -34,23 +34,31 @@ only open it in the browser or the Slack desktop app.
 ### Socket
 
 `internal/opensocket` holds both ends. The path is
-`filepath.Join(xdgData(), "slk.sock")`, so `~/.local/share/slk/slk.sock`
-by default and `$XDG_DATA_HOME/slk/slk.sock` when that is set.
+`opensocket.Path(xdgData())`, so `~/.local/share/slk/run/slk.sock` by
+default and `$XDG_DATA_HOME/slk/run/slk.sock` when that is set.
 
 `Listen(path, handle)`:
 
-- creates the directory with mode 0700 if it is missing (an existing
-  directory keeps its mode) and chmods the socket to 0600;
+- creates the `run` directory with mode 0700, or narrows an existing one
+  to 0700, and refuses one that is a symlink or belongs to another user.
+  The directory is the access control. Setting a 077 umask around
+  `net.Listen` would also work, but the umask is process-wide and would
+  race every other goroutine creating files, and a chmod after bind
+  leaves a window. A private directory has neither problem and does not
+  rely on the OS honouring a socket file's own mode. The socket is still
+  chmodded to 0600;
+- takes an exclusive `flock` on `slk.sock.lock` beside the socket for
+  the clear-and-bind step, so instances starting at the same moment
+  cannot both decide a stale socket is theirs. The lock file is never
+  removed;
 - if a file already sits at the path, dials it first. A successful dial
   means another slk owns it: `Listen` returns `ErrInUse` and the second
   instance logs this and runs without a listener. A failed dial means a
   crashed instance left it behind, and `Listen` removes it, but only when
   it is a socket. Any other file is left alone and reported as an error;
-- removes the socket file on `Close`.
-
-Two instances starting at the same moment over a stale socket could
-both decide it is stale. That window is small and the cost is one
-instance not receiving links, so there is no lock file.
+- on `Close`, under the same lock, removes the socket only if it is
+  still the file this instance bound (`os.SameFile`), so an exiting
+  instance never deletes another's live socket.
 
 ### Protocol
 
