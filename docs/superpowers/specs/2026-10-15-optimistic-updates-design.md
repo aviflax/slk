@@ -1,7 +1,7 @@
 # Optimistic updates: one shared mechanism
 
 Status: done, 2026-10-15 (phases 1 and 2, phase 3: optimistic edit
-and delete, then phase 4: review fixes)
+and delete, phase 4: review fixes, phase 5: edit and delete fixes)
 
 ## Problem
 
@@ -74,7 +74,8 @@ func ReplaceTS(rows []MessageItem, ts string, item MessageItem) ([]MessageItem, 
 func RemoveTS(rows []MessageItem, ts string) ([]MessageItem, RowChange)
 func RemoveAt(rows []MessageItem, i int) ([]MessageItem, RowChange)
 func PatchTS(rows []MessageItem, ts string, f func(*MessageItem)) ([]MessageItem, RowChange) // from the front
-func Reinsert(rows []MessageItem, item MessageItem, i int) ([]MessageItem, RowChange)
+func Reinsert(rows []MessageItem, item MessageItem) ([]MessageItem, RowChange) // in TS order
+func CompareTS(a, b string) int // numeric time order of Slack TSes
 func AppendIfAbsent(rows []MessageItem, item MessageItem) ([]MessageItem, RowChange)
 func Upsert(rows []MessageItem, item MessageItem) ([]MessageItem, RowChange)
 // Settle replaces the placeholder localTS with item (RowReplaced at
@@ -96,13 +97,17 @@ locate their row with `FirstIndexOfTS`. The send paths scan from the
 back (`IndexOfTS`); the edit and delete paths and their echoes scan from
 the front (`PatchTS`, `FirstIndexOfTS`), as they always have, so an
 edit or delete and its echo touch the same row. `Reinsert` puts a
-removed row back at its index, clamped, and does nothing when the TS is
-shown again already.
+removed row back where its TS belongs: before the first row Slack knows
+with a later TS, else after the last such row, ahead of placeholders.
+History prepended or messages appended since the removal do not move
+it. It does nothing when the TS is shown again already.
 
 Property tests are in `rows_prop_test.go`: `Settle` never yields
 duplicate TSes, reports its op, and leaves every other row alone;
 `RemoveTS` then re-inserting at the reported index restores the slice;
-`Reinsert` undoes `RemoveAt` and is a no-op on a present TS.
+on TS-sorted rows `Reinsert` undoes `RemoveAt` and is a no-op on a
+present TS, and it keeps the rows sorted after any prepends and
+appends; `CompareTS` is the time order.
 
 There are two selection fix-ups. Each pane's `afterLocalRemoved` (used
 by `RemoveLocal`) steps back on `i < selected`, keeping the cursor on
@@ -122,8 +127,8 @@ type rowSink interface {
 	Settle(localTS string, item messages.MessageItem) // messages.Settle, else upsert
 	RemoveLocal(localTS string) bool
 	Patch(ts string, f func(*messages.MessageItem)) (prior messages.MessageItem, ok bool)
-	Remove(ts string) (messages.RemovedRow, bool) // the row, its index, whether selected
-	Restore(r messages.RemovedRow)                // at its index, reselected; no-op if shown
+	Remove(ts string) (messages.RemovedRow, bool) // the row, whether selected, where the cursor was left
+	Restore(r messages.RemovedRow)                // in TS order; reselected only if the cursor has not moved; no-op if shown
 }
 var _ rowSink = (*messages.Model)(nil)
 var _ rowSink = (*thread.Model)(nil)
@@ -142,6 +147,7 @@ func (a *App) insertSinks(ins pendingInsert) rowSinks // one of the two, for a p
 func (a *App) shownSinks(channelID string) rowSinks   // an existing message: edit, delete, echoes
 func (a *App) removeFrom(s rowSinks, ts string) []removedRow
 func (a *App) restoreTo(channelID string, removed []removedRow)
+func (a *App) showBody(channelID, ts string, body messages.Body) (prior messages.MessageItem, ok bool) // reducer_send.go
 func (a *App) localRow(localTS, text, threadTS, subtype string) messages.MessageItem
 
 const noWorkspaceReason = "no active workspace"
@@ -212,23 +218,28 @@ func (p *pendingOps) NextLocalTS() string
 type pendingEdit struct {
 	id               uint64 // from BeginEdit, increasing
 	channelID, ts    string
-	text             string // the new text as shown, mrkdwn
-	panel            Panel  // where it was typed, to reopen it
+	wire             string        // the text chat.update sends
+	body             messages.Body // what it shows: messages.EditedBody(wire)
+	panel            Panel         // where it was typed, to reopen it
 	threadTS, teamID string
 	typed            string // the composer text before mention translation
 }
-func (p *pendingOps) BeginEdit(e pendingEdit, prior messages.MessageItem, priorOK bool) pendingEdit
-func (p *pendingOps) EndEdit(id uint64, ok bool, slackText string) (e pendingEdit, shown editShown, newest, found bool)
+func (p *pendingOps) BeginEdit(e pendingEdit, prior messages.MessageItem, priorOK bool) (_ pendingEdit, send bool)
+func (p *pendingOps) EditEcho(channelID, ts string, body messages.Body) bool
+func (p *pendingOps) EndEdit(id uint64, ok bool) (editSettled, bool) // show, next, failed, superseded, gone
 func (p *pendingOps) EditPending(channelID, ts string) bool
+func (p *pendingOps) EditGone(channelID, ts string)
 
 type pendingDelete struct {
 	channelID, ts string
-	removed       []removedRow // per pane: the row, its index, whether selected
+	removed       []removedRow // per pane: the row, whether selected, where the cursor was left
 	echoed        bool         // message_deleted arrived first
 }
 func (p *pendingOps) BeginDelete(d pendingDelete)
 func (p *pendingOps) EndDelete(channelID, ts string) (pendingDelete, bool)
 func (p *pendingOps) DeleteEchoed(channelID, ts string)
+func (p *pendingOps) DeletePending(channelID, ts string) bool
+func (p *pendingOps) PatchRemoved(channelID, ts string, f func(*messages.MessageItem)) (messages.MessageItem, bool)
 
 func (a *App) sendingGuard(ts string) (tea.Cmd, bool)
 func (a *App) sendingSelectionGuard() (tea.Cmd, bool)
@@ -285,49 +296,99 @@ composer on screen turns its "also send to channel" toggle back on. A
 draft stored for a thread not on screen cannot keep it, because opening
 a thread clears the toggle.
 
+What an edit shows is a whole body, `messages.Body` (text, blocks and
+the edited mark). The pane draws a message's body from its rich_text
+block when there is one (`MessageTextSource`), and slk and the web client
+attach one to every message typed, so patching `Text` alone shows
+nothing. `messages.EditedBody(wire)` is what chat.update stores for an
+edit: `blockkit.FromTyped` runs `mrkdwn.Convert` as the client does and
+parses its rich_text block. An echo's body is Slack's, copied as it is.
+Every body change goes through `showBody`: the panes, a held echo, and
+the rows a pending delete holds.
+
 The flow for an edit:
 
 - **Begin** (`reduceEditMessage`): `submitEdit` closes the editor at
   Enter (restoring the stashed draft, as a send leaves insert mode) and
   puts `Typed`, `TeamID`, `Panel` and `ThreadTS` on `EditMessageMsg`.
-  The text, converted by `mrkdwn.Convert` as `chat.update` converts it
-  and marked edited, is patched into `shownSinks`; the row as it was
-  goes to `BeginEdit`.
-- **State**: per message, a base (the row before its first pending
-  edit, then the newest edit to succeed) and the pending edits. The
-  message shows the newest edit that is pending or has succeeded: its
-  own text while pending, Slack's once it succeeded. A property test
-  (`pending_ops_prop_test.go`) checks this over random begin and settle
-  orders.
-- **Echo**: while an edit of the message is pending, `message_changed`
-  is ignored (`skipped_edit_echo_pending`). It cannot say which edit it
-  carries, and an older edit's echo must not overwrite a newer edit's
-  text; the result shows Slack's text anyway. With nothing pending the
-  echo patches `shownSinks` as before.
-- **Result** (`reduceMessageEdited`): `MessageEditedMsg` carries `Text`,
-  the mrkdwn `EditMessage` sent (the `cmd/slk` closure used to discard
-  it), and `EditID`. `EndEdit` says what to show, and it is patched in.
-  A failure of the newest edit is reopened by `reopenEdit` (same
-  workspace, normal mode, no other edit open, the same panel focused
-  and still showing the message) with the typed text in its composer;
-  otherwise the text goes back through `giveTextBack`. A failed edit
-  that a newer one replaced only toasts. The result no longer closes
-  the editor: any editor open by then is a newer edit.
+  The edit's body is shown (`showBody`) and `BeginEdit` records it.
+- **One in flight**: per message, at most one chat.update is in flight.
+  `BeginEdit` sends the edit at once when none is; otherwise it waits,
+  replacing an older waiting edit, which is never sent (the newest text
+  wins), and `EndEdit` hands it back to be sent when the one in flight
+  ends (`sendEdit`). Slack therefore applies the edits in the order they
+  were made. A waiting edit is refused, as a failure, if the user has
+  switched workspace by the time it would go.
+- **State**: per message, `server`, Slack's state as best known: the
+  body before the first edit, then each succeeded edit's body and each
+  echo's. `known` is false while no pane has shown the message.
+- **Echo**: while an edit is in flight, `message_changed` is recorded
+  (`EditEcho`: `server` becomes the echo; debug log
+  `recorded_edit_echo_pending`), not shown, so an older state cannot
+  flicker over a newer edit. An echo whose text equals the in-flight
+  edit's proves Slack stored that edit (`echoed`). With nothing in
+  flight the echo is shown as it is.
+- **Result** (`reduceMessageEdited`): `EndEdit` settles the edit in
+  flight. If it was echoed, `server` (the echo, or a newer one) stands,
+  and a failure is not a failure: the HTTP call failed after Slack
+  stored it, so there is no toast and no reopen. Otherwise success sets
+  `server` to the edit's body. When an edit is waiting, it is sent and
+  shown; a failure of the one that ended only toasts. When none is
+  waiting, the message shows `server` (nothing when unknown) and the
+  ledger forgets it. A real failure is reopened by `reopenEdit` (same
+  workspace, normal mode, no other edit open, the same panel focused and
+  still showing the message) with the typed text in its composer;
+  otherwise the text goes back through `giveTextBack`. When the message
+  is deleted (its echo, a successful delete, or Slack's
+  message_not_found, `MessageEditedMsg.NotFound`) or its delete is
+  pending, the text goes to the clipboard instead: a draft would post it
+  as a new message. A waiting edit whose message is gone is never sent
+  and its text is the one given back. The result never closes the
+  editor: any editor open by then is a newer edit.
+
+The proof rule is "an echo with the edit's exact text", not "any echo
+after the edit was sent": another client's change could arrive in that
+window and would then swallow a real failure, losing the user's text.
+The exact rule can only err the other way (Slack stored a different
+form of the text), which reopens an edit Slack already has. One case
+stays ambiguous: an edit succeeds, its echo is lost (a reconnect), and
+a stale echo of an older change by another client arrives after the
+result. The message then shows that echo until the next change.
 
 The flow for a delete:
 
 - **Begin** (`DeleteMessageMsg`, after the confirm prompt): `removeFrom`
   takes the row out of `shownSinks`, and `BeginDelete` keeps what each
-  pane removed.
+  pane removed, with where it left the cursor.
+- **Meanwhile**: `showBody` writes edits and echoes of the message into
+  the kept rows (`PatchRemoved`), so a restore brings back what the
+  message is now.
 - **Echo**: `WSMessageDeletedMsg` marks the pending delete echoed and
-  runs `applyMessageDeleted` (remove by TS, cancel an edit of it, close
-  the thread panel of a deleted parent, drop its action prompt). A row
-  already gone is a no-op with no selection change.
+  runs `applyMessageDeleted` (remove by TS, mark an edit in flight
+  gone, cancel an open edit of it, close the thread panel of a deleted
+  parent, drop its action prompt). A row already gone is a no-op with
+  no selection change.
 - **Success**: `applyMessageDeleted`, so a deleted parent's panel
-  closes even when the echo is late.
+  closes even when the echo is late. Slack's message_not_found
+  (`MessageDeletedMsg.NotFound`, from `isMessageNotFound` in `cmd/slk`)
+  is a success: the message is gone, so a second delete of a message
+  already deleted reports nothing.
 - **Failure**: unless echoed (the delete went through), `restoreTo` puts
-  the rows back at their index, reselected if they were, and the toast
-  shows. After the echo nothing is restored or reported.
+  the rows back in TS order (`Reinsert`), reselected only if the
+  cursor is still where the delete left it, and the toast shows. After
+  the echo nothing is restored or reported.
+
+A rapid stateful test (`TestEditsAndDeletesEndOnSlacksState`,
+`pending_edit_prop_test.go`) models Slack as the source of truth,
+applying each chat.update when it receives it, and interleaves edits,
+their results (success, failure, failure after Slack stored it), echoes
+(some lost, for edits Slack accepted), other clients' edits, deletes
+and their results (including message_not_found) and older history.
+It checks that one chat.update per message is in flight and Slack gets
+them in the order typed, that rows stay in TS order, that a failed
+edit's text Slack lacks is given back, and that once everything has
+settled every pane shows exactly Slack's body, or nothing for a
+deleted message.
 
 Kept pessimistic: the thread panel of a deleted parent closes only once
 Slack confirms, since a closed panel cannot be put back as it was; and
@@ -368,8 +429,8 @@ uploads and typing name the conversation, not a message.
 |---|---|---|---|
 | Channel send (done) | `InsertLocal` | `Settle` | `RemoveLocal`, offer text back |
 | Thread reply, +broadcast (done) | `InsertLocal` on the thread, and the channel when broadcast | `Settle`, reply count | `RemoveLocal`, offer text back |
-| Edit (done) | patch text, mark edited | patch with Slack's converted text | restore prior, reopen edit with the typed text, else offer it back |
-| Delete (done) | remove, keep row and index | apply as the echo does | restore at index, reselect |
+| Edit (done) | show the edited body; one chat.update in flight per message | show Slack's state (an echo, else the edit) | show Slack's state, reopen edit with the typed text, else offer it back (clipboard if the message is gone) |
+| Delete (done) | remove, keep rows (kept current by later edits) | apply as the echo does | restore in TS order, reselect if the cursor has not moved |
 
 Reactions keep their own mechanism for now, with the duplicated closure
 merged into one function. Activity read, thread mark-read and presence
@@ -395,9 +456,23 @@ are out of scope.
    placeholder hands the cursor to its message; nil results of the
    other user actions become failures.
 
+5. **Edit and delete fixes. Done:** an edit replaces the whole body,
+   so it shows on messages drawn from a rich_text block (it never did
+   on real messages); one chat.update per message in flight, so Slack
+   applies edits in order; echoes recorded during an edit decide the
+   final state, and one carrying the edit's text turns a timeout into a
+   success; a pending delete's rows follow edits and echoes, and a
+   failed delete restores in TS order without taking a moved cursor;
+   message_not_found ends a delete, and a failed edit of a deleted
+   message goes to the clipboard, never a draft.
+
 ## Out of scope
 
 - Reaction toggle serialisation (the activity path's
   `want`/`confirmed`/`inFlight` scheme would fit, but it is a separate
   change), and not rolling back on `already_reacted`/`no_reaction`.
 - Presence rollback.
+- A deleted reply does not lower its parent's reply count, optimistically
+  or on the echo.
+- The send placeholder (`localRow`) still shows `Text` only; the sent
+  message from the result has no blocks either, so they render alike.
