@@ -96,9 +96,9 @@ order = 1
 
 # Channels can carry an optional ":<N>" suffix to pin their order
 # within the section. Lower numbers sort higher. Entries without a
-# suffix fall after annotated ones, in the order they appear.
+# suffix fall after annotated ones, alphabetically by name.
 # This syntax is only honored when use_slack_sections = false;
-# in Slack-native mode, channel order comes from Slack.
+# in Slack-native mode, channels sort alphabetically by name.
 [sections.Engineering]
 channels = ["eng-general:1", "eng-alerts:2", "eng-*"]
 order = 2
@@ -155,7 +155,7 @@ Each entry in a section's `channels` list may carry an optional `:<N>`
 suffix where `N` is a non-negative integer. Channels matched by an
 annotated pattern sort ahead of channels matched by un-annotated
 patterns; among annotated channels, lower `N` wins; un-annotated
-channels keep the order Slack returned them in.
+channels sort alphabetically by name, ignoring case and accents.
 
 ```toml
 [sections.Engineering]
@@ -165,13 +165,15 @@ order = 2
 
 In the example above, `#eng-general` is pinned to the top of the
 Engineering section, followed by `#eng-alerts`, followed by every
-other `eng-*` channel in Slack-API order.
+other `eng-*` channel in alphabetical order.
 
 This syntax is only honored when `use_slack_sections = false` (or
 when Slack's section endpoint is unreachable and slk falls back to
-glob mode). In Slack-native mode, channel order within a section
-comes from Slack and the `:<N>` suffix is ignored along with the
-rest of the `[sections.*]` block.
+glob mode). In Slack-native mode the `:<N>` suffix is ignored along
+with the rest of the `[sections.*]` block, and channels within a
+section sort alphabetically by name (the Starred section lists
+channels before people). slk cannot read the sort order you pick in
+the official client.
 
 ### Limitations of Slack-native sections
 

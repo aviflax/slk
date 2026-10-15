@@ -8,14 +8,14 @@ import (
 
 // items C1..C4; C2 and C4 are unread, C3 is unread-but-muted (excluded),
 // C1 is read. NextUnread walks m.filtered (visible section order); a
-// single explicit Section on every item keeps that order == input order
-// so these assertions read cleanly.
+// single explicit Section on every item, and names that sort in ID
+// order, keep that order == input order so these assertions read cleanly.
 func unreadNavModel() Model {
 	m := New([]ChannelItem{
-		{ID: "C1", Name: "one", Type: "channel", Section: "Eng"},
-		{ID: "C2", Name: "two", Type: "channel", Section: "Eng"},
-		{ID: "C3", Name: "muted", Type: "channel", Section: "Eng", IsMuted: true},
-		{ID: "C4", Name: "four", Type: "channel", Section: "Eng"},
+		{ID: "C1", Name: "a-one", Type: "channel", Section: "Eng"},
+		{ID: "C2", Name: "b-two", Type: "channel", Section: "Eng"},
+		{ID: "C3", Name: "c-muted", Type: "channel", Section: "Eng", IsMuted: true},
+		{ID: "C4", Name: "d-four", Type: "channel", Section: "Eng"},
 	})
 	m.SetReadStateReader(func() map[string]cache.ReadState {
 		return map[string]cache.ReadState{
@@ -60,8 +60,8 @@ func TestPrevUnread_Backward(t *testing.T) {
 func TestNextUnread_ReturnsNameAndType(t *testing.T) {
 	m := unreadNavModel()
 	id, name, chType, ok := m.NextUnread("C1", 1)
-	if !ok || id != "C2" || name != "two" || chType != "channel" {
-		t.Fatalf("want C2/two/channel, got %q/%q/%q ok=%v", id, name, chType, ok)
+	if !ok || id != "C2" || name != "b-two" || chType != "channel" {
+		t.Fatalf("want C2/b-two/channel, got %q/%q/%q ok=%v", id, name, chType, ok)
 	}
 }
 

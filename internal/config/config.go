@@ -40,10 +40,10 @@ type Compose struct {
 // suffix of the form "<pattern>:<N>" where N is a non-negative
 // integer. Channels matching a pattern with an explicit N are placed
 // above un-annotated channels within the section, sorted by N
-// ascending. Example: channels = ["general:1", "alerts:2", "random"].
+// ascending; the rest sort by name. Example: channels = ["general:1", "alerts:2", "random"].
 // The ":N" syntax is only honored when use_slack_sections = false
 // (or as a fallback when Slack's section endpoint is unreachable);
-// in Slack-native mode, channel order is taken from Slack.
+// in Slack-native mode, channels within a section sort by name.
 type SectionDef struct {
 	Channels []string `toml:"channels"`
 	Order    int      `toml:"order"` // lower = higher in sidebar

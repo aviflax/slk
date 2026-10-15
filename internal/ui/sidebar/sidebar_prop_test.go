@@ -9,6 +9,7 @@ import (
 
 	"github.com/gammons/slk/internal/core"
 	"github.com/gammons/slk/internal/proptest"
+	"github.com/gammons/slk/internal/text"
 	"pgregory.net/rapid"
 )
 
@@ -18,6 +19,10 @@ var customSections = []string{"Eng", "Ops", "Starred", "Design"}
 
 // channelItems draws 0..n items with unique IDs (C0, C1, ...), a mix of
 // types, custom sections, section and channel orders and mutes.
+// itemNames repeats names and spells some only differently in case or
+// accents, so rows tie on a folded name.
+var itemNames = []string{"general", "General", "Général", "random", "alpha", "Zoe", "zebra", "ch-1", "ch1"}
+
 func channelItems(max int) *rapid.Generator[[]ChannelItem] {
 	return rapid.Custom(func(t *rapid.T) []ChannelItem {
 		n := rapid.IntRange(0, max).Draw(t, "items")
@@ -33,7 +38,7 @@ func channelItems(max int) *rapid.Generator[[]ChannelItem] {
 			}
 			out[i] = ChannelItem{
 				ID:           fmt.Sprintf("C%d", i),
-				Name:         fmt.Sprintf("ch%d", i),
+				Name:         rapid.SampledFrom(itemNames).Draw(t, "name"),
 				Type:         rapid.SampledFrom([]string{"channel", "private", "dm", "group_dm", "app"}).Draw(t, "type"),
 				Section:      sec,
 				SectionOrder: rapid.IntRange(0, 3).Draw(t, "sectionOrder"),
@@ -264,7 +269,8 @@ func TestMentionBadgeAndVisiblyUnread(t *testing.T) {
 //   - leaves each section's items contiguous, sections in sectionOrder;
 //   - inside a section named in stars, channels and private channels
 //     come before everything else;
-//   - then ChannelOrder > 0 ascending, then input order;
+//   - then ChannelOrder > 0 ascending, then text.Fold(Name), then input
+//     order;
 //   - gives the same result whatever order filtered arrives in (the
 //     comparator is a total order), so sorting again changes nothing.
 func TestSortFilteredIdx(t *testing.T) {
@@ -322,7 +328,9 @@ func TestSortFilteredIdx(t *testing.T) {
 				t.Fatalf("unannotated %s before annotated %s", a.ID, b.ID)
 			case oa > 0 && ob > 0 && oa > ob:
 				t.Fatalf("%s (order %d) before %s (order %d)", a.ID, oa, b.ID, ob)
-			case oa == ob && got[i-1] > got[i]:
+			case oa == ob && text.Fold(a.Name) > text.Fold(b.Name):
+				t.Fatalf("%s (%q) before %s (%q)", a.ID, a.Name, b.ID, b.Name)
+			case oa == ob && text.Fold(a.Name) == text.Fold(b.Name) && got[i-1] > got[i]:
 				t.Fatalf("%s and %s tie but are out of input order", a.ID, b.ID)
 			}
 		}

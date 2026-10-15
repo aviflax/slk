@@ -94,8 +94,8 @@ func unreadOpts() []testOpt {
 		withChannels(
 			sidebar.ChannelItem{ID: "C1", Name: "general", Type: "channel", Section: "Eng"},
 			sidebar.ChannelItem{ID: "C2", Name: "random", Type: "channel", Section: "Eng"},
-			sidebar.ChannelItem{ID: "C3", Name: "design", Type: "channel", Section: "Eng"},
-			sidebar.ChannelItem{ID: "C4", Name: "ops", Type: "channel", Section: "Eng"},
+			sidebar.ChannelItem{ID: "C3", Name: "support", Type: "channel", Section: "Eng"},
+			sidebar.ChannelItem{ID: "C4", Name: "triage", Type: "channel", Section: "Eng"},
 		),
 		withMessages(normalMessages()...),
 		withActiveChannel("C1"),
@@ -113,7 +113,7 @@ func unreadOpts() []testOpt {
 // SetReadStateReader does not rebuild the sidebar's filtered list
 // (sidebar/model.go:301-305), which is fine here: unreadOpts' items are
 // sectioned, so the list built at SetChannels time already contains all
-// four in input order.
+// four, and their names sort in ID order.
 func seedUnreads(t *testing.T, a *App) {
 	t.Helper()
 	a.setReadStateReaderForTest(func() map[string]cache.ReadState {
@@ -1914,7 +1914,7 @@ func TestNormalModeKeys(t *testing.T) {
 				if !ok {
 					t.Fatalf("cmd() = %#v, want ChannelSelectedMsg", cmd())
 				}
-				want := ChannelSelectedMsg{ID: "C4", Name: "ops", Type: "channel"}
+				want := ChannelSelectedMsg{ID: "C4", Name: "triage", Type: "channel"}
 				if msg != want {
 					t.Errorf("cmd() = %+v, want %+v", msg, want)
 				}

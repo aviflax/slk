@@ -1,6 +1,7 @@
 package sidebar
 
 import (
+	"slices"
 	"strings"
 	"testing"
 
@@ -33,7 +34,7 @@ func TestSidebarNavigation(t *testing.T) {
 	channels := []ChannelItem{
 		{ID: "C1", Name: "general", Type: "channel"},
 		{ID: "C2", Name: "random", Type: "channel"},
-		{ID: "C3", Name: "eng", Type: "channel"},
+		{ID: "C3", Name: "support", Type: "channel"},
 	}
 
 	m := New(channels)
@@ -82,7 +83,7 @@ func TestThreadsItem_DefaultSelected(t *testing.T) {
 func TestThreadsItem_MoveDownLeavesIt(t *testing.T) {
 	m := New([]ChannelItem{
 		{ID: "C1", Name: "general", Type: "channel"},
-		{ID: "C2", Name: "design", Type: "channel"},
+		{ID: "C2", Name: "random", Type: "channel"},
 	})
 	m.ToggleCollapse("Channels")
 	m.MoveDown() // Activity
@@ -705,7 +706,7 @@ func TestView_RendersDotFromReadStateReader(t *testing.T) {
 
 // TestRebuildFilter_OrdersChannelsWithinSectionByChannelOrder verifies
 // that within a section, channels with an explicit ChannelOrder > 0
-// sort ahead of un-annotated channels (input order), and that
+// sort ahead of un-annotated channels (by name), and that
 // annotated channels are themselves sorted by ChannelOrder ascending.
 // This is the config-mode (use_slack_sections=false) behavior driven
 // by the SectionDef "<pattern>:<N>" suffix syntax.
@@ -728,7 +729,7 @@ func TestRebuildFilter_OrdersChannelsWithinSectionByChannelOrder(t *testing.T) {
 	}
 
 	// Expected: annotated first (C4 order=1, C2 order=2), then
-	// un-annotated in input order (C1, C3).
+	// un-annotated by name (C1 alpha, C3 gamma).
 	want := []string{"C4", "C2", "C1", "C3"}
 	if len(got) != len(want) {
 		t.Fatalf("filtered len = %d, want %d (got=%v)", len(got), len(want), got)
@@ -740,28 +741,25 @@ func TestRebuildFilter_OrdersChannelsWithinSectionByChannelOrder(t *testing.T) {
 	}
 }
 
-// TestRebuildFilter_NoChannelOrderPreservesInputOrder is a regression
-// guard: when every item has ChannelOrder == 0 (the default), the
-// existing input-order behavior must be preserved bit-for-bit.
-func TestRebuildFilter_NoChannelOrderPreservesInputOrder(t *testing.T) {
+// TestRebuildFilter_NoChannelOrderSortsByName: without a ChannelOrder,
+// channels in a section sort by name, ignoring case and accents, and
+// names that fold the same keep their input order.
+func TestRebuildFilter_NoChannelOrderSortsByName(t *testing.T) {
 	items := []ChannelItem{
-		{ID: "C1", Name: "alpha", Type: "channel", Section: "Eng", SectionOrder: 1},
-		{ID: "C2", Name: "beta", Type: "channel", Section: "Eng", SectionOrder: 1},
-		{ID: "C3", Name: "gamma", Type: "channel", Section: "Eng", SectionOrder: 1},
+		{ID: "C1", Name: "zebra", Type: "channel", Section: "Eng", SectionOrder: 1},
+		{ID: "C2", Name: "Général", Type: "channel", Section: "Eng", SectionOrder: 1},
+		{ID: "C3", Name: "alpha", Type: "channel", Section: "Eng", SectionOrder: 1},
+		{ID: "C4", Name: "general", Type: "channel", Section: "Eng", SectionOrder: 1},
+		{ID: "C5", Name: "Beta", Type: "channel", Section: "Eng", SectionOrder: 1},
 	}
 	m := New(items)
 	var got []string
 	for _, idx := range m.filtered {
 		got = append(got, m.items[idx].ID)
 	}
-	want := []string{"C1", "C2", "C3"}
-	if len(got) != len(want) {
-		t.Fatalf("filtered len = %d, want %d (got=%v)", len(got), len(want), got)
-	}
-	for i := range want {
-		if got[i] != want[i] {
-			t.Errorf("position %d: got %q, want %q", i, got[i], want[i])
-		}
+	want := []string{"C3", "C5", "C2", "C4", "C1"}
+	if !slices.Equal(got, want) {
+		t.Fatalf("order = %v, want %v", got, want)
 	}
 }
 
