@@ -127,7 +127,29 @@ func (s *Server) serveConn(conn net.Conn) {
 		reply = "error: " + oneLine(err.Error())
 	}
 	_, _ = io.WriteString(conn, reply+"\n")
+	lingerForReply(conn)
 }
+
+// lingerForReply lets the client read the reply before the socket closes.
+// A request rejected for its length leaves unread bytes behind, and on
+// Linux closing a socket with unread input sends a reset, which can
+// discard the reply before the client reads it. Shutting the write side
+// and draining what the client still sends, up to a cap and a short
+// deadline, closes cleanly instead.
+func lingerForReply(conn net.Conn) {
+	uc, ok := conn.(*net.UnixConn)
+	if !ok {
+		return
+	}
+	_ = uc.CloseWrite()
+	_ = uc.SetReadDeadline(time.Now().Add(lingerTimeout))
+	_, _ = io.Copy(io.Discard, io.LimitReader(uc, lingerMax))
+}
+
+const (
+	lingerTimeout = time.Second
+	lingerMax     = 64 << 10
+)
 
 func (s *Server) request(conn net.Conn) error {
 	url, err := readRequest(conn)
