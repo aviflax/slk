@@ -327,8 +327,9 @@ func versionUpdateLine() string {
 }
 
 // checkForUpdate runs the daily check and returns the hint to show, or
-// "" when up to date or the check failed. Safe to call from a goroutine.
-func checkForUpdate(ctx context.Context, current string) string {
+// "" when up to date or the check failed, plus the new version. Safe to
+// call from a goroutine.
+func checkForUpdate(ctx context.Context, current string) (latestVer, hint string) {
 	ctx, cancel := context.WithTimeout(ctx, updateCheckTimeout)
 	defer cancel()
 	client := &http.Client{Timeout: updateCheckTimeout}
@@ -336,7 +337,8 @@ func checkForUpdate(ctx context.Context, current string) string {
 		return fetchLatestRelease(ctx, client, latestReleaseURL, current)
 	})
 	if !isNewerVersion(latest, current) {
-		return ""
+		return "", ""
 	}
-	return updateHint(strings.TrimPrefix(latest, "v"), detectInstallMethod(resolvedExecutable(), currentInstallEnv()))
+	latest = strings.TrimPrefix(latest, "v")
+	return latest, updateHint(latest, detectInstallMethod(resolvedExecutable(), currentInstallEnv()))
 }

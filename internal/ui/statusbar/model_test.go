@@ -53,6 +53,48 @@ func TestStatusBarUnreadCount(t *testing.T) {
 	}
 }
 
+func TestUpdateNotice_WideShowsNarrowDrops(t *testing.T) {
+	m := New()
+	m.SetMode(testMode("NORMAL"))
+	m.SetChannel("general")
+	m.SetWorkspace("Acme Corp")
+	m.SetConnectionState(StateConnected)
+	m.SetUpdateNotice("↑ 0.26.2")
+
+	wide := m.View(120)
+	if !strings.Contains(wide, "↑ 0.26.2") {
+		t.Errorf("wide bar should show the update note: %q", wide)
+	}
+	if w := lipgloss.Width(wide); w != 120 {
+		t.Errorf("wide bar width = %d, want 120", w)
+	}
+
+	// The tightest width that still fits the bar without the note.
+	bare := m
+	bare.SetUpdateNotice("")
+	need := lipgloss.Width(bare.View(0)) + 1 // left + right + gutter, gap 0
+	narrow := m.View(need)
+	if strings.Contains(narrow, "↑") {
+		t.Errorf("narrow bar should drop the update note: %q", narrow)
+	}
+	if !strings.Contains(narrow, "Connected") || !strings.Contains(narrow, "general") {
+		t.Errorf("narrow bar lost core segments: %q", narrow)
+	}
+}
+
+func TestUpdateNotice_ClearsAndInvalidatesView(t *testing.T) {
+	m := New()
+	v := m.Version()
+	m.SetUpdateNotice("↑ 1.0.0")
+	if m.Version() == v {
+		t.Error("setting the note must invalidate the cached view")
+	}
+	m.SetUpdateNotice("")
+	if strings.Contains(m.View(100), "↑") {
+		t.Error("cleared note still shown")
+	}
+}
+
 func TestModel_ClearCopiedClearsToast(t *testing.T) {
 	m := New()
 	m.SetChannel("general")

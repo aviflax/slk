@@ -539,7 +539,8 @@ type (
 	// UpdateAvailableMsg carries the finished hint text ("slk 0.26.2 is
 	// available. Run: ...") from cmd/slk's background release check. The
 	// UI only displays it; install-method detection stays in cmd/slk.
-	UpdateAvailableMsg struct{ Hint string }
+	// Version (no "v") feeds the persistent status-bar note.
+	UpdateAvailableMsg struct{ Version, Hint string }
 )
 
 // autoScrollTickMsg is dispatched by tea.Tick while a drag is held near

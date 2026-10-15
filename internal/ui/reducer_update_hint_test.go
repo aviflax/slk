@@ -21,6 +21,19 @@ func TestUpdateAvailableMsg_ShowsHintInStatusBar(t *testing.T) {
 	}
 }
 
+func TestUpdateAvailableMsg_NoteSurvivesToastExpiry(t *testing.T) {
+	a := newTestApp(t, withSize(160, 30))
+	a.Update(UpdateAvailableMsg{Version: "0.26.2", Hint: testUpdateHint})
+	a.Update(statusbar.CopiedClearMsg{Seq: a.statusbar.ToastSeq()})
+	got := statusbarText(a)
+	if strings.Contains(got, testUpdateHint) {
+		t.Errorf("toast should have cleared: %q", got)
+	}
+	if !strings.Contains(got, "↑ 0.26.2") {
+		t.Errorf("status bar = %q, want the persistent note", got)
+	}
+}
+
 func TestUpdateAvailableMsg_EmptyHintShowsNothing(t *testing.T) {
 	a := newTestApp(t)
 	_, cmd := a.Update(UpdateAvailableMsg{})

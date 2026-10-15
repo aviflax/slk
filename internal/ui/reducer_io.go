@@ -176,6 +176,11 @@ var reduceIO reducerFunc = func(a *App, msg tea.Msg) (tea.Cmd, bool) {
 		if m.Hint == "" {
 			return nil, true
 		}
+		// The toast is easy to miss (any later toast replaces it), so a
+		// short muted note stays in the bar for the rest of the session.
+		if m.Version != "" {
+			a.statusbar.SetUpdateNotice("↑ " + m.Version)
+		}
 		return toastWithClear(a, m.Hint, updateHintDuration), true
 
 	case UploadProgressMsg:

@@ -36,6 +36,7 @@ type Model struct {
 	helpHint    string    // muted text rendered in the gap area; empty disables
 	commandLine string    // "" == inactive; otherwise the :prompt shown in place of channel/workspace
 	search      string    // search segment ("/query  3/17" indicator / live prompt); "" hides
+	update      string    // persistent update-available note (e.g. "↑ 0.26.2"); "" hides
 	version     int64
 }
 
@@ -185,6 +186,16 @@ func (m *Model) SetCommandLine(s string) {
 	}
 }
 
+// SetUpdateNotice sets the short, persistent "newer release" segment
+// shown on the right for the rest of the session (e.g. "↑ 0.26.2").
+// Pass "" to clear. View drops it first when the bar is too narrow.
+func (m *Model) SetUpdateNotice(s string) {
+	if m.update != s {
+		m.update = s
+		m.dirty()
+	}
+}
+
 // SetToast displays an arbitrary string in the right-side toast slot. Pass ""
 // to clear. In internal/ui, do not call it with text directly: use
 // toastWithClear, which also schedules the toast's clear, or
@@ -292,6 +303,16 @@ func (m Model) View(width int) string {
 			lipgloss.NewStyle().Foreground(styles.Error).Background(styles.SurfaceDark).Render("● Disconnected"))
 	}
 
+	// Persistent update note: muted, so it informs without competing with
+	// the unread badge or connection state. Sits just left of presence.
+	var updatePart string
+	if m.update != "" {
+		updatePart = lipgloss.NewStyle().
+			Foreground(styles.TextMuted).
+			Background(styles.SurfaceDark).
+			Render(m.update)
+	}
+
 	// The :command prompt owns the left side while active (the
 	// channel/workspace/search segments return when it clears).
 	var left string
@@ -310,14 +331,17 @@ func (m Model) View(width int) string {
 	sep := lipgloss.NewStyle().Background(styles.SurfaceDark).Render(" ")
 	trailing := lipgloss.NewStyle().Background(styles.SurfaceDark).Render("  ")
 
-	rightContent := ""
-	for i, p := range rightParts {
-		if i > 0 {
-			rightContent += sep
+	buildRight := func(parts []string) string {
+		out := ""
+		for i, p := range parts {
+			if i > 0 {
+				out += sep
+			}
+			out += p
 		}
-		rightContent += p
+		return out + trailing // trailing padding (extra space for unicode width variance)
 	}
-	rightContent += trailing // trailing padding (extra space for unicode width variance)
+	rightContent := buildRight(rightParts)
 
 	// Right-align so the rightmost segment ends at column (width-1),
 	// matching the inner right edge of the message-pane / thread-pane
@@ -327,6 +351,26 @@ func (m Model) View(width int) string {
 	// overhangs visually past the compose box.
 	const rightGutter = 1
 	gap := width - rightGutter - lipgloss.Width(left) - lipgloss.Width(rightContent)
+	if updatePart != "" {
+		// The update note is the first thing to go: it only appears when
+		// it fits with at least one column to spare before the left side.
+		withUpdate := make([]string, 0, len(rightParts)+1)
+		// Insert before the presence/connection pills, after unread/toast.
+		idx := 0
+		if m.unreadCount > 0 {
+			idx++
+		}
+		if m.toast != "" {
+			idx++
+		}
+		withUpdate = append(withUpdate, rightParts[:idx]...)
+		withUpdate = append(withUpdate, updatePart)
+		withUpdate = append(withUpdate, rightParts[idx:]...)
+		candidate := buildRight(withUpdate)
+		if g := width - rightGutter - lipgloss.Width(left) - lipgloss.Width(candidate); g >= 1 {
+			rightContent, gap = candidate, g
+		}
+	}
 	if gap < 0 {
 		gap = 0
 	}

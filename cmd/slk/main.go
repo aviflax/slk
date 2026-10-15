@@ -1532,12 +1532,12 @@ func run() error {
 	// skip it (--demo never reaches run()).
 	if cfg.EffectiveCheckForUpdates() && updateCheckableVersion(version) {
 		go func() {
-			hint := checkForUpdate(context.Background(), version)
+			latest, hint := checkForUpdate(context.Background(), version)
 			if hint == "" {
 				return
 			}
 			time.Sleep(updateToastDelay)
-			p.Send(ui.UpdateAvailableMsg{Hint: hint})
+			p.Send(ui.UpdateAvailableMsg{Version: latest, Hint: hint})
 		}()
 	}
 
