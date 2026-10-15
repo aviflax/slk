@@ -398,10 +398,10 @@ func (c Config) SectionOrder(teamID, sectionName string) int {
 	return 0
 }
 
-// matchSectionAndOrderIn walks sections in Order-ascending order and
-// returns the first section name whose patterns match channelName,
-// along with the per-channel order encoded in the matching pattern's
-// ":N" suffix (0 if absent). Patterns are stripped of any ":N" suffix
+// matchSectionAndOrderIn walks sections in Order-ascending order (ties by
+// name) and returns the first section name whose patterns match
+// channelName, along with the per-channel order encoded in the matching
+// pattern's ":N" suffix (0 if absent). Patterns are stripped of any ":N" suffix
 // before being passed to filepath.Match.
 func matchSectionAndOrderIn(sections map[string]SectionDef, channelName string) (string, int) {
 	type entry struct {
@@ -413,8 +413,15 @@ func matchSectionAndOrderIn(sections map[string]SectionDef, channelName string) 
 	for name, def := range sections {
 		entries = append(entries, entry{name: name, order: def.Order, patterns: def.Channels})
 	}
+	// Sections that share an Order (the default, 0, when none is set)
+	// tie-break by name. The map iterates in random order, so without it
+	// a channel matching several tied sections landed in a different one
+	// from call to call.
 	sort.Slice(entries, func(i, j int) bool {
-		return entries[i].order < entries[j].order
+		if entries[i].order != entries[j].order {
+			return entries[i].order < entries[j].order
+		}
+		return entries[i].name < entries[j].name
 	})
 	for _, e := range entries {
 		for _, raw := range e.patterns {
