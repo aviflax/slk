@@ -7,7 +7,6 @@ import (
 	"slices"
 	"strings"
 	"testing"
-	"time"
 
 	tea "charm.land/bubbletea/v2"
 	"pgregory.net/rapid"
@@ -17,18 +16,15 @@ import (
 	"github.com/gammons/slk/internal/ui/messages"
 )
 
-// firstEdited runs cmd (batch members concurrently, as the runtime
-// does) and returns the first MessageEditedMsg it delivers, waiting
-// only as long as it takes to arrive.
+// firstEdited runs cmd to completion and returns the first
+// MessageEditedMsg it delivers.
 func firstEdited(cmd tea.Cmd) (MessageEditedMsg, bool) {
-	ch := make(chan MessageEditedMsg, 1)
-	go deliverFirst(cmd, ch)
-	select {
-	case m := <-ch:
-		return m, true
-	case <-time.After(2 * time.Second):
-		return MessageEditedMsg{}, false
+	for _, m := range drainCmd(cmd) {
+		if res, ok := m.(MessageEditedMsg); ok {
+			return res, true
+		}
 	}
+	return MessageEditedMsg{}, false
 }
 
 // slackModel is Slack as the source of truth for the edit and delete
