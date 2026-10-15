@@ -75,6 +75,12 @@ var reduceLinks reducerFunc = func(a *App, msg tea.Msg) (tea.Cmd, bool) {
 	case OpenLinkMsg:
 		return a.routeLink(m.URL), true
 	case OpenPermalinkMsg:
+		if m.Claim != nil && !m.Claim() {
+			// The sender gave up waiting (the event loop was blocked,
+			// say by $EDITOR) and told its client so; navigating now
+			// would surprise the user long after the request.
+			return nil, true
+		}
 		cmd, err := a.routeLinkInApp(m.URL)
 		if m.Reply != nil {
 			select {

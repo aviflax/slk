@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"sync/atomic"
 	"time"
 
 	tea "charm.land/bubbletea/v2"
@@ -77,14 +78,45 @@ func openCommand(args []string, socketPath string, stdout, stderr io.Writer) int
 // (program.Send) and waits for its reply. send runs on its own
 // goroutine because program.Send blocks until the event loop takes the
 // message.
+//
+// The message may still reach the UI after the handler has given up,
+// when something blocks the event loop for longer than timeout (an
+// $EDITOR session does). The handler and the reducer race for one
+// claim, so exactly one of them decides: if the handler wins, it
+// answers "did not respond" and the reducer drops the late message; if
+// the reducer wins, it navigates and the handler waits for its reply.
 func permalinkHandler(send func(tea.Msg), timeout time.Duration) opensocket.Handler {
+	const (
+		pending int32 = iota
+		takenByUI
+		abandoned
+	)
 	return func(url string) error {
+		var state atomic.Int32
 		reply := make(chan error, 1)
-		go send(ui.OpenPermalinkMsg{URL: url, Reply: reply})
+		go send(ui.OpenPermalinkMsg{
+			URL:   url,
+			Claim: func() bool { return state.CompareAndSwap(pending, takenByUI) },
+			Reply: reply,
+		})
+		timer := time.NewTimer(timeout)
+		defer timer.Stop()
 		select {
 		case err := <-reply:
 			return err
-		case <-time.After(timeout):
+		case <-timer.C:
+		}
+		if state.CompareAndSwap(pending, abandoned) {
+			return errors.New("slk did not respond")
+		}
+		// The UI claimed it just as the timer fired; its reply follows
+		// on the same Update call. The second bound only guards
+		// against a reducer that never gets there.
+		timer.Reset(timeout)
+		select {
+		case err := <-reply:
+			return err
+		case <-timer.C:
 			return errors.New("slk did not respond")
 		}
 	}

@@ -83,6 +83,9 @@ func TestPermalinkHandlerRelaysUIReply(t *testing.T) {
 	var got ui.OpenPermalinkMsg
 	h := permalinkHandler(func(m tea.Msg) {
 		got = m.(ui.OpenPermalinkMsg)
+		if !got.Claim() {
+			t.Error("Claim refused before the timeout")
+		}
 		got.Reply <- errors.New("channel C1 is not one slk knows")
 	}, time.Second)
 	if err := h(testPermalink); err == nil || err.Error() != "channel C1 is not one slk knows" {
@@ -93,9 +96,33 @@ func TestPermalinkHandlerRelaysUIReply(t *testing.T) {
 	}
 }
 
-func TestPermalinkHandlerTimesOut(t *testing.T) {
-	h := permalinkHandler(func(tea.Msg) {}, 20*time.Millisecond)
+// The UI takes the message only after the handler gave up (bubbletea's
+// loop was blocked, e.g. by $EDITOR). Its Claim must then refuse, so
+// the reducer drops it instead of navigating long after the client was
+// told "did not respond".
+func TestPermalinkHandlerTimesOutAndAbandons(t *testing.T) {
+	delivered := make(chan ui.OpenPermalinkMsg, 1)
+	h := permalinkHandler(func(m tea.Msg) { delivered <- m.(ui.OpenPermalinkMsg) }, 20*time.Millisecond)
 	if err := h(testPermalink); err == nil || !strings.Contains(err.Error(), "did not respond") {
 		t.Errorf("handler = %v, want a timeout", err)
+	}
+	if late := <-delivered; late.Claim() {
+		t.Error("Claim accepted a message the handler had abandoned")
+	}
+}
+
+// A UI that claimed the message before the timeout fired is answered
+// with its own reply, even if the reply lands after the timeout.
+func TestPermalinkHandlerWaitsForClaimedReply(t *testing.T) {
+	h := permalinkHandler(func(m tea.Msg) {
+		msg := m.(ui.OpenPermalinkMsg)
+		if !msg.Claim() {
+			t.Error("Claim refused before the timeout")
+		}
+		time.Sleep(150 * time.Millisecond)
+		msg.Reply <- nil
+	}, 100*time.Millisecond)
+	if err := h(testPermalink); err != nil {
+		t.Errorf("handler = %v, want the UI's ok", err)
 	}
 }

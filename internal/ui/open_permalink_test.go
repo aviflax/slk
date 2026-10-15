@@ -103,6 +103,49 @@ func TestOpenPermalink_UnreadReplyDoesNotBlock(t *testing.T) {
 	app.Update(OpenPermalinkMsg{URL: "https://github.com/foo/bar"})
 }
 
+// A message the sender stopped waiting for (it already told its client
+// "did not respond", e.g. while $EDITOR held the event loop) must not
+// navigate when it finally arrives.
+func TestOpenPermalink_AbandonedIsDropped(t *testing.T) {
+	app, opened := linkTestApp(t)
+	app.activeChannelID = "CELSEWHERE"
+	reply := make(chan error, 1)
+	_, cmd := app.Update(OpenPermalinkMsg{
+		URL:   "https://myteam.slack.com/archives/C054JFCBN69/p1779284733270139",
+		Claim: func() bool { return false },
+		Reply: reply,
+	})
+	if msgs := drainCmd(cmd); len(msgs) != 0 {
+		t.Errorf("abandoned link produced %#v", msgs)
+	}
+	if app.pendingLinkNav != nil || *opened != "" {
+		t.Errorf("abandoned link acted: pending=%+v browser=%q", app.pendingLinkNav, *opened)
+	}
+	select {
+	case err := <-reply:
+		t.Errorf("abandoned link got a reply: %v", err)
+	default:
+	}
+}
+
+func TestOpenPermalink_ClaimedIsRouted(t *testing.T) {
+	app, _ := linkTestApp(t)
+	app.activeChannelID = "CELSEWHERE"
+	claims := 0
+	reply := make(chan error, 1)
+	app.Update(OpenPermalinkMsg{
+		URL:   "https://myteam.slack.com/archives/C054JFCBN69/p1779284733270139",
+		Claim: func() bool { claims++; return true },
+		Reply: reply,
+	})
+	if claims != 1 || app.pendingLinkNav == nil {
+		t.Errorf("claims=%d pending=%+v", claims, app.pendingLinkNav)
+	}
+	if err := <-reply; err != nil {
+		t.Errorf("reply = %v", err)
+	}
+}
+
 // applyLocation refuses during an upload and shows a toast; the socket
 // sender must hear that as a refusal, not "ok".
 func TestOpenPermalink_DuringUpload_Declines(t *testing.T) {

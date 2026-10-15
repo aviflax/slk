@@ -636,7 +636,13 @@ type OpenLinkMsg struct{ URL string }
 // sender can fall back. Reply should have a buffer of one; the reducer
 // drops the reply rather than block on it.
 type OpenPermalinkMsg struct {
-	URL   string
+	URL string
+	// Claim, when set, is called once before the reducer acts. It
+	// returns false when the sender has stopped waiting (it already
+	// answered its client), and the message is then dropped without
+	// navigating or replying. Once Claim returns true the reducer
+	// always replies, so the sender may keep waiting for that reply.
+	Claim func() bool
 	Reply chan<- error
 }
 
