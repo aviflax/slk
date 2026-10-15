@@ -2,7 +2,10 @@ package ui
 
 import (
 	"errors"
+	"strings"
 	"testing"
+
+	"github.com/charmbracelet/x/ansi"
 
 	"github.com/gammons/slk/internal/core"
 	"github.com/gammons/slk/internal/ids"
@@ -11,29 +14,53 @@ import (
 
 // editApp is a typedApp in normal mode on C1 whose own messages are
 // 1.000000 ("one") and the parent of thread 5.000000 ("parent"), with
-// that thread open on reply 6.000000 ("reply"). Its edit service
-// answers with Slack's text, "slack:" and the text sent, or with err.
+// that thread open on reply 6.000000 ("reply"). Every row carries the
+// rich_text block Slack stores (typedRow). Its edit service answers
+// with the text sent, or with err.
 func editApp(t *testing.T, err error) *App {
 	t.Helper()
 	a := typedApp(t)
 	a.mode = ModeNormal
-	parent := messages.MessageItem{TS: "5.000000", UserID: "USELF", Text: "parent", ReplyCount: 1}
-	a.messagepane.SetMessages([]messages.MessageItem{
-		{TS: "1.000000", UserID: "USELF", Text: "one"},
-		parent,
-	})
+	parent := typedRow("5.000000", "parent", "")
+	parent.ReplyCount = 1
+	a.messagepane.SetMessages([]messages.MessageItem{typedRow("1.000000", "one", ""), parent})
 	a.threadPanel.SetThread(parent, []messages.MessageItem{
-		{TS: "6.000000", UserID: "USELF", Text: "reply", ThreadTS: "5.000000"},
+		typedRow("6.000000", "reply", "5.000000"),
 	}, "C1", "5.000000")
 	a.SetMessageService(core.NewMessageService(core.MessageServiceFuncs{
 		Edit: func(ch ids.ChannelID, ts ids.MessageTS, text string) core.Msg {
 			if err != nil {
 				return MessageEditedMsg{ChannelID: string(ch), TS: string(ts), Err: err}
 			}
-			return MessageEditedMsg{ChannelID: string(ch), TS: string(ts), Text: "slack:" + text}
+			return MessageEditedMsg{ChannelID: string(ch), TS: string(ts), Text: text}
 		},
 	}))
 	return a
+}
+
+// typedRow is one of the user's messages as Slack returns it: the
+// mrkdwn text and the rich_text block slk and the web client attach to
+// everything typed. The pane draws the body from that block.
+func typedRow(ts, text, threadTS string) messages.MessageItem {
+	row := messages.MessageItem{TS: ts, UserID: "USELF", ThreadTS: threadTS}
+	body := messages.EditedBody(text)
+	body.Edited = false
+	body.Apply(&row)
+	return row
+}
+
+// drawn is what the channel pane and the thread pane draw, without
+// styling.
+func drawn(a *App) (channel, thread string) {
+	return ansi.Strip(a.messagepane.View(40, 100)), ansi.Strip(a.threadPanel.View(40, 100))
+}
+
+// wantDrawn checks that view draws want and not gone.
+func wantDrawn(t *testing.T, what, view, want, gone string) {
+	t.Helper()
+	if !strings.Contains(view, want) || gone != "" && strings.Contains(view, gone) {
+		t.Errorf("%s draws %q, want %q and not %q", what, strings.Join(strings.Fields(view), " "), want, gone)
+	}
 }
 
 // editFrom edits message ts from panel's composer the way the user
@@ -110,15 +137,15 @@ func TestPendingEdit_ShowsAtOnce(t *testing.T) {
 	})
 }
 
-// The result lands the text Slack stored.
-func TestPendingEdit_SuccessShowsSlacksText(t *testing.T) {
+// The result lands the body chat.update sent.
+func TestPendingEdit_SuccessShowsTheSentBody(t *testing.T) {
 	a := editApp(t, nil)
 	res := editFrom(t, a, PanelMessages, "1.000000", "new")
 	if res.EditID == 0 {
 		t.Fatalf("result = %+v, want the edit id stamped", res)
 	}
 	a.Update(res)
-	wantText(t, "channel", a.messagepane.Messages(), "1.000000", "slack:new", true)
+	wantText(t, "channel", a.messagepane.Messages(), "1.000000", "new", true)
 	if a.pendingOps.EditPending("C1", "1.000000") {
 		t.Error("edit still pending after its result")
 	}
@@ -216,16 +243,16 @@ func TestPendingEdit_EchoIsHarmless(t *testing.T) {
 	t.Run("before the result", func(t *testing.T) {
 		a := editApp(t, nil)
 		res := editFrom(t, a, PanelMessages, "1.000000", "new")
-		a.Update(editEcho("slack:new"))
+		a.Update(editEcho("new"))
 		a.Update(res)
-		wantText(t, "channel", a.messagepane.Messages(), "1.000000", "slack:new", true)
+		wantText(t, "channel", a.messagepane.Messages(), "1.000000", "new", true)
 	})
 	t.Run("after the result", func(t *testing.T) {
 		a := editApp(t, nil)
 		res := editFrom(t, a, PanelMessages, "1.000000", "new")
 		a.Update(res)
-		a.Update(editEcho("slack:new"))
-		wantText(t, "channel", a.messagepane.Messages(), "1.000000", "slack:new", true)
+		a.Update(editEcho("new"))
+		wantText(t, "channel", a.messagepane.Messages(), "1.000000", "new", true)
 	})
 	t.Run("before a failure", func(t *testing.T) {
 		a := editApp(t, errors.New("boom"))
@@ -251,13 +278,13 @@ func TestPendingEdit_TwoQuickEdits(t *testing.T) {
 		first := editFrom(t, a, PanelMessages, "1.000000", "first")
 		second := editFrom(t, a, PanelMessages, "1.000000", "second")
 		wantText(t, "after both edits", a.messagepane.Messages(), "1.000000", "second", true)
-		a.Update(older(echo("C1", "1.000000", "", "slack:first")))
+		a.Update(older(echo("C1", "1.000000", "", "first")))
 		wantText(t, "after the first's echo", a.messagepane.Messages(), "1.000000", "second", true)
 		a.Update(first)
-		a.Update(older(echo("C1", "1.000000", "", "slack:first")))
+		a.Update(older(echo("C1", "1.000000", "", "first")))
 		wantText(t, "after the first's result and a late echo", a.messagepane.Messages(), "1.000000", "second", true)
 		a.Update(second)
-		wantText(t, "after the second's result", a.messagepane.Messages(), "1.000000", "slack:second", true)
+		wantText(t, "after the second's result", a.messagepane.Messages(), "1.000000", "second", true)
 	})
 	t.Run("results out of order", func(t *testing.T) {
 		a := editApp(t, nil)
@@ -265,7 +292,7 @@ func TestPendingEdit_TwoQuickEdits(t *testing.T) {
 		second := editFrom(t, a, PanelMessages, "1.000000", "second")
 		a.Update(second)
 		a.Update(first)
-		wantText(t, "channel", a.messagepane.Messages(), "1.000000", "slack:second", true)
+		wantText(t, "channel", a.messagepane.Messages(), "1.000000", "second", true)
 	})
 	t.Run("newer one fails", func(t *testing.T) {
 		a := editApp(t, nil)
@@ -274,7 +301,7 @@ func TestPendingEdit_TwoQuickEdits(t *testing.T) {
 		second.Err, second.Text = errors.New("boom"), ""
 		a.Update(first)
 		a.Update(second)
-		wantText(t, "channel", a.messagepane.Messages(), "1.000000", "slack:first", true)
+		wantText(t, "channel", a.messagepane.Messages(), "1.000000", "first", true)
 		if got := a.compose.Value(); got != "second" || !a.editing.IsActive() {
 			t.Errorf("composer = %q, editing=%v, want the second edit reopened", got, a.editing.IsActive())
 		}
@@ -290,7 +317,7 @@ func TestPendingEdit_TwoQuickEdits(t *testing.T) {
 			t.Errorf("superseded edit given back: editing=%v composer=%q", a.editing.IsActive(), a.compose.Value())
 		}
 		a.Update(second)
-		wantText(t, "channel", a.messagepane.Messages(), "1.000000", "slack:second", true)
+		wantText(t, "channel", a.messagepane.Messages(), "1.000000", "second", true)
 	})
 }
 
@@ -310,4 +337,43 @@ func TestPendingEdit_NilResultFails(t *testing.T) {
 	if a.pendingOps.EditPending("C1", "1.000000") {
 		t.Error("edit still pending")
 	}
+}
+
+// What the panes draw follows every edit, on a message whose body is
+// drawn from its rich_text block: the optimistic edit, its success,
+// its failure and another client's message_changed, whose text and
+// blocks are Slack's and are shown as they are.
+func TestPendingEdit_DrawsTheEditedBody(t *testing.T) {
+	t.Run("optimistic, then success", func(t *testing.T) {
+		a := editApp(t, nil)
+		res := editFrom(t, a, PanelMessages, "5.000000", "fresh *words*")
+		ch, th := drawn(a)
+		wantDrawn(t, "channel", ch, "fresh words", "parent")
+		wantDrawn(t, "thread parent", th, "fresh words", "parent")
+		a.Update(res)
+		ch, th = drawn(a)
+		wantDrawn(t, "channel after success", ch, "fresh words", "parent")
+		wantDrawn(t, "thread parent after success", th, "fresh words", "parent")
+	})
+	t.Run("thread reply", func(t *testing.T) {
+		a := editApp(t, nil)
+		_ = editFrom(t, a, PanelThread, "6.000000", "fresh words")
+		_, th := drawn(a)
+		wantDrawn(t, "thread", th, "fresh words", "▌reply")
+	})
+	t.Run("failure", func(t *testing.T) {
+		a := editApp(t, errors.New("boom"))
+		res := editFrom(t, a, PanelMessages, "1.000000", "fresh words")
+		a.Update(res)
+		ch, _ := drawn(a)
+		wantDrawn(t, "channel", ch, "one", "fresh words")
+	})
+	t.Run("another client's edit", func(t *testing.T) {
+		a := editApp(t, nil)
+		changed := typedRow("1.000000", "slack blocks", "")
+		changed.Text, changed.IsEdited = "stale fallback", true
+		a.Update(NewMessageMsg{ChannelID: "C1", Message: changed})
+		ch, _ := drawn(a)
+		wantDrawn(t, "channel", ch, "slack blocks", "one")
+	})
 }

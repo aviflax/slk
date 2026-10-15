@@ -63,7 +63,6 @@ import (
 
 	"github.com/gammons/slk/internal/debuglog"
 	"github.com/gammons/slk/internal/ids"
-	"github.com/gammons/slk/internal/slack/mrkdwn"
 	"github.com/gammons/slk/internal/ui/messages"
 	"github.com/gammons/slk/internal/ui/statusbar"
 )
@@ -257,7 +256,10 @@ func reduceNewMessage(a *App, m NewMessageMsg) tea.Cmd {
 				m.ChannelID, m.Message.TS)
 			return nil
 		}
-		edit := setEditedText(m.Message.Text, true)
+		// The echo is Slack's stored state: its text, its blocks
+		// (which the body is drawn from) and the edited mark, as
+		// they are.
+		edit := messages.BodyOf(m.Message).Apply
 		a.shownSinks(m.ChannelID).patch(m.Message.TS, edit)
 		a.pendingOps.PatchHeld(m.ChannelID, m.Message.TS, edit)
 		return nil
@@ -475,24 +477,20 @@ func reduceSendMessage(a *App, m SendMessageMsg) tea.Cmd {
 	})
 }
 
-// setEditedText is a row patch that shows text, marked edited or not.
-func setEditedText(text string, edited bool) func(*messages.MessageItem) {
-	return func(r *messages.MessageItem) { r.Text, r.IsEdited = text, edited }
-}
-
-// reduceEditMessage handles EditMessageMsg: the new text shows at once,
-// converted to mrkdwn as chat.update converts it and marked edited, in
-// every pane that shows the message, and the edit is recorded in
+// reduceEditMessage handles EditMessageMsg: the new body shows at once,
+// converted as chat.update converts it (messages.EditedBody: the mrkdwn
+// and the rich_text block the pane draws) and marked edited, in every
+// pane that shows the message, and the edit is recorded in
 // pendingOps until its result settles it (reduceMessageEdited).
 func reduceEditMessage(a *App, m EditMessageMsg) tea.Cmd {
 	if cmd, blocked := a.sendingGuard(m.TS); blocked {
 		copyText, _, _ := a.giveTextBack(commandOrigin{teamID: m.TeamID, channelID: m.ChannelID, threadTS: m.ThreadTS, typed: m.Typed})
 		return tea.Batch(cmd, copyText)
 	}
-	converted, _ := mrkdwn.Convert(m.NewText)
-	prior, shown := a.shownSinks(m.ChannelID).patch(m.TS, setEditedText(converted, true))
+	body := messages.EditedBody(m.NewText)
+	prior, shown := a.shownSinks(m.ChannelID).patch(m.TS, body.Apply)
 	e := a.pendingOps.BeginEdit(pendingEdit{
-		channelID: m.ChannelID, ts: m.TS, text: converted,
+		channelID: m.ChannelID, ts: m.TS, body: body,
 		panel: m.Panel, threadTS: m.ThreadTS, teamID: m.TeamID, typed: m.Typed,
 	}, prior, shown)
 	messageSvc := a.messageSvc
@@ -510,13 +508,14 @@ func reduceEditMessage(a *App, m EditMessageMsg) tea.Cmd {
 // back as that conversation's draft. The editor is never closed here:
 // submitEdit already closed it, and an editor open now is a newer edit.
 func reduceMessageEdited(a *App, m MessageEditedMsg) tea.Cmd {
-	e, shown, newest, found := a.pendingOps.EndEdit(m.EditID, m.Err == nil, m.Text)
+	e, shown, newest, found := a.pendingOps.EndEdit(m.EditID, m.Err == nil)
 	switch {
 	case found && shown.known:
-		a.shownSinks(m.ChannelID).patch(m.TS, setEditedText(shown.text, shown.edited))
+		a.shownSinks(m.ChannelID).patch(m.TS, shown.body.Apply)
 	case !found && m.Err == nil && m.Text != "" && !a.pendingOps.EditPending(m.ChannelID, m.TS):
-		// A result with no pending edit (one fired directly).
-		a.shownSinks(m.ChannelID).patch(m.TS, setEditedText(m.Text, true))
+		// A result with no pending edit (one fired directly): its
+		// text alone, so no stale rich_text block hides it.
+		a.shownSinks(m.ChannelID).patch(m.TS, messages.Body{Text: m.Text, Edited: true}.Apply)
 	}
 	if m.Err == nil {
 		return nil

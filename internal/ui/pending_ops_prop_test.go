@@ -2,6 +2,7 @@ package ui
 
 import (
 	"fmt"
+	"reflect"
 	"slices"
 	"testing"
 
@@ -18,7 +19,7 @@ import (
 func TestEditLedgerShowsNewestLiveEdit(t *testing.T) {
 	rapid.Check(t, func(t *rapid.T) {
 		p := newPendingOps()
-		prior := editShown{text: "prior", known: true}
+		prior := editShown{body: messages.Body{Text: "prior"}, known: true}
 		var pending, succeeded []uint64
 		live := func() uint64 { // the newest pending or succeeded id, 0 for none
 			return max(slices.Max(append([]uint64{0}, pending...)), slices.Max(append([]uint64{0}, succeeded...)))
@@ -27,10 +28,12 @@ func TestEditLedgerShowsNewestLiveEdit(t *testing.T) {
 			if len(pending) == 0 || rapid.Bool().Draw(t, "begin") {
 				// Ids count up from 1, so the next is p.editID+1.
 				text := fmt.Sprintf("t%d", p.editID+1)
-				e := p.BeginEdit(pendingEdit{channelID: "C1", ts: "1.0", text: text},
-					messages.MessageItem{Text: prior.text, IsEdited: prior.edited}, true)
-				if e.text != text {
-					t.Fatalf("edit %d is %q, want %q", e.id, e.text, text)
+				prow := messages.MessageItem{}
+				prior.body.Apply(&prow)
+				e := p.BeginEdit(pendingEdit{channelID: "C1", ts: "1.0", body: messages.Body{Text: text, Edited: true}},
+					prow, true)
+				if e.body.Text != text {
+					t.Fatalf("edit %d is %q, want %q", e.id, e.body.Text, text)
 				}
 				pending = append(pending, e.id)
 				continue
@@ -44,16 +47,13 @@ func TestEditLedgerShowsNewestLiveEdit(t *testing.T) {
 			}
 			want := prior
 			if n := live(); n != 0 {
-				want = editShown{text: fmt.Sprintf("t%d", n), edited: true, known: true}
-				if slices.Contains(succeeded, n) {
-					want.text = fmt.Sprintf("s%d", n)
-				}
+				want = editShown{body: messages.Body{Text: fmt.Sprintf("t%d", n), Edited: true}, known: true}
 			}
-			e, shown, newest, found := p.EndEdit(id, ok, fmt.Sprintf("s%d", id))
+			e, shown, newest, found := p.EndEdit(id, ok)
 			if !found || e.id != id {
 				t.Fatalf("EndEdit(%d) found=%v id=%d", id, found, e.id)
 			}
-			if shown != want || newest != wantNewest {
+			if !reflect.DeepEqual(shown, want) || newest != wantNewest {
 				t.Fatalf("EndEdit(%d ok=%v): shown %+v newest %v, want %+v newest %v (pending %v succeeded %v)",
 					id, ok, shown, newest, want, wantNewest, pending, succeeded)
 			}

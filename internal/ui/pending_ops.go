@@ -85,7 +85,7 @@ type pendingEdit struct {
 	id        uint64 // from BeginEdit; later edits have larger ids
 	channelID string
 	ts        string
-	text      string // the new text as shown, converted to mrkdwn
+	body      messages.Body // the new body as shown (messages.EditedBody)
 	// panel, threadTS, teamID and typed are where the edit was typed
 	// (threadTS is the open thread for a PanelThread edit) and the text
 	// as typed, so a failed edit can be reopened there or given back.
@@ -122,23 +122,21 @@ type editKey struct{ channelID, ts string }
 // The message shows the text of the newest edit that is pending or has
 // succeeded, or base when there is none.
 type editedMessage struct {
-	// base is the text the message showed before its first pending
+	// base is the body the message showed before its first pending
 	// edit, then that of the newest edit to succeed (baseID). known
 	// is false when no pane showed the message at the first edit, so
 	// there is nothing to put back.
-	base       string
-	baseEdited bool
-	baseID     uint64
-	known      bool
-	pending    []pendingEdit // oldest first
+	base    messages.Body
+	baseID  uint64
+	known   bool
+	pending []pendingEdit // oldest first
 }
 
-// editShown is the text a message should show once an edit settles.
+// editShown is the body a message should show once an edit settles.
 // known is false when nothing is known to show (see editedMessage).
 type editShown struct {
-	text   string
-	edited bool
-	known  bool
+	body  messages.Body
+	known bool
 }
 
 // pendingDelete is one optimistic delete waiting for its chat.delete
@@ -281,19 +279,19 @@ func (p *pendingOps) BeginEdit(e pendingEdit, prior messages.MessageItem, priorO
 	k := editKey{e.channelID, e.ts}
 	m := p.edits[k]
 	if m == nil {
-		m = &editedMessage{base: prior.Text, baseEdited: prior.IsEdited, known: priorOK}
+		m = &editedMessage{base: messages.BodyOf(prior), known: priorOK}
 		p.edits[k] = m
 	}
 	m.pending = append(m.pending, e)
 	return e
 }
 
-// EndEdit settles the edit id: result is the text Slack stored when ok.
-// It returns the edit, what its message should show now, and whether
+// EndEdit settles the edit id; a success stores the edit's body, what
+// chat.update sent. It returns the edit, what its message should show now, and whether
 // the edit is the newest of that message (no later edit is pending or
 // has succeeded), which a failure needs to know before giving the text
 // back. found is false for an unknown id.
-func (p *pendingOps) EndEdit(id uint64, ok bool, result string) (e pendingEdit, shown editShown, newest, found bool) {
+func (p *pendingOps) EndEdit(id uint64, ok bool) (e pendingEdit, shown editShown, newest, found bool) {
 	for k, m := range p.edits {
 		i := slices.IndexFunc(m.pending, func(x pendingEdit) bool { return x.id == id })
 		if i < 0 {
@@ -308,14 +306,11 @@ func (p *pendingOps) EndEdit(id uint64, ok bool, result string) (e pendingEdit, 
 			}
 		}
 		if ok && id > m.baseID {
-			if result == "" {
-				result = e.text
-			}
-			m.base, m.baseEdited, m.baseID, m.known = result, true, id, true
+			m.base, m.baseID, m.known = e.body, id, true
 		}
-		shown = editShown{text: m.base, edited: m.baseEdited, known: m.known}
+		shown = editShown{body: m.base, known: m.known}
 		if n := len(m.pending); n > 0 && m.pending[n-1].id > m.baseID {
-			shown = editShown{text: m.pending[n-1].text, edited: true, known: true}
+			shown = editShown{body: m.pending[n-1].body, known: true}
 		}
 		if len(m.pending) == 0 {
 			delete(p.edits, k)
