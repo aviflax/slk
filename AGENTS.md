@@ -168,6 +168,7 @@ scrollbars, date formatting, case folding, or ID formatting: it already exists.
 | A since/until/overlap date range in a timezone, and "is this ts in it?" | `export.NewWindow`, `export.Window.Contains` |
 | The first instant of a local calendar date, safe in zones that skip midnight (Sao Paulo once did) | `export.dayStart(date, deltaDays, loc)`; `time.Date(y, m, d, 0, 0, 0, 0, loc)` returns the previous evening on such a day |
 | Sleep out a slack-go rate-limit error (ctx-aware) | `slackclient.WaitOutRateLimit` |
+| Bound one request of a paginated Web API call (each page its own 30s; the caller's ctx only cancels) | `(*slackclient.Client).pageCtx(ctx)`, used by every paging loop in `internal/slack`; a caller of one passes a ctx without a whole-call deadline |
 | Page through all channel history in a ts range / a thread's replies in a ts range | `(*slackclient.Client).WalkHistory`, `GetRepliesBetween` |
 | Press a legacy attachment button (`chat.attachmentAction`, payload byte-identical to the web client's) | `(*slackclient.Client).AttachmentAction(ctx, AttachmentActionRequest)`, with `service_id` = the posting app's bot ID |
 | Press a legacy attachment button from the UI | `core.InteractionService.PressAttachmentAction` (App field `a.interactions`); wired in `cmd/slk` via `pressAttachmentAction` to the active workspace's `Client.AttachmentAction` |

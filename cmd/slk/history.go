@@ -560,8 +560,10 @@ func fetchChannelMessages(client *slackclient.Client, channelID string, db *cach
 // so the ThreadRepliesLoadedMsg consumer can decide whether to clobber
 // an already-rendered cached view.
 func fetchThreadReplies(client *slackclient.Client, channelID, threadTS string, db *cache.DB, userNames *userNameStore, tsFormat string, avatarCache *avatar.Cache, router *workspaceRouter) []messages.MessageItem {
-	ctx, cancel := context.WithTimeout(context.Background(), requestTimeout)
-	defer cancel()
+	// No deadline for the whole fetch: GetReplies bounds each page
+	// request itself, so a long thread on a slow link takes longer
+	// rather than failing.
+	ctx := context.Background()
 	debuglog.Cache("fetchThreadReplies: channel=%s thread_ts=%s entry", channelID, threadTS)
 	start := time.Now()
 	history, err := client.GetReplies(ctx, channelID, threadTS)

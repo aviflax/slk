@@ -8,6 +8,8 @@ import "time"
 const sendTimeout = 30 * time.Second
 
 // requestTimeout bounds any other Web API call the UI waits on: a
-// history or thread fetch, a join, a reaction, a read mark. Its result
-// clears a spinner or an in-flight flag, so it must always come.
+// history fetch, a join, a reaction, a read mark. Its result clears a
+// spinner or an in-flight flag, so it must always come. A call that
+// pages (a thread's replies) is not given it: the client bounds each
+// page's request instead, so the call ends however many pages it takes.
 const requestTimeout = 30 * time.Second

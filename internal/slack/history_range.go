@@ -57,7 +57,8 @@ func (c *Client) WalkHistory(ctx context.Context, channelID, oldest, latest stri
 		if err := ctx.Err(); err != nil {
 			return err
 		}
-		resp, err := c.api.GetConversationHistoryContext(ctx, &slack.GetConversationHistoryParameters{
+		pctx, cancel := c.pageCtx(ctx)
+		resp, err := c.api.GetConversationHistoryContext(pctx, &slack.GetConversationHistoryParameters{
 			ChannelID: channelID,
 			Oldest:    oldest,
 			Latest:    latest,
@@ -65,6 +66,7 @@ func (c *Client) WalkHistory(ctx context.Context, channelID, oldest, latest stri
 			Limit:     historyPageSize,
 			Cursor:    cursor,
 		})
+		cancel()
 		if err != nil {
 			limited, waitErr := WaitOutRateLimit(ctx, err)
 			if waitErr != nil {
@@ -98,7 +100,8 @@ func (c *Client) GetRepliesBetween(ctx context.Context, channelID, threadTS, old
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
-		msgs, hasMore, nextCursor, err := c.api.GetConversationRepliesContext(ctx, &slack.GetConversationRepliesParameters{
+		pctx, cancel := c.pageCtx(ctx)
+		msgs, hasMore, nextCursor, err := c.api.GetConversationRepliesContext(pctx, &slack.GetConversationRepliesParameters{
 			ChannelID: channelID,
 			Timestamp: threadTS,
 			Oldest:    oldest,
@@ -106,6 +109,7 @@ func (c *Client) GetRepliesBetween(ctx context.Context, channelID, threadTS, old
 			Inclusive: true,
 			Cursor:    cursor,
 		})
+		cancel()
 		if err != nil {
 			limited, waitErr := WaitOutRateLimit(ctx, err)
 			if waitErr != nil {

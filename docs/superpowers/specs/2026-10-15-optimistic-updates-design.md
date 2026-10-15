@@ -193,7 +193,8 @@ send must always end, because echoes are held until it does. The
 timeout works because `SlackAPI` declares only slack-go's `*Context`
 methods (`TestSlackAPI_EveryMethodTakesContext`); the plain ones use
 `context.Background()` and dropped every ctx slk passed. Every other
-Web API call the UI waits on is bounded by `requestTimeout`.
+Web API call the UI waits on is bounded by `requestTimeout`, except a
+paginated one, whose client method bounds each page's request.
 
 The thread pane and the channel panes are kept apart in `rowSinks`
 because the paths write them differently: a broadcast placeholder is a
@@ -640,6 +641,11 @@ are out of scope.
    and thread fetches, the export, and the cache rows both the fetches
    and the WebSocket write, which now keep `edited_at`) sets `IsEdited`
    from Slack's `edited` field.
+   A paginated client call (thread replies, history walks, channel and
+   member lists, sections, thread subscriptions) bounds each page's
+   request (`pageCtx`, 30s) rather than taking one deadline for every
+   page, and the thread fetch no longer wraps it in `requestTimeout`,
+   so a long thread on a slow link finishes instead of timing out.
 
 ## Out of scope
 

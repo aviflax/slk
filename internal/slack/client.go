@@ -127,6 +127,26 @@ type Client struct {
 	// (e.g. &Client{api: mock}); BrowserTransport treats a nil Env as
 	// "send no envelope params", so those clients still work.
 	envelope *slackhttp.Envelope
+
+	// pageTimeout bounds each request of a paginated call (pageCtx);
+	// zero means defaultPageTimeout.
+	pageTimeout time.Duration
+}
+
+// defaultPageTimeout bounds one request of a paginated call.
+const defaultPageTimeout = 30 * time.Second
+
+// pageCtx is the context for one request of a paginated call: the
+// caller's ctx, which cancels it, plus a deadline of its own. A call
+// that pages through a long thread or channel takes as many requests
+// as it needs, each bounded, so a slow link slows it down instead of
+// failing it; callers pass a ctx that only cancels.
+func (c *Client) pageCtx(ctx context.Context) (context.Context, context.CancelFunc) {
+	d := c.pageTimeout
+	if d <= 0 {
+		d = defaultPageTimeout
+	}
+	return context.WithTimeout(ctx, d)
 }
 
 // NewClient creates a new Slack client using browser cookie auth.
@@ -553,7 +573,9 @@ func (c *Client) GetChannels(ctx context.Context) ([]slack.Channel, error) {
 			ExcludeArchived: true,
 		}
 
-		channels, nextCursor, err := c.api.GetConversationsForUserContext(ctx, params)
+		pctx, cancel := c.pageCtx(ctx)
+		channels, nextCursor, err := c.api.GetConversationsForUserContext(pctx, params)
+		cancel()
 		if err != nil {
 			// Handle rate limits gracefully
 			if rlErr, ok := err.(*slack.RateLimitedError); ok {
@@ -614,7 +636,9 @@ func (c *Client) GetUsersInConversation(ctx context.Context, channelID string) (
 			Limit:     1000,
 		}
 
-		users, next, err := c.api.GetUsersInConversationContext(ctx, params)
+		pctx, cancel := c.pageCtx(ctx)
+		users, next, err := c.api.GetUsersInConversationContext(pctx, params)
+		cancel()
 		if err != nil {
 			if rlErr, ok := err.(*slack.RateLimitedError); ok {
 				wait := rlErr.RetryAfter
@@ -846,7 +870,9 @@ func (c *Client) GetHistorySince(ctx context.Context, channelID, oldest string, 
 			Limit:     200,
 			Cursor:    cursor,
 		}
-		resp, err := c.api.GetConversationHistoryContext(ctx, params)
+		pctx, cancel := c.pageCtx(ctx)
+		resp, err := c.api.GetConversationHistoryContext(pctx, params)
+		cancel()
 		if err != nil {
 			// Rate-limit retry mirrors GetChannels' pattern.
 			if rlErr, ok := err.(*slack.RateLimitedError); ok {
@@ -1159,11 +1185,13 @@ func (c *Client) GetReplies(ctx context.Context, channelID, threadTS string) ([]
 	cursor := ""
 
 	for {
-		msgs, hasMore, nextCursor, err := c.api.GetConversationRepliesContext(ctx, &slack.GetConversationRepliesParameters{
+		pctx, cancel := c.pageCtx(ctx)
+		msgs, hasMore, nextCursor, err := c.api.GetConversationRepliesContext(pctx, &slack.GetConversationRepliesParameters{
 			ChannelID: channelID,
 			Timestamp: threadTS,
 			Cursor:    cursor,
 		})
+		cancel()
 		if err != nil {
 			return nil, fmt.Errorf("getting thread replies: %w", err)
 		}
@@ -1741,7 +1769,9 @@ func (c *Client) GetChannelSections(ctx context.Context) ([]SidebarSection, erro
 	var all []SidebarSection
 	cursor := ""
 	for {
-		body, err := c.callChannelSectionsList(ctx, cursor)
+		pctx, cancel := c.pageCtx(ctx)
+		body, err := c.callChannelSectionsList(pctx, cursor)
+		cancel()
 		if err != nil {
 			return nil, err
 		}
@@ -1862,7 +1892,9 @@ func (c *Client) ListThreadSubscriptions(ctx context.Context) ([]ThreadSubscript
 	currentTS := ""
 	rateLimitRetries := 0
 	for {
-		body, err := c.callListThreadSubscriptions(ctx, currentTS)
+		pctx, cancel := c.pageCtx(ctx)
+		body, err := c.callListThreadSubscriptions(pctx, currentTS)
+		cancel()
 		if err != nil {
 			var rl *rateLimitError
 			if errors.As(err, &rl) && rateLimitRetries < listThreadSubscriptionsMaxRateLimitRetries {
