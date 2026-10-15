@@ -2,7 +2,8 @@
 
 Status: done, 2026-10-15 (phases 1 and 2, phase 3: optimistic edit
 and delete, phase 4: review fixes, phase 5: edit and delete fixes,
-phase 6: ordering, read cursors and timeouts)
+phase 6: ordering, read cursors and timeouts, phase 7: reloads and
+review fixes)
 
 ## Problem
 
@@ -608,6 +609,18 @@ are out of scope.
    workspace; the placeholder edit refusal reports the clipboard;
    ephemerals stay out of navigation; a sent message is drawn from its
    typed body throughout.
+
+7. **Reloads and review fixes. Done:** a pane's rows replaced by a
+   fetch or a cache read keep every pending operation (`paneRows`,
+   "Reloads" above); an edit's echo is compared in Slack's escaped form
+   (`EchoCarries`); message_not_found for an edit removes the row;
+   "(edited)" comes from Slack's `edited` field, not from every
+   message_changed (`NewMessageMsg.Changed`); a body change keeps a
+   window at the bottom there (`entrylist.HoldBottom`, both panes); the
+   text-only patch methods are gone; the edit property applies
+   chat.update when sent and exercises echo-before-result; time zone
+   tests run in child processes (`tztest.Each`) instead of writing
+   `time.Local`, which raced under `-race`.
 
 ## Out of scope
 
