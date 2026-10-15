@@ -59,8 +59,13 @@ func buildPlainLine(line string) PlainLine {
 			byteOffset += len(cluster)
 			continue
 		}
+		start := byteOffset
+		if len(bytesMap) == 0 {
+			// Zero-width clusters before the first column belong to it.
+			start = 0
+		}
 		for k := 0; k < w; k++ {
-			bytesMap = append(bytesMap, byteOffset)
+			bytesMap = append(bytesMap, start)
 		}
 		byteOffset += len(cluster)
 	}
