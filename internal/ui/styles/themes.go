@@ -36,6 +36,11 @@ type ThemeColors struct {
 	SelectionForeground string `toml:"selection_foreground"`
 	SearchHighlightBg   string `toml:"search_highlight_bg"`
 	SearchHighlightFg   string `toml:"search_highlight_fg"`
+	// MentionBar, MentionBg and MentionPillBg are optional; Apply derives
+	// them from Warning when empty.
+	MentionBar    string `toml:"mention_bar"`
+	MentionBg     string `toml:"mention_bg"`
+	MentionPillBg string `toml:"mention_pill_bg"`
 	// ComposeInsertBG, SelectionBgFocused, and SelectionBgUnfocused are
 	// optional explicit overrides for the tints derived in tint.go. When
 	// empty, tint.go computes them from Accent/TextMuted+Background.
@@ -287,11 +292,15 @@ var builtinThemes = map[string]struct {
 	// ANSI 8 (bright black / palette gray) to bypass mixColors. With
 	// Background=ANSI 0 the default mix produces a near-black RGB
 	// tint (~RGB(0,25,25)) that's invisible against the terminal bg.
+	// The mention colours bypass mixColors for the same reason: the row
+	// gets no tint (MentionBg is the background; the bar marks it) and
+	// the pill is palette gray.
 	"ansi dark": {"ANSI Dark", ThemeColors{
 		Primary: "4", Accent: "6", Warning: "3", Error: "1",
 		Background: "0", Surface: "8", SurfaceDark: "0",
 		Text: "15", TextMuted: "8", Border: "8",
 		SelectionBgFocused: "8", SelectionBgUnfocused: "8",
+		MentionBg: "0", MentionPillBg: "8",
 	}},
 	// ansi-light is the light-terminal counterpart to ansi-dark. Same
 	// ANSI-16-only constraint; values chosen for readability on light
@@ -306,6 +315,7 @@ var builtinThemes = map[string]struct {
 		Background: "15", Surface: "7", SurfaceDark: "7",
 		Text: "0", TextMuted: "8", Border: "8",
 		SelectionBgFocused: "8", SelectionBgUnfocused: "8",
+		MentionBg: "15", MentionPillBg: "8",
 	}},
 	"zenburn": {"Zenburn", ThemeColors{
 		Primary: "#8CD0D3", Accent: "#7F9F7F", Warning: "#F0DFAF", Error: "#CC9393",

@@ -13,6 +13,15 @@ import (
 // readable on every built-in theme without overpowering message text.
 const defaultTintAlpha = 0.15
 
+// mentionTintAlpha and mentionPillAlpha are Warning's share in the
+// mention row tint and in the pill behind the user's own @name. The row
+// tint is fainter than the selection tint so the two stay apart; the
+// pill is strong enough to read on the tinted row.
+const (
+	mentionTintAlpha = 0.10
+	mentionPillAlpha = 0.35
+)
+
 // ComposeInsertBG is the background color used by the compose box when
 // focused (insert mode). Apply() populates this either from a theme's
 // explicit colors.compose_insert_bg, or by mixing Accent into Background

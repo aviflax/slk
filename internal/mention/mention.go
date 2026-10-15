@@ -42,10 +42,32 @@ import "strings"
 //
 // An empty selfUserID matches no direct mention; broadcasts still match.
 func InText(text, selfUserID string) bool {
+	return Classify(text, selfUserID) != None
+}
+
+// Kind is how a message mentions the user, as Classify reports it.
+type Kind int
+
+const (
+	// None: the text does not mention the user.
+	None Kind = iota
+	// Broadcast: only @here, @channel or @everyone reach the user.
+	Broadcast
+	// Direct: the text names the user with <@Uxxxx>. Direct wins over a
+	// broadcast in the same text.
+	Direct
+)
+
+// Classify reports how text mentions selfUserID. It recognizes the same
+// forms as InText, with the same gaps, and InText is Classify != None.
+func Classify(text, selfUserID string) Kind {
 	if selfUserID != "" && strings.Contains(text, "<@"+selfUserID+">") {
-		return true
+		return Direct
 	}
-	return strings.Contains(text, "<!here>") ||
+	if strings.Contains(text, "<!here>") ||
 		strings.Contains(text, "<!channel>") ||
-		strings.Contains(text, "<!everyone>")
+		strings.Contains(text, "<!everyone>") {
+		return Broadcast
+	}
+	return None
 }

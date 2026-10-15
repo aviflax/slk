@@ -43,3 +43,28 @@ func TestInText(t *testing.T) {
 		})
 	}
 }
+
+func TestClassify(t *testing.T) {
+	const self = "U123"
+	tests := []struct {
+		name string
+		text string
+		self string
+		want Kind
+	}{
+		{"direct", "hey <@U123>", self, Direct},
+		{"direct beats broadcast", "<!here> <@U123> look", self, Direct},
+		{"broadcast only", "<!channel> all hands", self, Broadcast},
+		{"someone else", "hey <@U999>", self, None},
+		{"prefix of a longer id", "<@U123ABC>", self, None},
+		{"empty self id sees only broadcasts", "<@U123> <!here>", "", Broadcast},
+		{"plain text", "nothing here", self, None},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := Classify(tt.text, tt.self); got != tt.want {
+				t.Errorf("Classify(%q, %q) = %v, want %v", tt.text, tt.self, got, tt.want)
+			}
+		})
+	}
+}

@@ -113,3 +113,67 @@ func TestComposeInsertBG_StableAcrossBuiltinThemes(t *testing.T) {
 		}
 	}
 }
+
+func TestMentionColors_DerivedFromWarning(t *testing.T) {
+	applyTheme(t, "dark", config.Theme{})
+	for _, c := range []struct {
+		name      string
+		got, want color.Color
+	}{
+		{"MentionBar", MentionBar, Warning},
+		{"MentionBg", MentionBg, mixColors(Warning, Background, mentionTintAlpha)},
+		{"MentionPillBg", MentionPillBg, mixColors(Warning, Background, mentionPillAlpha)},
+	} {
+		gr, gg, gb := rgb(c.got)
+		wr, wg, wb := rgb(c.want)
+		if gr != wr || gg != wg || gb != wb {
+			t.Errorf("%s = #%02X%02X%02X, want #%02X%02X%02X", c.name, gr, gg, gb, wr, wg, wb)
+		}
+	}
+}
+
+func TestMentionColors_ThemeOverrides(t *testing.T) {
+	RegisterCustomTheme("mentiontest", ThemeColors{
+		Primary: "#000000", Accent: "#000000", Warning: "#000000",
+		Error: "#000000", Background: "#000000", Surface: "#000000",
+		SurfaceDark: "#000000", Text: "#FFFFFF", TextMuted: "#888888",
+		Border:     "#222222",
+		MentionBar: "#FF0000", MentionBg: "#00FF00", MentionPillBg: "#0000FF",
+	})
+	applyTheme(t, "mentiontest", config.Theme{})
+	for _, c := range []struct {
+		name    string
+		got     color.Color
+		r, g, b uint8
+	}{
+		{"MentionBar", MentionBar, 0xFF, 0, 0},
+		{"MentionBg", MentionBg, 0, 0xFF, 0},
+		{"MentionPillBg", MentionPillBg, 0, 0, 0xFF},
+	} {
+		if r, g, b := rgb(c.got); r != c.r || g != c.g || b != c.b {
+			t.Errorf("%s = #%02X%02X%02X, want #%02X%02X%02X", c.name, r, g, b, c.r, c.g, c.b)
+		}
+	}
+}
+
+// TestMentionColors_InitialValuesAreDark pins the literals the
+// package-level mention colours start with (used before any Apply) to
+// what Apply("dark") derives. Keep the hex strings in step with styles.go.
+func TestMentionColors_InitialValuesAreDark(t *testing.T) {
+	applyTheme(t, "dark", config.Theme{})
+	for _, c := range []struct {
+		name    string
+		got     color.Color
+		initial string
+	}{
+		{"MentionBar", MentionBar, "#E0A030"},
+		{"MentionBg", MentionBg, "#2E272E"},
+		{"MentionPillBg", MentionPillBg, "#5F492F"},
+	} {
+		ir, ig, ib := rgb(lipgloss.Color(c.initial))
+		gr, gg, gb := rgb(c.got)
+		if ir != gr || ig != gg || ib != gb {
+			t.Errorf("%s starts as %s, dark derives #%02X%02X%02X", c.name, c.initial, gr, gg, gb)
+		}
+	}
+}

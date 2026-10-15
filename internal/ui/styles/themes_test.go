@@ -1,6 +1,7 @@
 package styles
 
 import (
+	"image/color"
 	"math"
 	"os"
 	"path/filepath"
@@ -284,6 +285,12 @@ func TestANSIThemesSelectionTintPaletteInherited(t *testing.T) {
 			unfocused := SelectionTintColor(false)
 			if _, ok := unfocused.(ansi.BasicColor); !ok {
 				t.Errorf("%s unfocused selection tint = %T, want ansi.BasicColor (palette-inherited)", tc.theme, unfocused)
+			}
+
+			for name, c := range map[string]color.Color{"MentionBg": MentionBg, "MentionPillBg": MentionPillBg} {
+				if _, ok := c.(ansi.BasicColor); !ok {
+					t.Errorf("%s %s = %T, want ansi.BasicColor (palette-inherited)", tc.theme, name, c)
+				}
 			}
 		})
 	}

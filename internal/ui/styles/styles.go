@@ -42,6 +42,15 @@ var (
 	SearchHighlightBg color.Color
 	SearchHighlightFg color.Color
 
+	// Mention highlight (docs/superpowers/specs/2026-10-15-mention-highlight-design.md):
+	// the gutter bar on a row that mentions the user, the row's tint, and
+	// the background of the user's own @name. Apply() copies the theme's
+	// values or derives them from Warning.
+	// The initial values are the dark theme's, as for the palette above.
+	MentionBar    color.Color = lipgloss.Color("#E0A030")
+	MentionBg     color.Color = lipgloss.Color("#2E272E")
+	MentionPillBg color.Color = lipgloss.Color("#5F492F")
+
 	// Panel styles
 	FocusedBorder = lipgloss.NewStyle().
 			BorderStyle(lipgloss.ThickBorder()).
@@ -381,6 +390,21 @@ func Apply(themeName string, overrides core.Theme) {
 		SearchHighlightFg = lipgloss.Color(colors.SearchHighlightFg)
 	} else {
 		SearchHighlightFg = Background
+	}
+
+	MentionBar = Warning
+	if colors.MentionBar != "" {
+		MentionBar = lipgloss.Color(colors.MentionBar)
+	}
+	if colors.MentionBg != "" {
+		MentionBg = lipgloss.Color(colors.MentionBg)
+	} else {
+		MentionBg = mixColors(Warning, Background, mentionTintAlpha)
+	}
+	if colors.MentionPillBg != "" {
+		MentionPillBg = lipgloss.Color(colors.MentionPillBg)
+	} else {
+		MentionPillBg = mixColors(Warning, Background, mentionPillAlpha)
 	}
 
 	// Compose-insert background: explicit theme override wins, otherwise
