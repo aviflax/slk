@@ -1,7 +1,7 @@
 # Optimistic updates: one shared mechanism
 
-Status: phases 1 and 2 done, 2026-10-15; phase 3 (optimistic edit and
-delete) not started
+Status: done, 2026-10-15 (phases 1 and 2, then phase 3: optimistic edit
+and delete)
 
 ## Problem
 
@@ -74,7 +74,8 @@ func FirstIndexOfTS(rows []MessageItem, ts string) int // from the front
 func ReplaceTS(rows []MessageItem, ts string, item MessageItem) ([]MessageItem, RowChange)
 func RemoveTS(rows []MessageItem, ts string) ([]MessageItem, RowChange)
 func RemoveAt(rows []MessageItem, i int) ([]MessageItem, RowChange)
-func PatchTS(rows []MessageItem, ts string, f func(*MessageItem)) ([]MessageItem, RowChange)
+func PatchTS(rows []MessageItem, ts string, f func(*MessageItem)) ([]MessageItem, RowChange) // from the front
+func Reinsert(rows []MessageItem, item MessageItem, i int) ([]MessageItem, RowChange)
 func AppendIfAbsent(rows []MessageItem, item MessageItem) ([]MessageItem, RowChange)
 func Upsert(rows []MessageItem, item MessageItem) ([]MessageItem, RowChange)
 // Settle replaces the placeholder localTS with item (RowReplaced at
@@ -85,19 +86,26 @@ func Settle(rows []MessageItem, localTS string, item MessageItem) ([]MessageItem
 ```
 
 Matching is literal: an empty TS matches a row with an empty TS. The
-send paths (append, settle, roll back, upsert) and the delete path write
-through these; the edit, reaction and reply-count paths only locate their
-row with `FirstIndexOfTS`. `PatchTS` has no caller yet; it is for the
-optimistic edit.
+send paths (append, settle, roll back, upsert), the edit path and the
+delete path write through these; the reaction and reply-count paths only
+locate their row with `FirstIndexOfTS`. The send paths scan from the
+back (`IndexOfTS`); the edit and delete paths and their echoes scan from
+the front (`PatchTS`, `FirstIndexOfTS`), as they always have, so an
+edit or delete and its echo touch the same row. `Reinsert` puts a
+removed row back at its index, clamped, and does nothing when the TS is
+shown again already.
 
 Property tests are in `rows_prop_test.go`: `Settle` never yields
 duplicate TSes, reports its op, and leaves every other row alone;
-`RemoveTS` then re-inserting at the reported index restores the slice.
+`RemoveTS` then re-inserting at the reported index restores the slice;
+`Reinsert` undoes `RemoveAt` and is a no-op on a present TS.
 
-The selection fix-ups are not unified yet. Each pane's
-`afterLocalRemoved` (used by `RemoveLocal` and by a `Settle` that
-removes) steps back on `i < selected`; `RemoveMessageByTS` steps back on
-`i <= selected && selected > 0`. Phase 3's delete has to pick one.
+There are two selection fix-ups. Each pane's `afterLocalRemoved` (used
+by `RemoveLocal` and by a `Settle` that removes) steps back on
+`i < selected`, keeping the cursor on the message it was on. A delete
+(`Remove`, behind `RemoveMessageByTS`) steps back on
+`i <= selected && selected > 0`, so deleting the selected message lands
+on the one before it, as deleting always has.
 
 ### 2. One row-writing interface for both panes
 
@@ -107,6 +115,9 @@ type rowSink interface {
 	InsertLocal(item messages.MessageItem)            // append unless shown
 	Settle(localTS string, item messages.MessageItem) // messages.Settle, else upsert
 	RemoveLocal(localTS string) bool
+	Patch(ts string, f func(*messages.MessageItem)) (prior messages.MessageItem, ok bool)
+	Remove(ts string) (messages.RemovedRow, bool) // the row, its index, whether selected
+	Restore(r messages.RemovedRow)                // at its index, reselected; no-op if shown
 }
 var _ rowSink = (*messages.Model)(nil)
 var _ rowSink = (*thread.Model)(nil)
@@ -117,13 +128,26 @@ type rowSinks struct {
 }
 func (s rowSinks) settle(localTS string, item messages.MessageItem) // clones per channel window
 func (s rowSinks) removeLocal(localTS string)
+func (s rowSinks) patch(ts string, f func(*messages.MessageItem)) (prior messages.MessageItem, ok bool)
 
 func (a *App) sinksFor(channelID string) rowSinks
 func (a *App) replySinksFor(channelID, threadTS string, broadcast bool) rowSinks
 func (a *App) insertSinks(ins pendingInsert) rowSinks // one of the two, for a pending send
+func (a *App) shownSinks(channelID string) rowSinks   // an existing message: edit, delete, echoes
+func (a *App) removeFrom(s rowSinks, ts string) []removedRow
+func (a *App) restoreTo(channelID string, removed []removedRow)
 func (a *App) localRow(localTS, text, threadTS, subtype string) messages.MessageItem
-func stampLocalTS(localTS string, broadcast bool, call func() tea.Msg) tea.Cmd
+
+const noWorkspaceReason = "no active workspace"
+func stampLocalTS(ins pendingInsert, call func() tea.Msg) tea.Cmd
+func stampEditID(e pendingEdit, call func() tea.Msg) tea.Cmd
+func failNilDelete(channelID, ts string, call func() tea.Msg) tea.Cmd
 ```
+
+The three wrappers put on the result what the reducer needs to find
+the pending operation (services never set it) and turn a nil result
+into the operation's failure: the `cmd/slk` closures return nil when no
+workspace is active, which used to leave a pending send open for good.
 
 The thread pane and the channel panes are kept apart in `rowSinks`
 because the paths write them differently: a broadcast placeholder is a
@@ -132,6 +156,14 @@ windows get their own clone of the settled message. `sinksFor` is every
 window on the channel; `replySinksFor` adds the thread panel when it is
 visible on that thread (matched on the panel's own channel, not
 `activeChannelID`), and the channel windows only for a broadcast.
+`shownSinks` is for a message that already exists: every window on the
+channel, plus the thread panel whenever it is on that channel (no
+visibility check), the fan-out the `message_changed` and
+`message_deleted` echoes always used. The thread pane's `Patch` writes a
+matching reply and the parent; its `Remove` never takes the parent.
+`restoreTo` only puts a row back into a pane that still shows the
+conversation it came from (a window on the channel, the thread panel on
+that thread).
 
 ### 3. A ledger of pending operations (package `ui`)
 
@@ -149,13 +181,34 @@ type pendingInsert struct {
 }
 func (ins pendingInsert) origin() commandOrigin // for offerTypedBack
 
-type pendingOps struct { /* inserts []*pendingInsert, oldest first; sentTSes; counter */ }
+type pendingOps struct { /* inserts, oldest first; sentTSes; edits and deletes by (channel, ts); counters */ }
 func (p *pendingOps) BeginInsert(ins pendingInsert)
 func (p *pendingOps) AdoptEcho(channelID string, msg messages.MessageItem) (pendingInsert, bool)
 func (p *pendingOps) EndInsert(localTS string) (pendingInsert, bool)
 func (p *pendingOps) RecordSent(ts string)
 func (p *pendingOps) IsSelfSent(ts string) bool
 func (p *pendingOps) NextLocalTS() string
+
+type pendingEdit struct {
+	id               uint64 // from BeginEdit, increasing
+	channelID, ts    string
+	text             string // the new text as shown, mrkdwn
+	panel            Panel  // where it was typed, to reopen it
+	threadTS, teamID string
+	typed            string // the composer text before mention translation
+}
+func (p *pendingOps) BeginEdit(e pendingEdit, prior messages.MessageItem, priorOK bool) pendingEdit
+func (p *pendingOps) EndEdit(id uint64, ok bool, slackText string) (e pendingEdit, shown editShown, newest, found bool)
+func (p *pendingOps) EditPending(channelID, ts string) bool
+
+type pendingDelete struct {
+	channelID, ts string
+	removed       []removedRow // per pane: the row, its index, whether selected
+	echoed        bool         // message_deleted arrived first
+}
+func (p *pendingOps) BeginDelete(d pendingDelete)
+func (p *pendingOps) EndDelete(channelID, ts string) (pendingDelete, bool)
+func (p *pendingOps) DeleteEchoed(channelID, ts string)
 
 func isLocalTS(ts string) bool
 func (a *App) sendingGuard(ts string) (tea.Cmd, bool)
@@ -192,6 +245,55 @@ is adopted by the send. The rows still end right (the send's own result
 appends it, the forward's result dedups), but a failure of that send in
 the window would not give its text back.
 
+The flow for an edit:
+
+- **Begin** (`reduceEditMessage`): `submitEdit` closes the editor at
+  Enter (restoring the stashed draft, as a send leaves insert mode) and
+  puts `Typed`, `TeamID`, `Panel` and `ThreadTS` on `EditMessageMsg`.
+  The text, converted by `mrkdwn.Convert` as `chat.update` converts it
+  and marked edited, is patched into `shownSinks`; the row as it was
+  goes to `BeginEdit`.
+- **State**: per message, a base (the row before its first pending
+  edit, then the newest edit to succeed) and the pending edits. The
+  message shows the newest edit that is pending or has succeeded: its
+  own text while pending, Slack's once it succeeded. A property test
+  (`pending_ops_prop_test.go`) checks this over random begin and settle
+  orders.
+- **Echo**: while an edit of the message is pending, `message_changed`
+  is ignored (`skipped_edit_echo_pending`). It cannot say which edit it
+  carries, and an older edit's echo must not overwrite a newer edit's
+  text; the result shows Slack's text anyway. With nothing pending the
+  echo patches `shownSinks` as before.
+- **Result** (`reduceMessageEdited`): `MessageEditedMsg` carries `Text`,
+  the mrkdwn `EditMessage` sent (the `cmd/slk` closure used to discard
+  it), and `EditID`. `EndEdit` says what to show, and it is patched in.
+  A failure of the newest edit is reopened by `reopenEdit` (same
+  workspace, normal mode, no other edit open, the same panel focused
+  and still showing the message) with the typed text in its composer;
+  otherwise the text goes back through `offerTypedBack`. A failed edit
+  that a newer one replaced only toasts. The result no longer closes
+  the editor: any editor open by then is a newer edit.
+
+The flow for a delete:
+
+- **Begin** (`DeleteMessageMsg`, after the confirm prompt): `removeFrom`
+  takes the row out of `shownSinks`, and `BeginDelete` keeps what each
+  pane removed.
+- **Echo**: `WSMessageDeletedMsg` marks the pending delete echoed and
+  runs `applyMessageDeleted` (remove by TS, cancel an edit of it, close
+  the thread panel of a deleted parent, drop its action prompt). A row
+  already gone is a no-op with no selection change.
+- **Success**: `applyMessageDeleted`, so a deleted parent's panel
+  closes even when the echo is late.
+- **Failure**: unless echoed (the delete went through), `restoreTo` puts
+  the rows back at their index, reselected if they were, and the toast
+  shows. After the echo nothing is restored or reported.
+
+Kept pessimistic: the thread panel of a deleted parent closes only once
+Slack confirms, since a closed panel cannot be put back as it was; and
+parent reply counts do not change on a reply's delete, neither
+optimistically nor on the echo, as before.
+
 Every action that targets the selected message refuses a placeholder
 with "Still sending…": `handleNormalMode` runs `sendingSelectionGuard`
 for every `isMessageOpKey` key plus edit and delete, and `setMark` and
@@ -203,8 +305,8 @@ for every `isMessageOpKey` key plus edit and delete, and `setMark` and
 |---|---|---|---|
 | Channel send (done) | `InsertLocal` | `Settle` | `RemoveLocal`, offer text back |
 | Thread reply, +broadcast (done) | `InsertLocal` on the thread, and the channel when broadcast | `Settle`, reply count | `RemoveLocal`, offer text back |
-| **Edit** (phase 3) | patch text, mark edited | patch with Slack's converted text | restore prior, reopen edit with the typed text |
-| **Delete** (phase 3) | remove, keep row and index | nothing | restore at index |
+| Edit (done) | patch text, mark edited | patch with Slack's converted text | restore prior, reopen edit with the typed text, else offer it back |
+| Delete (done) | remove, keep row and index | apply as the echo does | restore at index, reselect |
 
 Reactions keep their own mechanism for now, with the duplicated closure
 merged into one function. Activity read, thread mark-read and presence
@@ -217,32 +319,9 @@ are out of scope.
    duplicate (bug 1); echo adoption replaces the window (bugs 2, 3);
    empty-TS cleanup (4); text offered back on a failed send or reply
    (5, sends only); guard against acting on a placeholder (6).
-3. **Features, not started:** optimistic edit, then optimistic delete.
-   What they need from the code as it stands:
-   - `rowSink` gains `Patch(ts, f) (prior MessageItem, ok bool)`,
-     `Remove(ts) (removed MessageItem, index int, ok bool)` and
-     `Restore(item, index)`. The panes implement them over `PatchTS`
-     and `RemoveTS`/`slices.Insert`. Edits and deletes today locate rows
-     with `FirstIndexOfTS` while `PatchTS`/`RemoveTS` scan from the back;
-     with `Settle` no longer duplicating, pick one direction. Delete
-     also has to settle which selection fix-up wins (see §1).
-   - The thread panel's parent row is not in its replies: an edit of
-     the open thread's parent also patches the parent
-     (`UpdateParentInPlace` today), and a delete of it closes the panel
-     (`WSMessageDeletedMsg` today).
-   - The sinks for an existing message are every channel window plus
-     the thread panel when it shows that channel (the
-     `WSMessageDeletedMsg` / edit-echo fan-out), not
-     `sinksFor`/`replySinksFor`.
-   - `pendingOps` gains entries for edits and deletes, keyed by the real
-     TS, holding the prior row (and index for delete) and, for an edit,
-     the typed text. `EditMessageMsg` / `MessageEditedMsg` and
-     `DeleteMessageMsg` / `MessageDeletedMsg` begin and settle them; a
-     failed edit restores the prior row and reopens the edit with the
-     typed text (bug 5's edit half, still open: a failed edit exits
-     edit mode and discards the text). The edit and delete echoes
-     (`message_changed`, `WSMessageDeletedMsg`) arrive for the user's
-     own changes and must be idempotent against the optimistic state.
+3. **Features. Done:** a nil service result fails the operation;
+   optimistic edit; optimistic delete. The rowSink, pendingOps and flow
+   sections above describe them.
 
 ## Out of scope
 
@@ -250,6 +329,9 @@ are out of scope.
   `want`/`confirmed`/`inFlight` scheme would fit, but it is a separate
   change), and not rolling back on `already_reacted`/`no_reaction`.
 - Presence rollback.
-- The service closures in `cmd/slk` that return `nil` without an active
-  workspace (no result reaches the UI); worth fixing, but on the
-  `cmd/slk` side.
+- Other services that return nil without an active workspace
+  (`MarkUnread` and the like) still produce no result; only send, edit
+  and delete are wrapped.
+- Restoring a failed edit's text when it cannot be reopened and its
+  conversation already has a newer draft: `OfferDraft` never overwrites
+  one, so that text is lost, as for a failed send.
