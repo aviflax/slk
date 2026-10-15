@@ -200,7 +200,11 @@ func TestMessageServiceNeverGetsPlaceholder(t *testing.T) {
 // Older history is fetched from the oldest message Slack knows, never
 // from a placeholder heading an empty conversation.
 func TestOldestTSSkipsPlaceholder(t *testing.T) {
-	m := messages.New([]messages.MessageItem{{TS: "local:1"}, {TS: "2.0"}}, "general")
+	m := messages.New([]messages.MessageItem{{TS: ""}, {TS: "2.0"}}, "general")
+	if got := m.OldestTS(); got != "2.0" {
+		t.Errorf("OldestTS = %q, want 2.0 past a row with no TS", got)
+	}
+	m = messages.New([]messages.MessageItem{{TS: "local:1"}, {TS: "2.0"}}, "general")
 	if got := m.OldestTS(); got != "2.0" {
 		t.Errorf("OldestTS = %q, want 2.0", got)
 	}

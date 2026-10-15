@@ -632,3 +632,24 @@ func TestPendingSend_PlaceholderAndResultDrawTheTypedBody(t *testing.T) {
 		check("channel settled", a.messagepane.Messages()[1])
 	})
 }
+
+// Held echoes are released in time order (messages.CompareTS), not
+// string order: 9.x is before 10.x.
+func TestEndInsertReleasesInTimeOrder(t *testing.T) {
+	p := newPendingOps()
+	ins := pendingInsert{localTS: "local:1", channelID: "C1"}
+	p.BeginInsert(ins)
+	for _, ts := range []string{"10.000000", "9.000000"} {
+		if !p.HoldEcho(echo("C1", ts, "", "x")) {
+			t.Fatalf("echo %s not held", ts)
+		}
+	}
+	_, released, _ := p.EndInsert("local:1", "")
+	var got []string
+	for _, m := range released {
+		got = append(got, m.Message.TS)
+	}
+	if !slices.Equal(got, []string{"9.000000", "10.000000"}) {
+		t.Errorf("released %v, want 9 before 10", got)
+	}
+}

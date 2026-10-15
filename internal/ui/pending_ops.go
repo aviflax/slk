@@ -54,7 +54,6 @@
 package ui
 
 import (
-	"cmp"
 	"slices"
 	"time"
 
@@ -293,7 +292,7 @@ func (p *pendingOps) EndInsert(localTS, sentTS string) (ins pendingInsert, relea
 		return ins, nil, true
 	}
 	delete(p.held, k)
-	slices.SortStableFunc(held, func(x, y NewMessageMsg) int { return cmp.Compare(x.Message.TS, y.Message.TS) })
+	slices.SortStableFunc(held, func(x, y NewMessageMsg) int { return messages.CompareTS(x.Message.TS, y.Message.TS) })
 	return ins, held, true
 }
 

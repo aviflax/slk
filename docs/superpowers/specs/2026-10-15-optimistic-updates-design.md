@@ -81,6 +81,7 @@ func PatchTS(rows []MessageItem, ts string, f func(*MessageItem)) ([]MessageItem
 func Insert(rows []MessageItem, item MessageItem) ([]MessageItem, RowChange) // in TS order; no-op if shown
 func IsNewest(rows []MessageItem, i int) bool // no row Slack knows after i: the pane follows it
 func CompareTS(a, b string) int // numeric time order of Slack TSes; anything else after, as strings
+func TSAt(t time.Time) string   // the Slack TS of an instant
 func Upsert(rows []MessageItem, item MessageItem) ([]MessageItem, RowChange) // replace, else Insert
 // Settle replaces the placeholder localTS with item, which then moves
 // to where its TS belongs (RowReplaced at its index, or RowMoved from
@@ -91,8 +92,10 @@ func Settle(rows []MessageItem, localTS string, item MessageItem) ([]MessageItem
 func (c RowChange) Selection(selected int) int // the cursor kept on its message
 
 func LocalTS(n uint64) string           // "local:<n>", the placeholder id
-func IsLocalTS(ts string) bool          // the one placeholder predicate
-func KnownToSlack(msg MessageItem) bool // a real TS, not ephemeral
+func IsLocalTS(ts string) bool          // the one placeholder predicate, on a bare TS
+func HasSlackTS(msg MessageItem) bool   // a TS Slack assigned: TS order, OldestTS
+func KnownToSlack(msg MessageItem) bool // HasSlackTS and not ephemeral: cursors, marks, navigation
+func UnreadStart(rows []MessageItem, lastRead, selfID string) int // where "── new ──" goes
 func LastIndexBefore(rows []MessageItem, i int, keep func(MessageItem) bool) int
 ```
 
@@ -599,7 +602,9 @@ history or a link. The guards:
   that Slack knows (`KnownToSlack`), else the thread parent or the
   channel alone (`sentLocation`). `setMark` reads
   the raw selection (`selectedLocation`) so it refuses instead.
-- `OldestTS`, the anchor for older history, skips placeholders.
+- `OldestTS`, the anchor for older history, skips placeholders and
+  rows with no TS (`HasSlackTS`, the predicate `PrependMessages` and
+  `Insert` order by).
 
 No other path reads a pane's TS into a request. Thread fetch, reply and
 mark use the thread panel's parent, which only opens on a real message;
@@ -717,7 +722,10 @@ are out of scope.
    the end follows the newest row, and the user's own send is always
    selected. Clipboard writes land in the order they were made
    (`newestClipboardWrite` in `cmd/slk`), so an older unsent bundle can
-   no longer finish after a newer one and replace it.
+   no longer finish after a newer one and replace it. The row
+   predicates are three, each documented in `rows.go`: `IsLocalTS`,
+   `HasSlackTS` (was the unexported `ordered`) and `KnownToSlack`.
+   Released echoes are sorted by `CompareTS`.
 
 ## Out of scope
 

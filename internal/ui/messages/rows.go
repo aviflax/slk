@@ -36,13 +36,28 @@ func LocalTS(n uint64) string { return fmt.Sprintf("%s%d", localTSPrefix, n) }
 // or a link.
 func IsLocalTS(ts string) bool { return strings.HasPrefix(ts, localTSPrefix) }
 
+// The three TS predicates, from narrowest to widest question:
+//
+//   - IsLocalTS(ts): ts is a placeholder id, a message still sending.
+//     For a bare TS (a guard on an action's target).
+//   - HasSlackTS(msg): Slack assigned msg its TS, so it takes part in
+//     the panes' TS order and can anchor a history fetch. Placeholders
+//     and rows with no TS sit after such rows. Ephemerals count: their
+//     TS is Slack's.
+//   - KnownToSlack(msg): HasSlackTS and not an ephemeral, so Slack
+//     keeps it in the conversation (history returns it) and a read
+//     cursor, an unread boundary or a navigation mark may sit on it.
+
+// HasSlackTS reports whether Slack assigned msg its TS: not empty and
+// not a placeholder. Such rows are kept in TS order (Insert) and
+// anchor older history (OldestTS).
+func HasSlackTS(msg MessageItem) bool { return msg.TS != "" && !IsLocalTS(msg.TS) }
+
 // KnownToSlack reports whether Slack knows msg as a message of its
 // conversation, so a read cursor or an unread boundary may sit on it:
-// not a placeholder still sending, and not an ephemeral (Slack never
+// a TS Slack assigned (HasSlackTS), and not an ephemeral (Slack never
 // returns one from history).
-func KnownToSlack(msg MessageItem) bool {
-	return msg.TS != "" && !IsLocalTS(msg.TS) && !msg.Ephemeral
-}
+func KnownToSlack(msg MessageItem) bool { return HasSlackTS(msg) && !msg.Ephemeral }
 
 // LastIndexBefore returns the index of the last row before index i
 // for which keep is true, or -1. i may be len(rows) to search them all.
@@ -227,11 +242,6 @@ func splitTS(ts string) (sec, micro int64, ok bool) {
 	return sec, micro, sec >= 0
 }
 
-// ordered reports whether a row takes part in the TS order: a row Slack
-// assigned a TS. Placeholders (newer than anything Slack has, in the
-// order they were sent) and rows with no TS sit after them.
-func ordered(r MessageItem) bool { return r.TS != "" && !IsLocalTS(r.TS) }
-
 // Insert is the one way a row is added to a pane, and keeps its
 // invariant: the rows Slack knows are in TS order (CompareTS) and each
 // TS appears once, with placeholders after them. A row Slack knows goes
@@ -246,14 +256,14 @@ func Insert(rows []MessageItem, item MessageItem) ([]MessageItem, RowChange) {
 	if item.TS != "" && IndexOfTS(rows, item.TS) >= 0 {
 		return rows, noRowChange
 	}
-	if !ordered(item) {
+	if !HasSlackTS(item) {
 		return append(rows, item), RowChange{Op: RowAdded, Index: len(rows)}
 	}
 	// From the back: the rows Slack knows are in order, so the newest
 	// arrival, the common case, stops at the first row it passes.
 	i := -1
 	for j := len(rows) - 1; j >= 0; j-- {
-		if !ordered(rows[j]) {
+		if !HasSlackTS(rows[j]) {
 			continue
 		}
 		if CompareTS(rows[j].TS, item.TS) <= 0 {
@@ -266,7 +276,7 @@ func Insert(rows []MessageItem, item MessageItem) ([]MessageItem, RowChange) {
 		// of any placeholders.
 		i = 0
 		for j := len(rows) - 1; j >= 0; j-- {
-			if ordered(rows[j]) {
+			if HasSlackTS(rows[j]) {
 				i = j + 1
 				break
 			}
@@ -281,7 +291,7 @@ func Insert(rows []MessageItem, item MessageItem) ([]MessageItem, RowChange) {
 // inserted further up leaves the cursor where it is.
 func IsNewest(rows []MessageItem, i int) bool {
 	for _, r := range rows[i+1:] {
-		if ordered(r) {
+		if HasSlackTS(r) {
 			return false
 		}
 	}
@@ -323,7 +333,7 @@ func Settle(rows []MessageItem, localTS string, item MessageItem) ([]MessageItem
 			return RemoveAt(rows, i)
 		}
 	}
-	if !ordered(item) {
+	if !HasSlackTS(item) {
 		rows[i] = item
 		return rows, RowChange{Op: RowReplaced, Index: i}
 	}

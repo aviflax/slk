@@ -920,7 +920,7 @@ func (m *Model) PrependMessages(msgs []MessageItem) {
 	// that overlaps the head.
 	if len(m.messages) > 0 {
 		head := ""
-		if i := slices.IndexFunc(m.messages, ordered); i >= 0 {
+		if i := slices.IndexFunc(m.messages, HasSlackTS); i >= 0 {
 			head = m.messages[i].TS
 		}
 		have := make(map[string]struct{}, len(m.messages))
@@ -1419,10 +1419,8 @@ func (m *Model) LastReadTS() string {
 // placeholder still sending can head the list (a send into an empty
 // conversation), and Slack has never seen its TS.
 func (m *Model) OldestTS() string {
-	for _, r := range m.messages {
-		if !IsLocalTS(r.TS) {
-			return r.TS
-		}
+	if i := slices.IndexFunc(m.messages, HasSlackTS); i >= 0 {
+		return m.messages[i].TS
 	}
 	return ""
 }

@@ -93,7 +93,7 @@ func TestSettleNeverDuplicatesTS(t *testing.T) {
 			want = slices.Clone(before)
 			want[i] = item
 			wantCh = RowChange{Op: RowReplaced, Index: i}
-			if ordered(item) {
+			if HasSlackTS(item) {
 				want = slices.Delete(want, i, i+1)
 				var ins RowChange
 				want, ins = Insert(want, item)
