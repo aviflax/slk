@@ -72,20 +72,21 @@ func TestStampLocalTS_NilIsFailure(t *testing.T) {
 	}
 }
 
-// localRow is the user's own row under the placeholder id, its text
-// converted to mrkdwn.
+// localRow is the user's own row under the placeholder id, drawn from
+// the typed body: its text converted to mrkdwn, and its rich_text block.
 func TestLocalRow(t *testing.T) {
 	a := newTestApp(t)
 	a.currentUserID = "U-self"
 	a.userNames = map[string]string{"U-self": "me"}
 	a.nowTimestampFormatter = func() string { return "9:41 AM" }
-	got := a.localRow("local:3", "**hi**", "1700000000.000100", "thread_broadcast")
+	got := a.localRow("local:3", messages.TypedBody("**hi**"), "1700000000.000100", "thread_broadcast")
 	want := messages.MessageItem{
 		TS: "local:3", UserID: "U-self", UserName: "me", Text: "*hi*",
 		Timestamp: "9:41 AM", ThreadTS: "1700000000.000100", Subtype: "thread_broadcast",
 	}
 	if got.TS != want.TS || got.UserID != want.UserID || got.UserName != want.UserName || got.Text != want.Text ||
-		got.Timestamp != want.Timestamp || got.ThreadTS != want.ThreadTS || got.Subtype != want.Subtype {
+		got.Timestamp != want.Timestamp || got.ThreadTS != want.ThreadTS || got.Subtype != want.Subtype ||
+		len(got.Blocks) == 0 {
 		t.Errorf("localRow = %+v, want %+v", got, want)
 	}
 }

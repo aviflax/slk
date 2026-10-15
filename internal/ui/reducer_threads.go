@@ -323,12 +323,13 @@ var reduceThreads reducerFunc = func(a *App, msg tea.Msg) (tea.Cmd, bool) {
 		localTS := a.pendingOps.NextLocalTS()
 		ins := pendingInsert{
 			localTS: localTS, channelID: m.ChannelID, threadTS: m.ThreadTS, broadcast: m.Broadcast,
+			body:     messages.TypedBody(m.Text),
 			postTeam: a.activeTeamID, teamID: m.TeamID, typed: m.Typed,
 		}
 		a.pendingOps.BeginInsert(ins)
 		sinks := a.replySinksFor(m.ChannelID, m.ThreadTS, m.Broadcast)
 		if sinks.thread != nil {
-			sinks.thread.InsertLocal(a.localRow(localTS, m.Text, m.ThreadTS, ""))
+			sinks.thread.InsertLocal(a.localRow(localTS, ins.body, m.ThreadTS, ""))
 		}
 		// Broadcast ("Also send to #channel"): the reply will also
 		// land in the parent channel feed as a thread_broadcast row.
@@ -338,7 +339,7 @@ var reduceThreads reducerFunc = func(a *App, msg tea.Msg) (tea.Cmd, bool) {
 		// in ThreadReplySentMsg below.
 		// sinks.channel is empty unless m.Broadcast.
 		for _, s := range sinks.channel {
-			s.InsertLocal(a.localRow(localTS, m.Text, m.ThreadTS, "thread_broadcast"))
+			s.InsertLocal(a.localRow(localTS, ins.body, m.ThreadTS, "thread_broadcast"))
 		}
 		threads := a.threads
 		chID := ids.ChannelID(m.ChannelID)
@@ -389,7 +390,7 @@ var reduceThreads reducerFunc = func(a *App, msg tea.Msg) (tea.Cmd, bool) {
 		if ok {
 			a.recovered(ins.typed)
 		}
-		a.replySinksFor(m.ChannelID, m.ThreadTS, m.Broadcast).settle(m.LocalTS, m.Message)
+		a.replySinksFor(m.ChannelID, m.ThreadTS, m.Broadcast).settle(m.LocalTS, sentItem(ins, ok, m.Message))
 		for _, mm := range a.modelsForChannel(m.ChannelID) {
 			mm.IncrementReplyCount(m.ThreadTS, m.Message.TS)
 		}

@@ -16,7 +16,6 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
-	"github.com/gammons/slk/internal/slack/mrkdwn"
 	"github.com/gammons/slk/internal/ui/messages"
 	"github.com/gammons/slk/internal/ui/thread"
 )
@@ -191,22 +190,34 @@ func (s rowSinks) removeLocal(localTS string) {
 	}
 }
 
-// localRow is the placeholder for text the user just sent, under
-// localTS until the post returns the real TS. The text is converted
-// from the user's CommonMark to Slack mrkdwn with the converter the
-// send itself uses, so bold, code and links render before the swap.
-// threadTS and subtype are empty for a top-level send.
-func (a *App) localRow(localTS, text, threadTS, subtype string) messages.MessageItem {
-	converted, _ := mrkdwn.Convert(text)
-	return messages.MessageItem{
+// localRow is the placeholder for a message the user just sent, under
+// localTS until the post returns the real TS. It is drawn from body,
+// messages.TypedBody of the text sent: the mrkdwn and rich_text block
+// Slack will store, so bold, code and links render as they will once
+// sent. threadTS and subtype are empty for a top-level send.
+func (a *App) localRow(localTS string, body messages.Body, threadTS, subtype string) messages.MessageItem {
+	row := messages.MessageItem{
 		TS:        localTS,
 		UserID:    a.currentUserID,
 		UserName:  a.userNameFor(a.currentUserID),
-		Text:      converted,
 		Timestamp: a.nowFormatted(),
 		ThreadTS:  threadTS,
 		Subtype:   subtype,
 	}
+	body.Apply(&row)
+	return row
+}
+
+// sentItem is the message a send's HTTP result settles: the result,
+// with ins.body's blocks when it has none of its own (cmd/slk builds it
+// from the sent mrkdwn alone). The pane draws a message from its
+// rich_text block, so the message looks as it did while sending and as
+// its echo will. The result's Text is kept: it is the same mrkdwn.
+func sentItem(ins pendingInsert, ok bool, item messages.MessageItem) messages.MessageItem {
+	if ok && len(item.Blocks) == 0 {
+		item.Blocks = slices.Clone(ins.body.Blocks)
+	}
+	return item
 }
 
 // noWorkspaceReason is the failure a service result of nil stands for:

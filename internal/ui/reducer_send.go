@@ -119,7 +119,7 @@ var reduceSend reducerFunc = func(a *App, msg tea.Msg) (tea.Cmd, bool) {
 			a.recovered(ins.typed)
 		}
 		// settle gives each channel window its own clone.
-		a.sinksFor(m.ChannelID).settle(m.LocalTS, m.Message)
+		a.sinksFor(m.ChannelID).settle(m.LocalTS, sentItem(ins, ok, m.Message))
 		return a.releaseHeld(release), true
 
 	case MessageSendFailedMsg:
@@ -477,10 +477,13 @@ func reduceSendMessage(a *App, m SendMessageMsg) tea.Cmd {
 	// Recorded whether or not a pane shows the placeholder, so the
 	// user's own messages in the channel are held until the result
 	// either way.
-	ins := pendingInsert{localTS: localTS, channelID: m.ChannelID, postTeam: a.activeTeamID, teamID: m.TeamID, typed: m.Typed}
+	ins := pendingInsert{
+		localTS: localTS, channelID: m.ChannelID, body: messages.TypedBody(m.Text),
+		postTeam: a.activeTeamID, teamID: m.TeamID, typed: m.Typed,
+	}
 	a.pendingOps.BeginInsert(ins)
 	for _, s := range a.sinksFor(m.ChannelID).channel {
-		s.InsertLocal(a.localRow(localTS, m.Text, "", ""))
+		s.InsertLocal(a.localRow(localTS, ins.body, "", ""))
 	}
 	messageSvc := a.messageSvc
 	chID, text := ids.ChannelID(m.ChannelID), m.Text
@@ -489,8 +492,16 @@ func reduceSendMessage(a *App, m SendMessageMsg) tea.Cmd {
 	})
 }
 
+// editedBody is what chat.update stores for an edit to wire: the typed
+// body (messages.TypedBody), marked edited.
+func editedBody(wire string) messages.Body {
+	b := messages.TypedBody(wire)
+	b.Edited = true
+	return b
+}
+
 // reduceEditMessage handles EditMessageMsg: the new body shows at once,
-// converted as chat.update converts it (messages.EditedBody: the mrkdwn
+// converted as chat.update converts it (editedBody: the mrkdwn
 // and the rich_text block the pane draws) and marked edited, wherever
 // the message is (showBody), and the edit is recorded in pendingOps. Its
 // chat.update goes now, or, when an edit of the message is in flight,
@@ -504,7 +515,7 @@ func reduceEditMessage(a *App, m EditMessageMsg) tea.Cmd {
 		copyText, _, onClipboard := a.giveTextBack(commandOrigin{teamID: m.TeamID, channelID: m.ChannelID, threadTS: m.ThreadTS, typed: m.Typed})
 		return tea.Batch(copyText, editFailedToast(errStillSending, onClipboard))
 	}
-	body := messages.EditedBody(m.NewText)
+	body := editedBody(m.NewText)
 	prior, shown := a.showBody(m.ChannelID, m.TS, body)
 	e, send := a.pendingOps.BeginEdit(pendingEdit{
 		channelID: m.ChannelID, ts: m.TS, wire: m.NewText, body: body,

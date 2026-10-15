@@ -247,7 +247,7 @@ type pendingEdit struct {
 	id               uint64 // from BeginEdit, increasing
 	channelID, ts    string
 	wire             string        // the text chat.update sends
-	body             messages.Body // what it shows: messages.EditedBody(wire)
+	body             messages.Body // what it shows: editedBody(wire)
 	panel            Panel         // where it was typed, to reopen it
 	threadTS, teamID string
 	typed            string // the composer text before mention translation
@@ -340,9 +340,15 @@ What an edit shows is a whole body, `messages.Body` (text, blocks and
 the edited mark). The pane draws a message's body from its rich_text
 block when there is one (`MessageTextSource`), and slk and the web client
 attach one to every message typed, so patching `Text` alone shows
-nothing. `messages.EditedBody(wire)` is what chat.update stores for an
-edit: `blockkit.FromTyped` runs `mrkdwn.Convert` as the client does and
-parses its rich_text block. An echo's body is Slack's, copied as it is.
+nothing. `messages.TypedBody(wire)` is what Slack stores for typed
+text, sent by chat.postMessage or chat.update: `blockkit.FromTyped`
+runs `mrkdwn.Convert` as the client does and parses its rich_text
+block. An edit shows it marked edited (`editedBody`). A send's
+placeholder is drawn from it (`pendingInsert.body`, `localRow`), and
+the HTTP result, which cmd/slk builds from the mrkdwn alone, settles
+with its blocks (`sentItem`), so a sent message looks the same from
+Enter through its echo and later loads. An echo's body is Slack's,
+copied as it is.
 Every body change goes through `showBody`: the panes, a held echo, and
 the rows a pending delete holds.
 
@@ -525,5 +531,4 @@ are out of scope.
 - Presence rollback.
 - A deleted reply does not lower its parent's reply count, optimistically
   or on the echo.
-- The send placeholder (`localRow`) still shows `Text` only; the sent
-  message from the result has no blocks either, so they render alike.
+

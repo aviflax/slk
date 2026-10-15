@@ -169,9 +169,9 @@ func TestEditsAndDeletesEndOnSlacksState(t *testing.T) {
 					// stale arriving after the result, with the newer
 					// echo lost, is indistinguishable from a newer
 					// change by another client.
-					slack.change(ts, messages.EditedBody(text), !slack.queued(ts))
+					slack.change(ts, editedBody(text), !slack.queued(ts))
 				case outcome == "timeout":
-					slack.change(ts, messages.EditedBody(text), false)
+					slack.change(ts, editedBody(text), false)
 					res.Err = errors.New("timeout")
 				default:
 					res.Err = errors.New("boom")
@@ -213,7 +213,7 @@ func TestEditsAndDeletesEndOnSlacksState(t *testing.T) {
 				ev := slack.events[0].msg
 				slack.events = slack.events[1:]
 				if nm, ok := ev.(NewMessageMsg); ok {
-					if res, pending := inFlight[nm.Message.TS]; pending && nm.Message.Text == messages.EditedBody(wire[res.EditID]).Text {
+					if res, pending := inFlight[nm.Message.TS]; pending && nm.Message.Text == editedBody(wire[res.EditID]).Text {
 						echoed[nm.Message.TS] = true
 					}
 				}
@@ -224,7 +224,7 @@ func TestEditsAndDeletesEndOnSlacksState(t *testing.T) {
 					return
 				}
 				words++
-				slack.change(ts, messages.EditedBody(fmt.Sprintf("o%d", words)), false)
+				slack.change(ts, editedBody(fmt.Sprintf("o%d", words)), false)
 			case "delete":
 				ts := rapid.SampledFrom([]string{"1.000000", "6.000000"}).Draw(rt, "deleteTS")
 				if _, pending := deleteRes[ts]; pending || !shown(ts) {

@@ -70,6 +70,11 @@ type pendingInsert struct {
 	channelID string
 	threadTS  string // the parent's TS for a reply, "" for a top-level send
 	broadcast bool   // a reply also sent to the channel
+	// body is what the message is drawn from until Slack's own copy
+	// arrives: messages.TypedBody of the text sent. The placeholder
+	// shows it, and the HTTP result, which carries no blocks, settles
+	// with it.
+	body messages.Body
 	// postTeam is the workspace the send posts to: the active one at
 	// Enter. A Slack Connect channel has one ID in every workspace
 	// sharing it, so the conversation is keyed on it too.
@@ -97,7 +102,7 @@ type pendingEdit struct {
 	channelID string
 	ts        string
 	wire      string        // the text to send: mentions in wire form
-	body      messages.Body // the new body as shown (messages.EditedBody)
+	body      messages.Body // the new body as shown (editedBody)
 	// panel, threadTS, teamID and typed are where the edit was typed
 	// (threadTS is the open thread for a PanelThread edit) and the text
 	// as typed, so a failed edit can be reopened there or given back.

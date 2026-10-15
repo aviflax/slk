@@ -2,6 +2,7 @@ package ui
 
 import (
 	"fmt"
+	"reflect"
 	"slices"
 	"strings"
 	"testing"
@@ -595,4 +596,43 @@ func TestPendingSend_ReleaseSkipsAnotherWorkspace(t *testing.T) {
 	a.messagepane.SetMessages(nil)
 	a.Update(MessageSendFailedMsg{ChannelID: "C1", LocalTS: local, Reason: "boom"})
 	wantRows(t, "T2's C1", a.messagepane.Messages())
+}
+
+// A sent message is drawn from the body Slack stores for what was typed
+// (messages.TypedBody: the mrkdwn and its rich_text block), from the
+// placeholder through the settled HTTP result, which carries no blocks.
+// The echo and every later load carry the same blocks, so the message
+// never changes appearance on the way.
+func TestPendingSend_PlaceholderAndResultDrawTheTypedBody(t *testing.T) {
+	const text = "**bold** and `code`\nsecond line"
+	want := messages.TypedBody(text)
+	if len(want.Blocks) == 0 {
+		t.Fatal("TypedBody gave no blocks; the test needs a rich_text block")
+	}
+	check := func(what string, got messages.MessageItem) {
+		t.Helper()
+		if got.Text != want.Text || !reflect.DeepEqual(got.Blocks, want.Blocks) || got.IsEdited {
+			t.Errorf("%s = text %q blocks %+v edited %v, want the typed body unedited", what, got.Text, got.Blocks, got.IsEdited)
+		}
+	}
+	t.Run("channel", func(t *testing.T) {
+		a := pendingApp(t)
+		local := sendTop(t, a, text)
+		check("placeholder", a.messagepane.Messages()[0])
+		a.Update(MessageSentMsg{ChannelID: "C1", LocalTS: local, Message: messages.MessageItem{TS: "10.000001", UserID: "USELF", Text: want.Text}})
+		check("settled", a.messagepane.Messages()[0])
+	})
+	t.Run("broadcast reply", func(t *testing.T) {
+		a := pendingApp(t)
+		a.messagepane.SetMessages([]messages.MessageItem{{TS: "5.000000", Text: "parent"}})
+		openThread(a, "5.000000")
+		a.Update(SendThreadReplyMsg{ChannelID: "C1", ThreadTS: "5.000000", Text: text, Broadcast: true})
+		local := a.threadPanel.Replies()[0].TS
+		check("thread placeholder", a.threadPanel.Replies()[0])
+		check("channel placeholder", a.messagepane.Messages()[1])
+		a.Update(ThreadReplySentMsg{ChannelID: "C1", ThreadTS: "5.000000", LocalTS: local, Broadcast: true,
+			Message: messages.MessageItem{TS: "10.000001", ThreadTS: "5.000000", UserID: "USELF", Text: want.Text, Subtype: "thread_broadcast"}})
+		check("thread settled", a.threadPanel.Replies()[0])
+		check("channel settled", a.messagepane.Messages()[1])
+	})
 }

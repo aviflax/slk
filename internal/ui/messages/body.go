@@ -28,12 +28,13 @@ func (b Body) Apply(msg *MessageItem) {
 	msg.Text, msg.Blocks, msg.IsEdited = b.Text, slices.Clone(b.Blocks), b.Edited
 }
 
-// EditedBody is what Slack stores when the user edits a message to
-// typed (the text with mentions already turned into wire tokens), as
-// chat.update sends it: the mrkdwn and rich_text block of
-// blockkit.FromTyped, marked edited. With no block the message keeps
-// no blocks, so its Text is drawn.
-func EditedBody(typed string) Body {
+// TypedBody is what Slack stores for text the user typed (with mentions
+// already turned into wire tokens), as chat.postMessage and chat.update
+// both send it: the mrkdwn and rich_text block of blockkit.FromTyped.
+// With no block the message has no blocks, so its Text is drawn. The
+// send placeholder and the sent message are drawn from it, so they
+// look as the echo and later loads will; an edit marks it Edited.
+func TypedBody(typed string) Body {
 	text, blocks := blockkit.FromTyped(typed)
-	return Body{Text: text, Blocks: blocks, Edited: true}
+	return Body{Text: text, Blocks: blocks}
 }

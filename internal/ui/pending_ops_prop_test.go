@@ -2,6 +2,7 @@ package ui
 
 import (
 	"fmt"
+	"reflect"
 	"slices"
 	"testing"
 
@@ -98,7 +99,7 @@ func TestHoldAndReleaseShowsEachMessageOnce(t *testing.T) {
 					s.posts = rapid.Bool().Draw(t, "posted anyway")
 				}
 				ins, release, ok := p.EndInsert(s.ins.localTS, sentTS)
-				if !ok || ins != s.ins {
+				if !ok || !reflect.DeepEqual(ins, s.ins) {
 					t.Fatalf("EndInsert(%s) = %+v %v", s.ins.localTS, ins, ok)
 				}
 				if s.ok {

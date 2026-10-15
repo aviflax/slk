@@ -57,7 +57,7 @@ func editAppLog(t *testing.T, err error) (*App, *[]string) {
 // everything typed. The pane draws the body from that block.
 func typedRow(ts, text, threadTS string) messages.MessageItem {
 	row := messages.MessageItem{TS: ts, UserID: "USELF", ThreadTS: threadTS}
-	body := messages.EditedBody(text)
+	body := editedBody(text)
 	body.Edited = false
 	body.Apply(&row)
 	return row
