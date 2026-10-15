@@ -3,8 +3,8 @@ package main
 import (
 	"fmt"
 	"sync"
+	"sync/atomic"
 	"testing"
-	"time"
 
 	"github.com/gammons/slk/internal/config"
 )
@@ -26,6 +26,7 @@ func TestWorkspaceConfigStore_ConcurrentSaveAndSnapshot(t *testing.T) {
 	}
 
 	var writer, readers sync.WaitGroup
+	var writes atomic.Int64
 	stop := make(chan struct{})
 
 	writer.Add(1)
@@ -38,6 +39,7 @@ func TestWorkspaceConfigStore_ConcurrentSaveAndSnapshot(t *testing.T) {
 			default:
 			}
 			s.SaveTheme("T0", "toggled")
+			writes.Add(1)
 		}
 	}()
 
@@ -46,7 +48,13 @@ func TestWorkspaceConfigStore_ConcurrentSaveAndSnapshot(t *testing.T) {
 		readers.Add(1)
 		go func(id string) {
 			defer readers.Done()
-			for j := 0; j < 50; j++ {
+			// The race detector only reports accesses that nothing
+			// orders, so a reader must still be reading while the
+			// writer writes. Rather than sleep and hope, each reader
+			// keeps reading until the writer has completed another
+			// save since the reader began.
+			seen := writes.Load()
+			for j := 0; j < 50 || writes.Load() == seen; j++ {
 				snap := s.Snapshot()
 				if _, ok := snap.Workspaces[id]; !ok {
 					t.Errorf("snapshot missing %s", id)
@@ -56,7 +64,6 @@ func TestWorkspaceConfigStore_ConcurrentSaveAndSnapshot(t *testing.T) {
 	}
 
 	readers.Wait()
-	time.Sleep(20 * time.Millisecond)
 	close(stop)
 	writer.Wait()
 }
