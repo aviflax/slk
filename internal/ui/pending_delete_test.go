@@ -3,12 +3,14 @@ package ui
 import (
 	"errors"
 	"testing"
+	"time"
 
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/gammons/slk/internal/core"
 	"github.com/gammons/slk/internal/ids"
 	"github.com/gammons/slk/internal/ui/messages"
+	"github.com/gammons/slk/internal/ui/statusbar"
 )
 
 // deleteApp is a typedApp in normal mode on C1 with the user's own
@@ -267,4 +269,65 @@ func TestPendingDelete_FailureLeavesAMovedCursor(t *testing.T) {
 			t.Errorf("thread selection = %q, want it left on 8.000000", got)
 		}
 	})
+}
+
+// A failed delete puts back the message as Slack has it now: an edit
+// of it that settled while the delete was pending, failed or not, and
+// another client's edit, are what comes back.
+func TestPendingDelete_FailureRestoresTheCurrentBody(t *testing.T) {
+	deleteFails := func(a *App) {
+		a.SetMessageService(core.NewMessageService(core.MessageServiceFuncs{
+			Edit: a.messageSvc.Edit,
+			Delete: func(ch ids.ChannelID, ts ids.MessageTS) core.Msg {
+				return MessageDeletedMsg{ChannelID: string(ch), TS: string(ts), Err: errors.New("boom")}
+			},
+		}))
+	}
+	t.Run("edit fails, then the delete", func(t *testing.T) {
+		a := editApp(t, errors.New("boom"))
+		deleteFails(a)
+		edited := editFrom(t, a, PanelMessages, "1.000000", "fresh words")
+		del := deleteFrom(t, a, PanelMessages, "1.000000")
+		a.Update(edited)
+		a.Update(del)
+		ch, _ := drawn(a)
+		wantDrawn(t, "channel", ch, "one", "fresh words")
+	})
+	t.Run("edit succeeds, then the delete fails", func(t *testing.T) {
+		a := editApp(t, nil)
+		deleteFails(a)
+		edited := editFrom(t, a, PanelMessages, "1.000000", "fresh words")
+		del := deleteFrom(t, a, PanelMessages, "1.000000")
+		a.Update(edited)
+		a.Update(del)
+		ch, _ := drawn(a)
+		wantDrawn(t, "channel", ch, "fresh words", "▌one")
+	})
+	t.Run("another client's edit", func(t *testing.T) {
+		a := editApp(t, nil)
+		deleteFails(a)
+		del := deleteFrom(t, a, PanelMessages, "1.000000")
+		changed := typedRow("1.000000", "slack blocks", "")
+		changed.IsEdited = true
+		a.Update(NewMessageMsg{ChannelID: "C1", Message: changed})
+		a.Update(del)
+		ch, _ := drawn(a)
+		wantDrawn(t, "channel", ch, "slack blocks", "▌one")
+	})
+}
+
+// A delete Slack answers with message_not_found leaves the message
+// gone and reports nothing: it is gone, which is what was asked.
+func TestPendingDelete_NotFoundIsDone(t *testing.T) {
+	a := deleteApp(t, errors.New("message_not_found"))
+	res := deleteFrom(t, a, PanelMessages, "2.000000")
+	res.NotFound = true
+	_, cmd := a.Update(res)
+	for _, m := range drainMsgs(cmd, 50*time.Millisecond) {
+		if f, ok := m.(statusbar.DeleteFailedMsg); ok {
+			t.Errorf("reported %+v", f)
+		}
+	}
+	wantRows(t, "channel", a.messagepane.Messages(),
+		"1.000000=one", "3.000000=three", "5.000000=parent", "7.000000=bcast")
 }

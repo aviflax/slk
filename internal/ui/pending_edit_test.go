@@ -4,12 +4,16 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"time"
+
+	tea "charm.land/bubbletea/v2"
 
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/gammons/slk/internal/core"
 	"github.com/gammons/slk/internal/ids"
 	"github.com/gammons/slk/internal/ui/messages"
+	"github.com/gammons/slk/internal/ui/statusbar"
 )
 
 // editApp is a typedApp in normal mode on C1 whose own messages are
@@ -19,6 +23,14 @@ import (
 // with the text sent, or with err.
 func editApp(t *testing.T, err error) *App {
 	t.Helper()
+	a, _ := editAppLog(t, err)
+	return a
+}
+
+// editAppLog is editApp, with the log of the texts its edit service
+// was asked to send, in order.
+func editAppLog(t *testing.T, err error) (*App, *[]string) {
+	t.Helper()
 	a := typedApp(t)
 	a.mode = ModeNormal
 	parent := typedRow("5.000000", "parent", "")
@@ -27,15 +39,17 @@ func editApp(t *testing.T, err error) *App {
 	a.threadPanel.SetThread(parent, []messages.MessageItem{
 		typedRow("6.000000", "reply", "5.000000"),
 	}, "C1", "5.000000")
+	var sent []string
 	a.SetMessageService(core.NewMessageService(core.MessageServiceFuncs{
 		Edit: func(ch ids.ChannelID, ts ids.MessageTS, text string) core.Msg {
+			sent = append(sent, text)
 			if err != nil {
 				return MessageEditedMsg{ChannelID: string(ch), TS: string(ts), Err: err}
 			}
 			return MessageEditedMsg{ChannelID: string(ch), TS: string(ts), Text: text}
 		},
 	}))
-	return a
+	return a, &sent
 }
 
 // typedRow is one of the user's messages as Slack returns it: the
@@ -63,10 +77,11 @@ func wantDrawn(t *testing.T, what, view, want, gone string) {
 	}
 }
 
-// editFrom edits message ts from panel's composer the way the user
-// does (select, e, type, Enter), applies the edit and returns the
-// service's result, not yet delivered.
-func editFrom(t *testing.T, a *App, panel Panel, ts, typed string) MessageEditedMsg {
+// typeEdit edits message ts from panel's composer the way the user
+// does (select, e, type, Enter), applies the edit and returns its
+// command: the chat.update, or nil when the edit waits behind one in
+// flight.
+func typeEdit(t *testing.T, a *App, panel Panel, ts, typed string) tea.Cmd {
 	t.Helper()
 	a.focusedPanel = panel
 	if panel == PanelThread {
@@ -85,7 +100,37 @@ func editFrom(t *testing.T, a *App, panel Panel, ts, typed string) MessageEdited
 	c.SetValue(typed)
 	edit := deliveredMsgs[EditMessageMsg](t, pressEnter(a))[0]
 	_, cmd := a.Update(edit)
-	return deliveredMsgs[MessageEditedMsg](t, cmd)[0]
+	return cmd
+}
+
+// editFrom is typeEdit for an edit sent at once, and returns the
+// service's result, not yet delivered.
+func editFrom(t *testing.T, a *App, panel Panel, ts, typed string) MessageEditedMsg {
+	t.Helper()
+	return deliveredMsgs[MessageEditedMsg](t, typeEdit(t, a, panel, ts, typed))[0]
+}
+
+// queueEdit is typeEdit for an edit that must wait behind the one in
+// flight.
+func queueEdit(t *testing.T, a *App, panel Panel, ts, typed string) {
+	t.Helper()
+	if cmd := typeEdit(t, a, panel, ts, typed); cmd != nil {
+		t.Fatalf("edit %q was sent while another was in flight", typed)
+	}
+}
+
+// settleEdit delivers res and returns the result of the edit it sends
+// next, the one that waited behind it.
+func settleEdit(t *testing.T, a *App, res MessageEditedMsg) MessageEditedMsg {
+	t.Helper()
+	_, cmd := a.Update(res)
+	for _, m := range drainMsgs(cmd, 200*time.Millisecond) {
+		if next, ok := m.(MessageEditedMsg); ok {
+			return next
+		}
+	}
+	t.Fatalf("result of %d sent no waiting edit", res.EditID)
+	return MessageEditedMsg{}
 }
 
 // textOf is the text of the first row with ts, and whether it shows as
@@ -219,15 +264,30 @@ func TestPendingEdit_FailureAfterMovingOnGivesDraft(t *testing.T) {
 		}
 	})
 	t.Run("message gone", func(t *testing.T) {
-		a := editApp(t, errors.New("boom"))
-		res := editFrom(t, a, PanelMessages, "1.000000", "new")
-		a.Update(WSMessageDeletedMsg{ChannelID: "C1", TS: "1.000000"})
-		a.Update(res)
-		if a.editing.IsActive() {
-			t.Fatal("edit reopened on a deleted message")
-		}
-		if got := a.compose.Value(); got != "new" {
-			t.Errorf("composer = %q, want the text as a draft", got)
+		// A draft would post the text as a new message: it goes to
+		// the clipboard.
+		for _, how := range []string{"deleted elsewhere", "delete pending", "not found"} {
+			t.Run(how, func(t *testing.T) {
+				a := editApp(t, errors.New("boom"))
+				copied := clipboardLog(a)
+				res := editFrom(t, a, PanelMessages, "1.000000", "new")
+				switch how {
+				case "deleted elsewhere":
+					a.Update(WSMessageDeletedMsg{ChannelID: "C1", TS: "1.000000"})
+				case "delete pending":
+					a.Update(DeleteMessageMsg{ChannelID: "C1", TS: "1.000000"})
+				case "not found":
+					res.NotFound = true
+				}
+				_, cmd := a.Update(res)
+				if toast := shownToast(t, a, cmd); !strings.Contains(toast, "clipboard") {
+					t.Errorf("toast = %q, want it to say the text is on the clipboard", toast)
+				}
+				if a.editing.IsActive() || a.compose.Value() != "" || len(*copied) != 1 || (*copied)[0] != "new" {
+					t.Errorf("editing=%v composer=%q clipboard=%q, want the text on the clipboard only",
+						a.editing.IsActive(), a.compose.Value(), *copied)
+				}
+			})
 		}
 	})
 }
@@ -254,13 +314,17 @@ func TestPendingEdit_EchoIsHarmless(t *testing.T) {
 		a.Update(editEcho("new"))
 		wantText(t, "channel", a.messagepane.Messages(), "1.000000", "new", true)
 	})
-	t.Run("before a failure", func(t *testing.T) {
+	t.Run("another client's, before a failure", func(t *testing.T) {
+		// The echo is Slack's state; the failed edit never replaced it.
 		a := editApp(t, errors.New("boom"))
 		res := editFrom(t, a, PanelMessages, "1.000000", "new")
 		a.Update(editEcho("from another client"))
 		wantText(t, "channel", a.messagepane.Messages(), "1.000000", "new", true)
 		a.Update(res)
-		wantText(t, "channel", a.messagepane.Messages(), "1.000000", "one", false)
+		wantText(t, "channel", a.messagepane.Messages(), "1.000000", "from another client", true)
+		if !a.editing.Matches("C1", "1.000000") {
+			t.Error("failed edit not reopened")
+		}
 	})
 	t.Run("no edit pending", func(t *testing.T) {
 		a := editApp(t, nil)
@@ -269,37 +333,49 @@ func TestPendingEdit_EchoIsHarmless(t *testing.T) {
 	})
 }
 
-// Two quick edits of one message: the screen shows the newer one until
-// its result, whatever order the older edit's echo and result arrive in.
-func TestPendingEdit_TwoQuickEdits(t *testing.T) {
+// Quick edits of one message: one chat.update is in flight at a time,
+// a newer edit replaces the one waiting, and the screen shows the
+// newest edit throughout, whatever order the older edit's echo and
+// result arrive in.
+func TestPendingEdit_QuickEdits(t *testing.T) {
 	older := func(m NewMessageMsg) NewMessageMsg { m.Message.IsEdited = true; return m }
 	t.Run("both succeed", func(t *testing.T) {
-		a := editApp(t, nil)
+		a, sent := editAppLog(t, nil)
 		first := editFrom(t, a, PanelMessages, "1.000000", "first")
-		second := editFrom(t, a, PanelMessages, "1.000000", "second")
+		queueEdit(t, a, PanelMessages, "1.000000", "second")
 		wantText(t, "after both edits", a.messagepane.Messages(), "1.000000", "second", true)
 		a.Update(older(echo("C1", "1.000000", "", "first")))
 		wantText(t, "after the first's echo", a.messagepane.Messages(), "1.000000", "second", true)
-		a.Update(first)
+		second := settleEdit(t, a, first)
 		a.Update(older(echo("C1", "1.000000", "", "first")))
 		wantText(t, "after the first's result and a late echo", a.messagepane.Messages(), "1.000000", "second", true)
 		a.Update(second)
 		wantText(t, "after the second's result", a.messagepane.Messages(), "1.000000", "second", true)
+		if strings.Join(*sent, ",") != "first,second" {
+			t.Errorf("sent %q, want first then second", *sent)
+		}
 	})
-	t.Run("results out of order", func(t *testing.T) {
-		a := editApp(t, nil)
+	t.Run("the newest waiting edit wins", func(t *testing.T) {
+		a, sent := editAppLog(t, nil)
 		first := editFrom(t, a, PanelMessages, "1.000000", "first")
-		second := editFrom(t, a, PanelMessages, "1.000000", "second")
-		a.Update(second)
-		a.Update(first)
-		wantText(t, "channel", a.messagepane.Messages(), "1.000000", "second", true)
+		queueEdit(t, a, PanelMessages, "1.000000", "second")
+		queueEdit(t, a, PanelMessages, "1.000000", "third")
+		wantText(t, "while waiting", a.messagepane.Messages(), "1.000000", "third", true)
+		a.Update(settleEdit(t, a, first))
+		wantText(t, "settled", a.messagepane.Messages(), "1.000000", "third", true)
+		if strings.Join(*sent, ",") != "first,third" {
+			t.Errorf("sent %q, want first then third", *sent)
+		}
+		if a.pendingOps.EditPending("C1", "1.000000") {
+			t.Error("edit still pending")
+		}
 	})
 	t.Run("newer one fails", func(t *testing.T) {
 		a := editApp(t, nil)
 		first := editFrom(t, a, PanelMessages, "1.000000", "first")
-		second := editFrom(t, a, PanelMessages, "1.000000", "second")
+		queueEdit(t, a, PanelMessages, "1.000000", "second")
+		second := settleEdit(t, a, first)
 		second.Err, second.Text = errors.New("boom"), ""
-		a.Update(first)
 		a.Update(second)
 		wantText(t, "channel", a.messagepane.Messages(), "1.000000", "first", true)
 		if got := a.compose.Value(); got != "second" || !a.editing.IsActive() {
@@ -309,9 +385,9 @@ func TestPendingEdit_TwoQuickEdits(t *testing.T) {
 	t.Run("older one fails", func(t *testing.T) {
 		a := editApp(t, nil)
 		first := editFrom(t, a, PanelMessages, "1.000000", "first")
-		second := editFrom(t, a, PanelMessages, "1.000000", "second")
+		queueEdit(t, a, PanelMessages, "1.000000", "second")
 		first.Err, first.Text = errors.New("boom"), ""
-		a.Update(first)
+		second := settleEdit(t, a, first)
 		wantText(t, "channel", a.messagepane.Messages(), "1.000000", "second", true)
 		if a.editing.IsActive() || a.compose.Value() != "" {
 			t.Errorf("superseded edit given back: editing=%v composer=%q", a.editing.IsActive(), a.compose.Value())
@@ -319,6 +395,37 @@ func TestPendingEdit_TwoQuickEdits(t *testing.T) {
 		a.Update(second)
 		wantText(t, "channel", a.messagepane.Messages(), "1.000000", "second", true)
 	})
+	t.Run("another client's edit lands after ours", func(t *testing.T) {
+		a := editApp(t, nil)
+		first := editFrom(t, a, PanelMessages, "1.000000", "first")
+		a.Update(older(echo("C1", "1.000000", "", "first")))
+		a.Update(older(echo("C1", "1.000000", "", "theirs")))
+		a.Update(first)
+		wantText(t, "channel", a.messagepane.Messages(), "1.000000", "theirs", true)
+	})
+}
+
+// An edit whose chat.update failed after Slack stored it (a timeout) is
+// not a failure: its echo carried the text, so the message keeps it,
+// and the editor does not reopen to invite the same edit again.
+func TestPendingEdit_TimeoutAfterSlackStoredIt(t *testing.T) {
+	a := editApp(t, errors.New("timeout"))
+	copied := clipboardLog(a)
+	res := editFrom(t, a, PanelMessages, "1.000000", "fresh words")
+	changed := typedRow("1.000000", "fresh words", "")
+	changed.IsEdited = true
+	a.Update(NewMessageMsg{ChannelID: "C1", Message: changed})
+	_, cmd := a.Update(res)
+	for _, m := range drainMsgs(cmd, 50*time.Millisecond) {
+		if f, ok := m.(statusbar.EditFailedMsg); ok {
+			t.Errorf("reported %+v for an edit Slack stored", f)
+		}
+	}
+	ch, _ := drawn(a)
+	wantDrawn(t, "channel", ch, "fresh words", "one")
+	if a.editing.IsActive() || a.compose.Value() != "" || len(*copied) != 0 {
+		t.Errorf("editing=%v composer=%q clipboard=%q, want the text not given back", a.editing.IsActive(), a.compose.Value(), *copied)
+	}
 }
 
 // With no active workspace the service answers nil; the edit fails

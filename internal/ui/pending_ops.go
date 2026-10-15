@@ -30,20 +30,27 @@
 // post), its held echo is released like any other and the message
 // shows once, from the echo.
 //
-// An edit (BeginEdit) shows its text at once and is settled by its
-// chat.update result (EndEdit). While any edit of a message is
-// pending, the message shows the newest edit's text and the
-// message_changed echoes of it are ignored: an echo cannot say which
-// edit it carries, and an older edit's echo must not replace a newer
-// edit's text. Success shows the text Slack stored; a failure puts
-// back what was there, and gives the typed text back when no newer
-// edit replaced it.
+// An edit (BeginEdit) shows its body at once. One chat.update per
+// message is in flight at a time: an edit typed while one is out waits,
+// replacing any older waiting edit (the newest text wins), and is sent
+// when the one in flight ends (EndEdit). Slack then applies the edits
+// in the order the user made them. While an edit is in flight, a
+// message_changed echo of the message is recorded (EditEcho), not
+// shown: it cannot say which edit it carries, and an older state must
+// not flicker over a newer edit. Once nothing is in flight or waiting,
+// the message shows Slack's state as best known: the newest echo if one
+// proved Slack stored the last edit, else that edit's body if it
+// succeeded, else the newest echo, else what it showed before. An echo
+// carrying the in-flight edit's text proves Slack stored it, so a
+// failed HTTP call after it (a timeout) is not a failure.
 //
 // A delete (BeginDelete) takes the message out of every pane at once
-// and keeps the rows to put back at their old index if chat.delete
-// fails (EndDelete). Its message_deleted echo is harmless (removing a
-// missing row is a no-op) and proves the delete went through, so a
-// failure after it restores nothing.
+// and keeps the rows to put back if chat.delete fails (EndDelete). Its
+// message_deleted echo is harmless (removing a missing row is a no-op)
+// and proves the delete went through, so a failure after it restores
+// nothing. Whatever the message shows meanwhile (an edit settling, an
+// echo) is written into the kept rows too (PatchRemoved), so a restore
+// puts back the message as it is now.
 package ui
 
 import (
@@ -79,12 +86,13 @@ func (ins pendingInsert) origin() commandOrigin {
 	return commandOrigin{teamID: ins.teamID, channelID: ins.channelID, threadTS: ins.threadTS, typed: ins.typed}
 }
 
-// pendingEdit is one optimistic edit waiting for its chat.update
-// result.
+// pendingEdit is one optimistic edit: sent and awaiting its
+// chat.update result, or waiting behind the one that is.
 type pendingEdit struct {
 	id        uint64 // from BeginEdit; later edits have larger ids
 	channelID string
 	ts        string
+	wire      string        // the text to send: mentions in wire form
 	body      messages.Body // the new body as shown (messages.EditedBody)
 	// panel, threadTS, teamID and typed are where the edit was typed
 	// (threadTS is the open thread for a PanelThread edit) and the text
@@ -118,25 +126,47 @@ func conversationOf(channelID string, msg messages.MessageItem) conversationKey 
 // editKey names a message by channel and TS.
 type editKey struct{ channelID, ts string }
 
-// editedMessage is the edit state of one message with edits pending.
-// The message shows the text of the newest edit that is pending or has
-// succeeded, or base when there is none.
-type editedMessage struct {
-	// base is the body the message showed before its first pending
-	// edit, then that of the newest edit to succeed (baseID). known
-	// is false when no pane showed the message at the first edit, so
-	// there is nothing to put back.
-	base    messages.Body
-	baseID  uint64
-	known   bool
-	pending []pendingEdit // oldest first
+// messageEdits is the edit state of one message while an edit of it is
+// in flight.
+type messageEdits struct {
+	// server is Slack's state of the message as best known: the body
+	// a pane showed before the first edit, then that of each edit Slack
+	// accepted and of each message_changed echo. known is false while
+	// nothing is known (no pane showed the message), so there is
+	// nothing to put back.
+	server messages.Body
+	known  bool
+	// inFlight is the edit whose chat.update is awaiting its result.
+	inFlight pendingEdit
+	// echoed is set when an echo carrying inFlight's text arrived after
+	// it was sent: Slack stored it, whatever the HTTP result says, and
+	// server holds Slack's own form of it (or a newer state).
+	echoed bool
+	// queued is the newest edit typed while inFlight was out, sent when
+	// it ends; nil for none.
+	queued *pendingEdit
+	// gone is set once the message is known to be deleted.
+	gone bool
 }
 
-// editShown is the body a message should show once an edit settles.
-// known is false when nothing is known to show (see editedMessage).
-type editShown struct {
-	body  messages.Body
-	known bool
+// editSettled is what EndEdit decided.
+type editSettled struct {
+	// show is what the message shows now; showKnown is false when
+	// nothing is known to show (see messageEdits.server).
+	show      messages.Body
+	showKnown bool
+	// next is the waiting edit to send now, if any.
+	next *pendingEdit
+	// failed is an edit whose text Slack does not have and that no
+	// newer edit replaced: the user must hear of it and get the text
+	// back. With the message gone, a waiting edit that can no longer
+	// be sent is the one reported.
+	failed *pendingEdit
+	// superseded is set when the edit that ended failed but a newer
+	// one is on its way: a toast, nothing to give back.
+	superseded bool
+	// gone is set when the message is known to be deleted.
+	gone bool
 }
 
 // pendingDelete is one optimistic delete waiting for its chat.delete
@@ -160,8 +190,8 @@ type pendingOps struct {
 	// a send was pending there, in arrival order. See HoldEcho.
 	held map[conversationKey][]NewMessageMsg
 
-	// edits holds every message with an edit awaiting its result.
-	edits  map[editKey]*editedMessage
+	// edits holds every message with an edit in flight.
+	edits  map[editKey]*messageEdits
 	editID uint64
 
 	// deletes holds every message with a delete awaiting its result.
@@ -180,7 +210,7 @@ type pendingOps struct {
 func newPendingOps() *pendingOps {
 	return &pendingOps{
 		sentTSes: make(map[string]time.Time),
-		edits:    make(map[editKey]*editedMessage),
+		edits:    make(map[editKey]*messageEdits),
 		deletes:  make(map[editKey]*pendingDelete),
 		held:     make(map[conversationKey][]NewMessageMsg),
 	}
@@ -270,60 +300,103 @@ func (p *pendingOps) DropHeld(channelID, ts string) {
 }
 
 // BeginEdit records e under a fresh id and returns it with the id set.
-// prior is the message as a pane showed it before the edit (priorOK
-// false when none showed it); it is what a failure puts back unless an
-// earlier edit of the message is still pending, whose own prior holds.
-func (p *pendingOps) BeginEdit(e pendingEdit, prior messages.MessageItem, priorOK bool) pendingEdit {
+// send is true when its chat.update should go now: no edit of the
+// message is in flight. Otherwise e waits in place of any older waiting
+// edit, which is never sent (EndEdit sends e). prior is the message as
+// a pane showed it before the edit (priorOK false when none showed it);
+// it is Slack's state only while nothing else is known.
+func (p *pendingOps) BeginEdit(e pendingEdit, prior messages.MessageItem, priorOK bool) (_ pendingEdit, send bool) {
 	p.editID++
 	e.id = p.editID
 	k := editKey{e.channelID, e.ts}
 	m := p.edits[k]
 	if m == nil {
-		m = &editedMessage{base: messages.BodyOf(prior), known: priorOK}
-		p.edits[k] = m
+		p.edits[k] = &messageEdits{server: messages.BodyOf(prior), known: priorOK, inFlight: e}
+		return e, true
 	}
-	m.pending = append(m.pending, e)
-	return e
+	if !m.known && priorOK {
+		// A pane loaded the message since the first edit: what it
+		// shows came from Slack.
+		m.server, m.known = messages.BodyOf(prior), true
+	}
+	m.queued = &e
+	return e, false
 }
 
-// EndEdit settles the edit id; a success stores the edit's body, what
-// chat.update sent. It returns the edit, what its message should show now, and whether
-// the edit is the newest of that message (no later edit is pending or
-// has succeeded), which a failure needs to know before giving the text
-// back. found is false for an unknown id.
-func (p *pendingOps) EndEdit(id uint64, ok bool) (e pendingEdit, shown editShown, newest, found bool) {
+// EditEcho records body, a message_changed echo of channelID/ts, and
+// reports whether an edit of it is in flight. When it is, the caller
+// shows nothing: EndEdit decides what to show.
+func (p *pendingOps) EditEcho(channelID, ts string, body messages.Body) bool {
+	m := p.edits[editKey{channelID, ts}]
+	if m == nil {
+		return false
+	}
+	m.server, m.known = body, true
+	if body.Text == m.inFlight.body.Text {
+		m.echoed = true
+	}
+	return true
+}
+
+// EndEdit settles the edit id, the one in flight for its message: ok
+// is whether chat.update succeeded. It reports what the message shows
+// now and what the caller must do (editSettled); found is false for an
+// id that is not in flight.
+//
+// A failure after an echo carried the edit's text is a success: Slack
+// stored it (the HTTP call failed after Slack accepted it). The test is
+// the text being equal, not merely an echo having arrived, because an
+// echo of another client's change would otherwise swallow a real
+// failure and lose the user's text. A false failure (Slack stored a
+// different form of the text) reopens an edit Slack has, which loses
+// nothing.
+func (p *pendingOps) EndEdit(id uint64, ok bool) (s editSettled, found bool) {
 	for k, m := range p.edits {
-		i := slices.IndexFunc(m.pending, func(x pendingEdit) bool { return x.id == id })
-		if i < 0 {
+		if m.inFlight.id != id {
 			continue
 		}
-		e = m.pending[i]
-		m.pending = slices.Delete(m.pending, i, i+1)
-		newest = m.baseID < id
-		for _, x := range m.pending {
-			if x.id > id {
-				newest = false
-			}
+		e := m.inFlight
+		switch {
+		case m.echoed:
+			// m.server is the echo, Slack's own form of e or newer.
+		case ok:
+			m.server, m.known = e.body, true
 		}
-		if ok && id > m.baseID {
-			m.base, m.baseID, m.known = e.body, id, true
+		failed := !ok && !m.echoed
+		s.gone = m.gone
+		if m.queued != nil && !m.gone {
+			s.next = m.queued
+			m.inFlight, m.queued, m.echoed = *m.queued, nil, false
+			s.show, s.showKnown = s.next.body, true
+			s.superseded = failed
+			return s, true
 		}
-		shown = editShown{body: m.base, known: m.known}
-		if n := len(m.pending); n > 0 && m.pending[n-1].id > m.baseID {
-			shown = editShown{body: m.pending[n-1].body, known: true}
+		switch {
+		case m.queued != nil:
+			// The message is gone: the waiting edit can never be sent.
+			s.failed = m.queued
+		case failed:
+			s.failed = &e
 		}
-		if len(m.pending) == 0 {
-			delete(p.edits, k)
-		}
-		return e, shown, newest, true
+		s.show, s.showKnown = m.server, m.known
+		delete(p.edits, k)
+		return s, true
 	}
-	return pendingEdit{}, editShown{}, false, false
+	return editSettled{}, false
 }
 
-// EditPending reports whether an edit of the message is awaiting its
-// result.
+// EditPending reports whether an edit of the message is in flight.
 func (p *pendingOps) EditPending(channelID, ts string) bool {
 	return p.edits[editKey{channelID, ts}] != nil
+}
+
+// EditGone records that channelID/ts was deleted, so an edit of it in
+// flight is not followed by the one waiting, and a failure gives its
+// text back without making it a draft (it would post a new message).
+func (p *pendingOps) EditGone(channelID, ts string) {
+	if m := p.edits[editKey{channelID, ts}]; m != nil {
+		m.gone = true
+	}
 }
 
 // BeginDelete records d. A second delete of the same message while the
@@ -348,6 +421,29 @@ func (p *pendingOps) EndDelete(channelID, ts string) (pendingDelete, bool) {
 	}
 	delete(p.deletes, k)
 	return *d, true
+}
+
+// DeletePending reports whether a delete of channelID/ts is awaiting
+// its result.
+func (p *pendingOps) DeletePending(channelID, ts string) bool {
+	return p.deletes[editKey{channelID, ts}] != nil
+}
+
+// PatchRemoved applies f to the rows a pending delete of channelID/ts
+// took out, so a failed delete puts back the message as it is now, and
+// returns the first as it was. ok is false when there is none.
+func (p *pendingOps) PatchRemoved(channelID, ts string, f func(*messages.MessageItem)) (prior messages.MessageItem, ok bool) {
+	d := p.deletes[editKey{channelID, ts}]
+	if d == nil {
+		return messages.MessageItem{}, false
+	}
+	for i := range d.removed {
+		if !ok {
+			prior, ok = d.removed[i].row.Item, true
+		}
+		f(&d.removed[i].row.Item)
+	}
+	return prior, ok
 }
 
 // DeleteEchoed marks the pending delete of channelID/ts, if any, as

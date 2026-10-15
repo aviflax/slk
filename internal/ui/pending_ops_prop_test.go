@@ -2,7 +2,6 @@ package ui
 
 import (
 	"fmt"
-	"reflect"
 	"slices"
 	"testing"
 
@@ -10,64 +9,6 @@ import (
 
 	"github.com/gammons/slk/internal/ui/messages"
 )
-
-// However edits of one message begin and settle, after each result the
-// message shows the newest edit that is pending or has succeeded (its
-// own text while pending, Slack's once it succeeded), or what it showed
-// before any of them; and a result is "newest" exactly when no later
-// edit is pending or has succeeded.
-func TestEditLedgerShowsNewestLiveEdit(t *testing.T) {
-	rapid.Check(t, func(t *rapid.T) {
-		p := newPendingOps()
-		prior := editShown{body: messages.Body{Text: "prior"}, known: true}
-		var pending, succeeded []uint64
-		live := func() uint64 { // the newest pending or succeeded id, 0 for none
-			return max(slices.Max(append([]uint64{0}, pending...)), slices.Max(append([]uint64{0}, succeeded...)))
-		}
-		for range rapid.IntRange(1, 30).Draw(t, "steps") {
-			if len(pending) == 0 || rapid.Bool().Draw(t, "begin") {
-				// Ids count up from 1, so the next is p.editID+1.
-				text := fmt.Sprintf("t%d", p.editID+1)
-				prow := messages.MessageItem{}
-				prior.body.Apply(&prow)
-				e := p.BeginEdit(pendingEdit{channelID: "C1", ts: "1.0", body: messages.Body{Text: text, Edited: true}},
-					prow, true)
-				if e.body.Text != text {
-					t.Fatalf("edit %d is %q, want %q", e.id, e.body.Text, text)
-				}
-				pending = append(pending, e.id)
-				continue
-			}
-			id := pending[rapid.IntRange(0, len(pending)-1).Draw(t, "end")]
-			ok := rapid.Bool().Draw(t, "ok")
-			pending = slices.DeleteFunc(pending, func(x uint64) bool { return x == id })
-			wantNewest := live() < id
-			if ok {
-				succeeded = append(succeeded, id)
-			}
-			want := prior
-			if n := live(); n != 0 {
-				want = editShown{body: messages.Body{Text: fmt.Sprintf("t%d", n), Edited: true}, known: true}
-			}
-			e, shown, newest, found := p.EndEdit(id, ok)
-			if !found || e.id != id {
-				t.Fatalf("EndEdit(%d) found=%v id=%d", id, found, e.id)
-			}
-			if !reflect.DeepEqual(shown, want) || newest != wantNewest {
-				t.Fatalf("EndEdit(%d ok=%v): shown %+v newest %v, want %+v newest %v (pending %v succeeded %v)",
-					id, ok, shown, newest, want, wantNewest, pending, succeeded)
-			}
-			if p.EditPending("C1", "1.0") != (len(pending) > 0) {
-				t.Fatalf("EditPending = %v with pending %v", !(len(pending) > 0), pending)
-			}
-			if len(pending) == 0 {
-				// The ledger forgets the message; the next edit starts
-				// from what it shows now.
-				prior, succeeded = shown, nil
-			}
-		}
-	})
-}
 
 // However sends in two conversations begin, echo and end (in any
 // order, a send's echo before or after its result, sends failing with

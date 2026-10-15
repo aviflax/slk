@@ -634,6 +634,9 @@ type MessageEditedMsg struct {
 	// set it; stampEditID does.
 	EditID uint64
 	Err    error
+	// NotFound is set with Err when Slack has no such message
+	// (message_not_found): it was deleted.
+	NotFound bool
 }
 
 // MessageDeletedMsg carries the result of the chat.delete API call.
@@ -641,6 +644,9 @@ type MessageDeletedMsg struct {
 	ChannelID string
 	TS        string
 	Err       error
+	// NotFound is set with Err when Slack has no such message
+	// (message_not_found): it is gone, which is what a delete wants.
+	NotFound bool
 }
 
 // OpenLinkMsg requests that a URL be opened. This is the single

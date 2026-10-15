@@ -21,18 +21,21 @@
 //	MessageSendFailedMsg     - send failed: roll back placeholder,
 //	                           give the typed text back + fire
 //	                           SendFailed toast.
-//	EditMessageMsg           - user edit: show the new text at
-//	                           once, record a pending edit,
-//	                           chat.update call.
-//	MessageEditedMsg         - edit result: show Slack's text, or
-//	                           on failure put back what was there,
+//	EditMessageMsg           - user edit: show the new body at
+//	                           once, record a pending edit, and
+//	                           send its chat.update unless one
+//	                           for the message is in flight.
+//	MessageEditedMsg         - edit result: show Slack's state as
+//	                           best known, send the edit waiting
+//	                           behind it, and on a real failure
 //	                           reopen the edit (or give its text
 //	                           back) + fire EditFailed toast.
 //	DeleteMessageMsg         - user delete: remove the message
 //	                           from every pane at once, record a
 //	                           pending delete, chat.delete call.
-//	MessageDeletedMsg        - delete result: on success apply it
-//	                           as the echo does; on failure put
+//	MessageDeletedMsg        - delete result: on success (or
+//	                           message_not_found) apply it as the
+//	                           echo does; on failure put
 //	                           the rows back + fire DeleteFailed
 //	                           toast, unless the echo already
 //	                           showed it deleted.
@@ -59,6 +62,8 @@
 package ui
 
 import (
+	"errors"
+
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/gammons/slk/internal/debuglog"
@@ -183,10 +188,11 @@ var reduceSend reducerFunc = func(a *App, msg tea.Msg) (tea.Cmd, bool) {
 
 	case MessageDeletedMsg:
 		d, ok := a.pendingOps.EndDelete(m.ChannelID, m.TS)
-		if m.Err == nil {
-			// Slack deleted it: do what its echo does, so the thread
-			// panel closes on a deleted parent even when the echo is
-			// slow. Repeating it after the echo changes nothing.
+		if m.Err == nil || m.NotFound {
+			// Slack deleted it (or it was already gone): do what its
+			// echo does, so the thread panel closes on a deleted parent
+			// even when the echo is slow. Repeating it after the echo
+			// changes nothing.
 			return a.applyMessageDeleted(m.ChannelID, m.TS), true
 		}
 		if ok && d.echoed {
@@ -248,20 +254,18 @@ func reduceNewMessage(a *App, m NewMessageMsg) tea.Cmd {
 		// since edits to messages we recently sent would otherwise
 		// be silently dropped (the TS is still in selfSentTSes).
 		//
-		// While one of the user's own edits of the message is
-		// pending, the echo is ignored: it cannot say which edit it
-		// carries, and the edit's result shows the text Slack stored.
-		if a.pendingOps.EditPending(m.ChannelID, m.Message.TS) {
-			debuglog.Cache("NewMessageMsg: channel=%s ts=%s decision=skipped_edit_echo_pending",
+		// The echo is Slack's stored state: its text, its blocks
+		// (which the body is drawn from) and the edited mark, as they
+		// are. While one of the user's own edits of the message is in
+		// flight it is only recorded (EditEcho): it cannot say which
+		// edit it carries, and the edit's result decides what shows.
+		body := messages.BodyOf(m.Message)
+		if a.pendingOps.EditEcho(m.ChannelID, m.Message.TS, body) {
+			debuglog.Cache("NewMessageMsg: channel=%s ts=%s decision=recorded_edit_echo_pending",
 				m.ChannelID, m.Message.TS)
 			return nil
 		}
-		// The echo is Slack's stored state: its text, its blocks
-		// (which the body is drawn from) and the edited mark, as
-		// they are.
-		edit := messages.BodyOf(m.Message).Apply
-		a.shownSinks(m.ChannelID).patch(m.Message.TS, edit)
-		a.pendingOps.PatchHeld(m.ChannelID, m.Message.TS, edit)
+		a.showBody(m.ChannelID, m.Message.TS, body)
 		return nil
 	}
 	// Skip the WS echo of our own optimistic add. The corresponding
@@ -479,59 +483,127 @@ func reduceSendMessage(a *App, m SendMessageMsg) tea.Cmd {
 
 // reduceEditMessage handles EditMessageMsg: the new body shows at once,
 // converted as chat.update converts it (messages.EditedBody: the mrkdwn
-// and the rich_text block the pane draws) and marked edited, in every
-// pane that shows the message, and the edit is recorded in
-// pendingOps until its result settles it (reduceMessageEdited).
+// and the rich_text block the pane draws) and marked edited, wherever
+// the message is (showBody), and the edit is recorded in pendingOps. Its
+// chat.update goes now, or, when an edit of the message is in flight,
+// once that one ends (reduceMessageEdited), so Slack applies the edits
+// in the order they were made.
 func reduceEditMessage(a *App, m EditMessageMsg) tea.Cmd {
 	if cmd, blocked := a.sendingGuard(m.TS); blocked {
 		copyText, _, _ := a.giveTextBack(commandOrigin{teamID: m.TeamID, channelID: m.ChannelID, threadTS: m.ThreadTS, typed: m.Typed})
 		return tea.Batch(cmd, copyText)
 	}
 	body := messages.EditedBody(m.NewText)
-	prior, shown := a.shownSinks(m.ChannelID).patch(m.TS, body.Apply)
-	e := a.pendingOps.BeginEdit(pendingEdit{
-		channelID: m.ChannelID, ts: m.TS, body: body,
+	prior, shown := a.showBody(m.ChannelID, m.TS, body)
+	e, send := a.pendingOps.BeginEdit(pendingEdit{
+		channelID: m.ChannelID, ts: m.TS, wire: m.NewText, body: body,
 		panel: m.Panel, threadTS: m.ThreadTS, teamID: m.TeamID, typed: m.Typed,
 	}, prior, shown)
+	if !send {
+		debuglog.Cache("EditMessageMsg: channel=%s ts=%s decision=queued_behind_edit_in_flight", m.ChannelID, m.TS)
+		return nil
+	}
+	return a.sendEdit(e)
+}
+
+// sendEdit is e's chat.update, its result stamped with e's id. An edit
+// that waited behind another is refused, as a failure, when the user
+// has switched workspace since typing it: the service sends to the
+// active workspace.
+func (a *App) sendEdit(e pendingEdit) tea.Cmd {
+	if e.teamID != "" && e.teamID != a.activeTeamID {
+		return func() tea.Msg {
+			return MessageEditedMsg{ChannelID: e.channelID, TS: e.ts, EditID: e.id, Err: errEditWorkspaceChanged}
+		}
+	}
 	messageSvc := a.messageSvc
-	chID, ts, text := ids.ChannelID(m.ChannelID), ids.MessageTS(m.TS), m.NewText
+	chID, ts, text := ids.ChannelID(e.channelID), ids.MessageTS(e.ts), e.wire
 	return stampEditID(e, func() tea.Msg {
 		return messageSvc.Edit(chID, ts, text)
 	})
 }
 
+var (
+	errEditWorkspaceChanged = errors.New("switched workspace before the edit was sent")
+	errEditMessageGone      = errors.New("the message was deleted")
+)
+
+// showBody shows body on message ts of channelID wherever the message
+// is: every pane that may show it (shownSinks), a held echo of it, and
+// the rows a pending delete took out, so a failed delete puts back the
+// message as it is now. It returns the message as it was before, from a
+// pane, else from the pending delete; ok is false when neither has it.
+// Every edit of a message's body goes through it: the optimistic edit,
+// its settling, and message_changed echoes.
+func (a *App) showBody(channelID, ts string, body messages.Body) (prior messages.MessageItem, ok bool) {
+	prior, ok = a.shownSinks(channelID).patch(ts, body.Apply)
+	a.pendingOps.PatchHeld(channelID, ts, body.Apply)
+	if p, removed := a.pendingOps.PatchRemoved(channelID, ts, body.Apply); removed && !ok {
+		prior, ok = p, true
+	}
+	return prior, ok
+}
+
 // reduceMessageEdited handles MessageEditedMsg, the chat.update result.
-// The message then shows what pendingOps says it should: Slack's text
-// on success, or on failure what was there before (or a newer pending
-// edit's text). A failed edit that no newer edit replaced is reopened
-// where it was typed, or, when the user has moved on, its text is given
-// back as that conversation's draft. The editor is never closed here:
-// submitEdit already closed it, and an editor open now is a newer edit.
+// The message then shows what pendingOps says it should (EndEdit), and
+// the edit that waited behind this one, if any, is sent. A failed edit
+// whose text Slack does not have, and that no newer edit replaced, is
+// reported: reopened where it was typed, or, when the user has moved
+// on, its text given back as that conversation's draft. When the
+// message is deleted (or its delete is pending) the text goes to the
+// clipboard instead, since a draft would post it as a new message. The
+// editor is never closed here: submitEdit already closed it, and an
+// editor open now is a newer edit.
 func reduceMessageEdited(a *App, m MessageEditedMsg) tea.Cmd {
-	e, shown, newest, found := a.pendingOps.EndEdit(m.EditID, m.Err == nil)
-	switch {
-	case found && shown.known:
-		a.shownSinks(m.ChannelID).patch(m.TS, shown.body.Apply)
-	case !found && m.Err == nil && m.Text != "" && !a.pendingOps.EditPending(m.ChannelID, m.TS):
-		// A result with no pending edit (one fired directly): its
-		// text alone, so no stale rich_text block hides it.
-		a.shownSinks(m.ChannelID).patch(m.TS, messages.Body{Text: m.Text, Edited: true}.Apply)
+	if m.NotFound {
+		a.pendingOps.EditGone(m.ChannelID, m.TS)
 	}
-	if m.Err == nil {
-		return nil
-	}
-	var reopen, copyText tea.Cmd
-	var onClipboard bool
-	if found && newest {
-		var ok bool
-		if reopen, ok = a.reopenEdit(e); !ok {
-			copyText, _, onClipboard = a.giveTextBack(e.origin())
+	s, found := a.pendingOps.EndEdit(m.EditID, m.Err == nil)
+	if !found {
+		if m.Err == nil && m.Text != "" && !a.pendingOps.EditPending(m.ChannelID, m.TS) {
+			// A result with no pending edit (one fired directly): its
+			// text alone, so no stale rich_text block hides it.
+			a.showBody(m.ChannelID, m.TS, messages.Body{Text: m.Text, Edited: true})
 		}
+		if m.Err == nil {
+			return nil
+		}
+		return editFailedToast(m.Err, false)
 	}
-	reason := m.Err.Error()
-	return tea.Batch(func() tea.Msg {
+	if s.showKnown {
+		a.showBody(m.ChannelID, m.TS, s.show)
+	}
+	var cmds []tea.Cmd
+	if s.next != nil {
+		cmds = append(cmds, a.sendEdit(*s.next))
+	}
+	err := m.Err
+	if err == nil {
+		err = errEditMessageGone
+	}
+	switch {
+	case s.superseded:
+		cmds = append(cmds, editFailedToast(err, false))
+	case s.failed != nil && (s.gone || a.pendingOps.DeletePending(m.ChannelID, m.TS)):
+		cmds = append(cmds, a.clipboardWrite(s.failed.typed), editFailedToast(err, s.failed.typed != ""))
+	case s.failed != nil:
+		reopen, ok := a.reopenEdit(*s.failed)
+		var copyText tea.Cmd
+		var onClipboard bool
+		if !ok {
+			copyText, _, onClipboard = a.giveTextBack(s.failed.origin())
+		}
+		cmds = append(cmds, editFailedToast(err, onClipboard), reopen, copyText)
+	}
+	return tea.Batch(cmds...)
+}
+
+// editFailedToast reports a failed edit.
+func editFailedToast(err error, onClipboard bool) tea.Cmd {
+	reason := err.Error()
+	return func() tea.Msg {
 		return statusbar.EditFailedMsg{Reason: reason, OnClipboard: onClipboard}
-	}, reopen, copyText)
+	}
 }
 
 // applyMessageDeleted shows that Slack deleted message ts of channelID,
@@ -539,6 +611,7 @@ func reduceMessageEdited(a *App, m MessageEditedMsg) tea.Cmd {
 // idempotent: a row already gone (the optimistic delete took it) is a
 // no-op that leaves every selection alone.
 func (a *App) applyMessageDeleted(channelID, ts string) tea.Cmd {
+	a.pendingOps.EditGone(channelID, ts)
 	for _, mm := range a.modelsForChannel(channelID) {
 		mm.RemoveMessageByTS(ts)
 	}
