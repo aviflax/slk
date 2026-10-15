@@ -34,7 +34,7 @@ func Layout(labels []string, width, gap int) []Placed {
 		col := 0
 		if i > 0 {
 			col = end + gap
-			if col+w > width {
+			if width <= 0 || col+w > width {
 				row++
 				col = 0
 			}
