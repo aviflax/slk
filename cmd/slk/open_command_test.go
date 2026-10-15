@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	tea "charm.land/bubbletea/v2"
@@ -101,6 +102,14 @@ func TestPermalinkHandlerRelaysUIReply(t *testing.T) {
 // the reducer drops it instead of navigating long after the client was
 // told "did not respond".
 func TestPermalinkHandlerTimesOutAndAbandons(t *testing.T) {
+	// A synctest bubble gives the handler's timer a fake clock: it fires
+	// once every goroutine is blocked, in the order the durations imply.
+	synctest.Test(t, func(t *testing.T) {
+		testPermalinkHandlerTimesOutAndAbandons(t)
+	})
+}
+
+func testPermalinkHandlerTimesOutAndAbandons(t *testing.T) {
 	delivered := make(chan ui.OpenPermalinkMsg, 1)
 	h := permalinkHandler(func(m tea.Msg) { delivered <- m.(ui.OpenPermalinkMsg) }, 20*time.Millisecond)
 	if err := h(testPermalink); err == nil || !strings.Contains(err.Error(), "did not respond") {
@@ -114,6 +123,14 @@ func TestPermalinkHandlerTimesOutAndAbandons(t *testing.T) {
 // A UI that claimed the message before the timeout fired is answered
 // with its own reply, even if the reply lands after the timeout.
 func TestPermalinkHandlerWaitsForClaimedReply(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		testPermalinkHandlerWaitsForClaimedReply(t)
+	})
+}
+
+func testPermalinkHandlerWaitsForClaimedReply(t *testing.T) {
+	// On the bubble's fake clock the claim lands at 0, the first timeout
+	// fires at 100ms and the reply at 150ms, inside the second window.
 	h := permalinkHandler(func(m tea.Msg) {
 		msg := m.(ui.OpenPermalinkMsg)
 		if !msg.Claim() {
