@@ -359,8 +359,16 @@ var reduceThreads reducerFunc = func(a *App, msg tea.Msg) (tea.Cmd, bool) {
 		// so we cannot rely on the WS echo alone -- the HTTP response
 		// must apply all the side effects (parent reply count, threads
 		// dirty) here.
-		a.pendingOps.EndInsert(m.LocalTS)
+		ins, ok := a.pendingOps.EndInsert(m.LocalTS)
 		if m.Message.TS == "" {
+			// As in MessageSentMsg: drop the placeholder that
+			// cannot be settled, unless an echo already did.
+			if !ins.adopted && m.LocalTS != "" {
+				if !ok {
+					ins = pendingInsert{channelID: m.ChannelID, threadTS: m.ThreadTS, broadcast: m.Broadcast}
+				}
+				a.insertSinks(ins).removeLocal(m.LocalTS)
+			}
 			return nil, true
 		}
 		a.pendingOps.RecordSent(m.Message.TS)

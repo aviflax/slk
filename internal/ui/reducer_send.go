@@ -89,8 +89,18 @@ var reduceSend reducerFunc = func(a *App, msg tea.Msg) (tea.Cmd, bool) {
 		// (test paths firing MessageSentMsg directly, or the user
 		// navigated away and back between Enter and the HTTP
 		// response) the message is upserted by its Slack TS.
-		a.pendingOps.EndInsert(m.LocalTS)
+		ins, ok := a.pendingOps.EndInsert(m.LocalTS)
 		if m.Message.TS == "" {
+			// Nothing to settle the placeholder onto. Remove it
+			// rather than leave a row that never resolves, unless
+			// an echo already settled it (that row is the posted
+			// message).
+			if !ins.adopted && m.LocalTS != "" {
+				if !ok {
+					ins = pendingInsert{channelID: m.ChannelID}
+				}
+				a.insertSinks(ins).removeLocal(m.LocalTS)
+			}
 			return nil, true
 		}
 		a.pendingOps.RecordSent(m.Message.TS)

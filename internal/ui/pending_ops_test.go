@@ -176,3 +176,31 @@ func TestPendingReply_EchoAdoptedInEveryPane(t *testing.T) {
 	wantRows(t, "thread", a.threadPanel.Replies(), "10.000009=reply")
 	wantRows(t, "channel", a.messagepane.Messages(), "10.000009=reply")
 }
+
+// A sent result without a TS cannot settle the placeholder, so it
+// removes it rather than leaving a row that never resolves; a row an
+// echo already settled is the posted message and stays.
+func TestPendingSend_EmptyTSResult(t *testing.T) {
+	t.Run("channel", func(t *testing.T) {
+		a := pendingApp(t)
+		local := sendTop(t, a, "hello")
+		a.Update(MessageSentMsg{ChannelID: "C1", LocalTS: local})
+		wantRows(t, "channel", a.messagepane.Messages())
+	})
+	t.Run("broadcast reply", func(t *testing.T) {
+		a := pendingApp(t)
+		openThread(a, "5.000000")
+		a.Update(SendThreadReplyMsg{ChannelID: "C1", ThreadTS: "5.000000", Text: "reply", Broadcast: true})
+		local := a.threadPanel.Replies()[0].TS
+		a.Update(ThreadReplySentMsg{ChannelID: "C1", ThreadTS: "5.000000", LocalTS: local, Broadcast: true})
+		wantRows(t, "thread", a.threadPanel.Replies())
+		wantRows(t, "channel", a.messagepane.Messages())
+	})
+	t.Run("after adoption", func(t *testing.T) {
+		a := pendingApp(t)
+		local := sendTop(t, a, "hello")
+		a.Update(echo("C1", "10.000001", "", "hello"))
+		a.Update(MessageSentMsg{ChannelID: "C1", LocalTS: local})
+		wantRows(t, "channel", a.messagepane.Messages(), "10.000001=hello")
+	})
+}
