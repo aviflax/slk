@@ -81,6 +81,18 @@ func TestMixColorsSameColourIsFixed(t *testing.T) {
 	})
 }
 
+// A NaN alpha is not a share of anything; mixColors treats it as 0 and
+// returns bg rather than whatever a NaN-to-uint8 conversion yields.
+func TestMixColorsNaNAlphaIsBackground(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		fg := opaqueColor().Draw(t, "fg")
+		bg := opaqueColor().Draw(t, "bg")
+		if got := mixColors(fg, bg, math.NaN()); got != bg {
+			t.Fatalf("NaN alpha gave %v, want bg %v", got, bg)
+		}
+	})
+}
+
 // UserColor is a function of the ID alone, every non-empty ID gets a
 // palette colour, and the empty ID gets Primary.
 func TestUserColorDeterministicAndInPalette(t *testing.T) {

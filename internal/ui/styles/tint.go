@@ -56,9 +56,10 @@ func SelectionTintColor(focused bool) color.Color {
 }
 
 // mixColors returns a straight-line RGB interpolation between fg and bg.
-// alpha is the share of fg: 0.0 returns bg, 1.0 returns fg.
+// alpha is the share of fg: 0.0 returns bg, 1.0 returns fg. A NaN alpha
+// counts as 0.
 func mixColors(fg, bg color.Color, alpha float64) color.Color {
-	if alpha <= 0 {
+	if alpha <= 0 || math.IsNaN(alpha) {
 		return bg
 	}
 	if alpha >= 1 {
