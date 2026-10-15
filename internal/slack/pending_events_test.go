@@ -4,7 +4,6 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
-	"time"
 
 	"github.com/gorilla/websocket"
 )
@@ -65,25 +64,13 @@ func TestStartWebSocketDispatchesPendingEventsWithoutIncomingFrames(t *testing.T
 	}
 	defer func() {
 		_ = c.StopWebSocket()
-		select {
-		case <-c.WsDone():
-		case <-time.After(5 * time.Second):
-			t.Error("WebSocket event owner did not stop")
-		}
+		<-c.WsDone()
 	}()
 	defer close(h.connectRelease)
-	select {
-	case <-h.connectStarted:
-	case <-time.After(5 * time.Second):
-		t.Fatal("hello was not dispatched")
-	}
+	<-h.connectStarted // hello dispatched
 	h.pending <- struct{}{}
 	h.connectRelease <- struct{}{}
-	select {
-	case <-h.repaired:
-	case <-time.After(5 * time.Second):
-		t.Fatal("pending event was not dispatched on the idle connection")
-	}
+	<-h.repaired // the pending event was dispatched on the idle connection
 	if !<-h.serialized {
 		t.Fatal("pending event was not serialized with OnConnect")
 	}

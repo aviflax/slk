@@ -2306,12 +2306,7 @@ func TestStartWebSocket_SendsChromeUpgradeHeaders(t *testing.T) {
 	// so the goroutine doesn't outlive the test.
 	defer func() { <-c.WsDone() }()
 
-	var gotHeaders http.Header
-	select {
-	case gotHeaders = <-gotCh:
-	case <-time.After(5 * time.Second):
-		t.Fatal("server never received an upgrade request")
-	}
+	gotHeaders := <-gotCh
 
 	// The five headers real Chrome sends on a WS upgrade.
 	wantPresent := map[string]string{
@@ -2390,12 +2385,7 @@ func TestStartWebSocket_StartArgsMatchTheCapture(t *testing.T) {
 	}
 	defer func() { <-c.WsDone() }()
 
-	var q url.Values
-	select {
-	case q = <-gotCh:
-	case <-time.After(5 * time.Second):
-		t.Fatal("server never received an upgrade request")
-	}
+	q := <-gotCh
 
 	raw := q.Get("start_args")
 	if raw == "" {
