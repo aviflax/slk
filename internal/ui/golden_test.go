@@ -17,6 +17,7 @@ import (
 	"github.com/gammons/slk/internal/core"
 	"github.com/gammons/slk/internal/emoji"
 	imgpkg "github.com/gammons/slk/internal/image"
+	"github.com/gammons/slk/internal/tztest"
 	"github.com/gammons/slk/internal/ui/messages"
 	"github.com/gammons/slk/internal/ui/messages/blockkit"
 	"github.com/gammons/slk/internal/ui/sidebar"
@@ -1117,38 +1118,41 @@ func TestNewGoldenApp_RendersActiveChannelName(t *testing.T) {
 // same bytes on a developer's laptop and on CI, whatever TZ each is set
 // to.
 //
-// It swaps time.Local directly rather than shelling out with TZ= so the
-// whole offset range is covered in one process, including UTC+12..+14
-// where a UTC-anchored clock silently collapses the "Yesterday" divider
-// into a second "Today". Safe here because this package's tests never
-// run in parallel and nothing else reads time.Local concurrently.
+// Each zone renders in a child process started with TZ set
+// (tztest.Each), so the whole offset range is covered, including
+// UTC+12..+14 where a UTC-anchored clock silently collapses the
+// "Yesterday" divider into a second "Today". Setting time.Local in this
+// process instead would race with every time.Now in the timers earlier
+// tests left running.
 func TestNewGoldenApp_RenderIsTimezoneIndependent(t *testing.T) {
-	prev := time.Local
-	t.Cleanup(func() { time.Local = prev })
-
-	zones := []struct {
-		name    string
-		offsetH int
-	}{
-		{"UTC", 0},
-		{"Pacific/Honolulu", -10},
-		{"Etc/GMT+12", -12}, // westernmost real offset
-		{"Asia/Tokyo", +9},
-		{"Pacific/Auckland (NZDT)", +13},
-		{"Pacific/Kiritimati", +14}, // easternmost real offset
+	zones := []string{
+		"UTC",
+		"Pacific/Honolulu",
+		"Etc/GMT+12", // UTC-12, the westernmost real offset
+		"Asia/Tokyo",
+		"Pacific/Auckland",   // UTC+13 (NZDT) on the golden date
+		"Pacific/Kiritimati", // UTC+14, the easternmost real offset
 	}
-
+	got := tztest.Each(t, zones, func(t *testing.T) string {
+		return newGoldenApp(t, goldenFixtureOpts()...).View().Content
+	})
 	var want, wantZone string
-	for _, z := range zones {
-		time.Local = time.FixedZone(z.name, z.offsetH*3600)
-		got := newGoldenApp(t, goldenFixtureOpts()...).View().Content
+	rendered := 0
+	for i, z := range zones {
+		if got[i] == "" {
+			continue // the host has no zoneinfo for z
+		}
+		rendered++
 		if want == "" {
-			want, wantZone = got, z.name
+			want, wantZone = got[i], z
 			continue
 		}
-		if got != want {
-			t.Errorf("render under %s differs from %s: %s", z.name, wantZone, styleAwareDiff(want, got))
+		if got[i] != want {
+			t.Errorf("render under %s differs from %s: %s", z, wantZone, styleAwareDiff(want, got[i]))
 		}
+	}
+	if rendered < 2 {
+		t.Fatalf("only %d of %d zones rendered: nothing to compare", rendered, len(zones))
 	}
 }
 
