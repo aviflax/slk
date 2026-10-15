@@ -414,6 +414,28 @@ func TestBlockquoteEntityDecoding(t *testing.T) {
 	}
 }
 
+// TestBlockquoteWrapsWithBarOnEveryLine pins that a quote longer than the
+// content width is wrapped before it is styled, so each wrapped row keeps
+// the quote bar. Wrapping after styling left the bar on the first row only
+// and the continuation rows looked like ordinary message text.
+func TestBlockquoteWrapsWithBarOnEveryLine(t *testing.T) {
+	const width = 30
+	in := "&gt; I think we start assuming everything is valuable. If we begin to fill up storage"
+	out := RenderSlackMarkdownWith(in, RenderSlackMarkdownOpts{Width: width})
+	lines := strings.Split(ansi.Strip(WordWrap(out, width)), "\n")
+	if len(lines) < 2 {
+		t.Fatalf("expected the quote to wrap, got %q", lines)
+	}
+	for i, line := range lines {
+		if !strings.HasPrefix(line, "┃ ") {
+			t.Errorf("line %d lacks the quote bar: %q", i, line)
+		}
+		if w := lipgloss.Width(line); w > width {
+			t.Errorf("line %d is %d columns, wider than %d: %q", i, w, width, line)
+		}
+	}
+}
+
 // TestThreadBroadcastLabel asserts that a message with subtype
 // "thread_broadcast" (a thread reply that the author also posted to
 // the main channel) renders a "replied to a thread" label above the

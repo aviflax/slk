@@ -642,12 +642,13 @@ type RenderSlackMarkdownOpts struct {
 	Customs      map[string]string        // workspace custom emoji map; may be nil
 	EmojiFlushes *[]func(io.Writer) error // append-only; may be nil
 
-	// Width is the content width the result will be wrapped to, and is
-	// used only by the code-block path: a fenced block is hard-wrapped
-	// and padded to exactly this width so every one of its lines
-	// carries the surface background edge to edge, the way Slack draws
-	// one. 0 leaves the old behaviour (block as wide as its longest
-	// line, ragged right edge).
+	// Width is the content width the result will be wrapped to. A
+	// fenced code block is hard-wrapped and padded to exactly this
+	// width so every one of its lines carries the surface background
+	// edge to edge, the way Slack draws one. A blockquote is wrapped to
+	// it, less the bar, before styling, so each wrapped row keeps the
+	// bar. 0 leaves the old behaviour (block as wide as its longest
+	// line, ragged right edge; quote bar on the first row only).
 	Width int
 }
 
@@ -708,6 +709,13 @@ func RenderSlackMarkdownWith(text string, opts RenderSlackMarkdownOpts) string {
 			quoted := strings.TrimPrefix(line, "&gt; ")
 			quoted = strings.TrimPrefix(quoted, "> ")
 			quoted = slackEntityDecoder.Replace(quoted)
+			// Wrap before styling, to the width left after the bar and
+			// its padding, so lipgloss draws the bar on every wrapped
+			// row. The caller's WordWrap would otherwise break the
+			// styled line and leave the bar on the first row only.
+			if w := opts.Width; w > 2 {
+				quoted = WordWrap(quoted, w-2)
+			}
 			line = blockquoteStyle().Render(quoted)
 		} else {
 			line = renderInlineFormattingWith(line, opts)
