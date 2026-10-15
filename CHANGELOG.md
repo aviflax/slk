@@ -12,6 +12,8 @@ Earlier history, up to v0.26.2, is in [upstream's releases](https://github.com/g
 
 - On Linux, `slk open` with a request slk rejects for length could report
   "connection reset by peer" instead of slk's reason.
+- Installing or upgrading the Homebrew cask no longer prints a warning that
+  `postflight` is deprecated.
 
 ## [0.27.0] - 2026-10-15
 
