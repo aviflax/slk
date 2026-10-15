@@ -161,7 +161,7 @@ func TestReplaceAndPatchTouchOnlyTheMatch(t *testing.T) {
 		} else {
 			got, ch = ReplaceTS(rows, ts, MessageItem{TS: ts, Text: "patched", IsEdited: true})
 		}
-		i := IndexOfTS(before, ts)
+		i := IndexOfTS(before, ts) // TSes are distinct: either direction
 		if len(got) != len(before) {
 			t.Fatalf("length %d, want %d", len(got), len(before))
 		}

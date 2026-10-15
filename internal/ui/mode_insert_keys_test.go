@@ -1129,7 +1129,7 @@ func TestInsertModeKeys(t *testing.T) {
 				typeInto(t, &a.threadCompose, "edited reply")
 			},
 			key:      keyCode(tea.KeyEnter),
-			wantMode: ModeInsert,
+			wantMode: ModeNormal,
 			assert: func(t *testing.T, a *App, cmd tea.Cmd) {
 				if cmd == nil {
 					t.Fatal("cmd = nil, want EditMessageMsg")
@@ -1141,10 +1141,10 @@ func TestInsertModeKeys(t *testing.T) {
 				if edit.ChannelID != "C1" || edit.TS != "2.0" || edit.NewText != "edited reply" {
 					t.Errorf("EditMessageMsg = %+v, want {ChannelID:C1 TS:2.0 NewText:\"edited reply\"}", edit)
 				}
-				// The compose keeps its text: edits exit insert mode on
-				// MessageEditedMsg, not on submit (app.go:1670-1673).
-				if got := a.threadCompose.Value(); got != "edited reply" {
-					t.Errorf("thread compose value = %q, want it preserved until the edit lands", got)
+				// The edit shows at once, so the editor closes on
+				// submit and the stashed draft (empty here) is back.
+				if got := a.threadCompose.Value(); got != "" || a.editing.IsActive() {
+					t.Errorf("thread compose value = %q editing=%v, want the editor closed", got, a.editing.IsActive())
 				}
 			},
 		},

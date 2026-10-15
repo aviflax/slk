@@ -1001,15 +1001,16 @@ func run() error {
 				}
 				ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 				defer cancel()
-				// EditMessage returns the converted mrkdwn but we ignore
-				// it here: the message_changed WS echo updates the local
-				// copy with the server-stored text via UpdateMessageInPlace.
-				// MessageEditedMsg only carries success/fail status.
-				_, err := wctx.Client.EditMessage(ctx, chIDStr, tsStr, text)
+				// The UI shows the edit before this returns, and shows
+				// the converted mrkdwn EditMessage sent once it does,
+				// so the row matches what Slack stored. The
+				// message_changed echo is ignored while the edit is
+				// pending.
+				stored, err := wctx.Client.EditMessage(ctx, chIDStr, tsStr, text)
 				if err != nil {
 					log.Printf("Warning: failed to edit message %s/%s: %v", chIDStr, tsStr, err)
 				}
-				return ui.MessageEditedMsg{ChannelID: chIDStr, TS: tsStr, Err: err}
+				return ui.MessageEditedMsg{ChannelID: chIDStr, TS: tsStr, Text: stored, Err: err}
 			},
 			Delete: func(channelID ids.ChannelID, ts ids.MessageTS) core.Msg {
 				chIDStr, tsStr := string(channelID), string(ts)

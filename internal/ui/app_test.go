@@ -395,12 +395,10 @@ func TestHandleInsertMode_ThreadAttachmentSendReturnsToNormalMode(t *testing.T) 
 	}
 }
 
-// TestHandleInsertMode_EditSubmitStaysInInsert pins down the
-// intentional asymmetry: edits keep insert mode until the server
-// confirms the edit (see MessageEditedMsg → cancelEdit), so that
-// transient failures don't strand the user one keystroke away from
-// resuming their edit.
-func TestHandleInsertMode_EditSubmitStaysInInsert(t *testing.T) {
+// TestHandleInsertMode_EditSubmitLeavesInsert: an edit shows at once,
+// so submitting it leaves insert mode as a send does and closes the
+// editor. A failed edit reopens it (TestPendingEdit_FailureRestoresAndReopens).
+func TestHandleInsertMode_EditSubmitLeavesInsert(t *testing.T) {
 	app := NewApp()
 	app.activeChannelID = "C1"
 	app.focusedPanel = PanelMessages
@@ -419,8 +417,8 @@ func TestHandleInsertMode_EditSubmitStaysInInsert(t *testing.T) {
 	if _, ok := cmd().(EditMessageMsg); !ok {
 		t.Fatalf("expected EditMessageMsg, got %T", cmd())
 	}
-	if app.mode != ModeInsert {
-		t.Errorf("edit submit changed mode to %v, want ModeInsert (cancelEdit on MessageEditedMsg drives the flip)", app.mode)
+	if app.mode != ModeNormal || app.editing.IsActive() {
+		t.Errorf("after edit submit mode=%v editing=%v, want ModeNormal and the editor closed", app.mode, app.editing.IsActive())
 	}
 }
 
@@ -1735,17 +1733,17 @@ func TestSubmitEdit_NonEmptyText_EmitsEditMessageMsg(t *testing.T) {
 	}
 }
 
-func TestMessageEditedMsg_ExitsEditMode(t *testing.T) {
+func TestSubmitEdit_ExitsEditMode(t *testing.T) {
 	app := NewApp()
 	app.editing.active = true
 	app.editing.channelID = "C1"
 	app.editing.ts = "1.0"
 	app.editing.panel = PanelMessages
 
-	app.Update(MessageEditedMsg{ChannelID: "C1", TS: "1.0", Err: nil})
+	_ = app.submitEdit("hello", "hello")
 
 	if app.editing.active {
-		t.Error("expected editing.active=false after success")
+		t.Error("expected editing.active=false after submit")
 	}
 }
 

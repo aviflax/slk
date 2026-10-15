@@ -512,6 +512,27 @@ func (m *Model) UpdateMessageInPlace(ts, newText string) bool {
 	return true
 }
 
+// Patch applies f to every row with TS ts this pane shows: the first
+// reply with it (messages.PatchTS) and the parent when it is the one.
+// It returns the matched row as it was before, the reply's when both
+// match. ok is false when neither has ts. An edit or its echo writes
+// both, as UpdateMessageInPlace and UpdateParentInPlace together do.
+func (m *Model) Patch(ts string, f func(*messages.MessageItem)) (prior messages.MessageItem, ok bool) {
+	if ts != "" && m.parent.TS == ts {
+		prior, ok = m.parent, true
+		f(&m.parent)
+	}
+	rows, ch := messages.PatchTS(m.replies, ts, func(r *messages.MessageItem) { prior = *r; f(r) })
+	m.replies = rows
+	if ch.Op != messages.RowNone {
+		ok = true
+	}
+	if ok {
+		m.InvalidateCache()
+	}
+	return prior, ok
+}
+
 // RemoveMessageByTS removes a reply by TS, adjusting the selected
 // index so it remains valid. Returns true if found.
 //

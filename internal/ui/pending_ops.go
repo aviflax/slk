@@ -1,8 +1,8 @@
 // internal/ui/pending_ops.go
 //
-// The ledger of the user's optimistic sends, from Enter until Slack
-// answers, and how the WebSocket echoes of those sends are told apart
-// from every other message the user posts.
+// The ledger of the user's optimistic sends and edits, from Enter until
+// Slack answers, and how the WebSocket echoes of those sends are told
+// apart from every other message the user posts.
 //
 // A send (channel message, thread reply, broadcast) records a pending
 // insert under its "local:N" placeholder id. Its echo can arrive before
@@ -21,10 +21,20 @@
 // text as typed back to the composer it came from. A failure on an
 // adopted insert is not a failure the user needs to see: the echo
 // proves Slack posted the message.
+//
+// An edit (BeginEdit) shows its text at once and is settled by its
+// chat.update result (EndEdit). While any edit of a message is
+// pending, the message shows the newest edit's text and the
+// message_changed echoes of it are ignored: an echo cannot say which
+// edit it carries, and an older edit's echo must not replace a newer
+// edit's text. Success shows the text Slack stored; a failure puts
+// back what was there, and gives the typed text back when no newer
+// edit replaced it.
 package ui
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -53,11 +63,62 @@ func (ins pendingInsert) origin() commandOrigin {
 	return commandOrigin{teamID: ins.teamID, channelID: ins.channelID, threadTS: ins.threadTS, typed: ins.typed}
 }
 
-// pendingOps tracks the user's sends from this session. See the
-// package comment.
+// pendingEdit is one optimistic edit waiting for its chat.update
+// result.
+type pendingEdit struct {
+	id        uint64 // from BeginEdit; later edits have larger ids
+	channelID string
+	ts        string
+	text      string // the new text as shown, converted to mrkdwn
+	// panel, threadTS, teamID and typed are where the edit was typed
+	// (threadTS is the open thread for a PanelThread edit) and the text
+	// as typed, so a failed edit can be reopened there or given back.
+	panel    Panel
+	threadTS string
+	teamID   string
+	typed    string
+}
+
+// origin is where e was typed, for offerTypedBack.
+func (e pendingEdit) origin() commandOrigin {
+	return commandOrigin{teamID: e.teamID, channelID: e.channelID, threadTS: e.threadTS, typed: e.typed}
+}
+
+// editKey names a message by channel and TS.
+type editKey struct{ channelID, ts string }
+
+// editedMessage is the edit state of one message with edits pending.
+// The message shows the text of the newest edit that is pending or has
+// succeeded, or base when there is none.
+type editedMessage struct {
+	// base is the text the message showed before its first pending
+	// edit, then that of the newest edit to succeed (baseID). known
+	// is false when no pane showed the message at the first edit, so
+	// there is nothing to put back.
+	base       string
+	baseEdited bool
+	baseID     uint64
+	known      bool
+	pending    []pendingEdit // oldest first
+}
+
+// editShown is the text a message should show once an edit settles.
+// known is false when nothing is known to show (see editedMessage).
+type editShown struct {
+	text   string
+	edited bool
+	known  bool
+}
+
+// pendingOps tracks the user's sends and edits from this session. See
+// the package comment.
 type pendingOps struct {
 	// inserts are the sends without an HTTP result, oldest first.
 	inserts []*pendingInsert
+
+	// edits holds every message with an edit awaiting its result.
+	edits  map[editKey]*editedMessage
+	editID uint64
 
 	// sentTSes records authoritative TSes the App has observed via
 	// MessageSentMsg / ThreadReplySentMsg or an adopted echo. WS
@@ -70,7 +131,7 @@ type pendingOps struct {
 }
 
 func newPendingOps() *pendingOps {
-	return &pendingOps{sentTSes: make(map[string]time.Time)}
+	return &pendingOps{sentTSes: make(map[string]time.Time), edits: make(map[editKey]*editedMessage)}
 }
 
 // BeginInsert records a send whose placeholder is ins.localTS.
@@ -112,6 +173,66 @@ func (p *pendingOps) AdoptEcho(channelID string, msg messages.MessageItem) (pend
 		}
 	}
 	return pendingInsert{}, false
+}
+
+// BeginEdit records e under a fresh id and returns it with the id set.
+// prior is the message as a pane showed it before the edit (priorOK
+// false when none showed it); it is what a failure puts back unless an
+// earlier edit of the message is still pending, whose own prior holds.
+func (p *pendingOps) BeginEdit(e pendingEdit, prior messages.MessageItem, priorOK bool) pendingEdit {
+	p.editID++
+	e.id = p.editID
+	k := editKey{e.channelID, e.ts}
+	m := p.edits[k]
+	if m == nil {
+		m = &editedMessage{base: prior.Text, baseEdited: prior.IsEdited, known: priorOK}
+		p.edits[k] = m
+	}
+	m.pending = append(m.pending, e)
+	return e
+}
+
+// EndEdit settles the edit id: result is the text Slack stored when ok.
+// It returns the edit, what its message should show now, and whether
+// the edit is the newest of that message (no later edit is pending or
+// has succeeded), which a failure needs to know before giving the text
+// back. found is false for an unknown id.
+func (p *pendingOps) EndEdit(id uint64, ok bool, result string) (e pendingEdit, shown editShown, newest, found bool) {
+	for k, m := range p.edits {
+		i := slices.IndexFunc(m.pending, func(x pendingEdit) bool { return x.id == id })
+		if i < 0 {
+			continue
+		}
+		e = m.pending[i]
+		m.pending = slices.Delete(m.pending, i, i+1)
+		newest = m.baseID < id
+		for _, x := range m.pending {
+			if x.id > id {
+				newest = false
+			}
+		}
+		if ok && id > m.baseID {
+			if result == "" {
+				result = e.text
+			}
+			m.base, m.baseEdited, m.baseID, m.known = result, true, id, true
+		}
+		shown = editShown{text: m.base, edited: m.baseEdited, known: m.known}
+		if n := len(m.pending); n > 0 && m.pending[n-1].id > m.baseID {
+			shown = editShown{text: m.pending[n-1].text, edited: true, known: true}
+		}
+		if len(m.pending) == 0 {
+			delete(p.edits, k)
+		}
+		return e, shown, newest, true
+	}
+	return pendingEdit{}, editShown{}, false, false
+}
+
+// EditPending reports whether an edit of the message is awaiting its
+// result.
+func (p *pendingOps) EditPending(channelID, ts string) bool {
+	return p.edits[editKey{channelID, ts}] != nil
 }
 
 // RecordSent marks a message TS as one the user just posted from this

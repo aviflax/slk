@@ -22,9 +22,13 @@
 //	                           give the typed text back + fire
 //	                           SendFailed toast, unless the echo
 //	                           already showed it posted.
-//	EditMessageMsg           - user edit: chat.update call.
-//	MessageEditedMsg         - edit result: leave edit mode + on
-//	                           failure fire EditFailed toast.
+//	EditMessageMsg           - user edit: show the new text at
+//	                           once, record a pending edit,
+//	                           chat.update call.
+//	MessageEditedMsg         - edit result: show Slack's text, or
+//	                           on failure put back what was there,
+//	                           reopen the edit (or give its text
+//	                           back) + fire EditFailed toast.
 //	DeleteMessageMsg         - user delete: chat.delete call.
 //	MessageDeletedMsg        - delete result: on failure fire
 //	                           DeleteFailed toast.
@@ -55,6 +59,7 @@ import (
 
 	"github.com/gammons/slk/internal/debuglog"
 	"github.com/gammons/slk/internal/ids"
+	"github.com/gammons/slk/internal/slack/mrkdwn"
 	"github.com/gammons/slk/internal/ui/messages"
 	"github.com/gammons/slk/internal/ui/statusbar"
 )
@@ -134,27 +139,10 @@ var reduceSend reducerFunc = func(a *App, msg tea.Msg) (tea.Cmd, bool) {
 		}, true
 
 	case EditMessageMsg:
-		messageSvc := a.messageSvc
-		chID, ts, text := ids.ChannelID(m.ChannelID), ids.MessageTS(m.TS), m.NewText
-		return func() tea.Msg {
-			return messageSvc.Edit(chID, ts, text)
-		}, true
+		return reduceEditMessage(a, m), true
 
 	case MessageEditedMsg:
-		// Only exit edit mode if this result matches the edit
-		// that's currently in flight. A stale result from a
-		// previously cancelled or replaced edit must not clobber
-		// the current one.
-		if a.editing.Matches(m.ChannelID, m.TS) {
-			a.cancelEdit()
-		}
-		if m.Err == nil {
-			return nil, true
-		}
-		reason := m.Err.Error()
-		return func() tea.Msg {
-			return statusbar.EditFailedMsg{Reason: reason}
-		}, true
+		return reduceMessageEdited(a, m), true
 
 	case DeleteMessageMsg:
 		messageSvc := a.messageSvc
@@ -244,19 +232,22 @@ func reduceNewMessage(a *App, m NewMessageMsg) tea.Cmd {
 		debuglog.Cache("NewMessageMsg: channel=%s ts=%s decision=skipped_edit_echo",
 			m.ChannelID, m.Message.TS)
 		// Edit echo: update existing message in place rather than
-		// appending. Fan out to every window viewing the channel;
-		// gate on the thread panel's channel for the thread cache
-		// -- avoids touching panes showing a different channel.
+		// appending, in every pane that may show it (shownSinks:
+		// every window viewing the channel, and the thread panel's
+		// reply or parent when the panel is on that channel).
 		// This branch must run BEFORE the isSelfSent dedup below,
 		// since edits to messages we recently sent would otherwise
 		// be silently dropped (the TS is still in selfSentTSes).
-		for _, mm := range a.modelsForChannel(m.ChannelID) {
-			mm.UpdateMessageInPlace(m.Message.TS, m.Message.Text)
+		//
+		// While one of the user's own edits of the message is
+		// pending, the echo is ignored: it cannot say which edit it
+		// carries, and the edit's result shows the text Slack stored.
+		if a.pendingOps.EditPending(m.ChannelID, m.Message.TS) {
+			debuglog.Cache("NewMessageMsg: channel=%s ts=%s decision=skipped_edit_echo_pending",
+				m.ChannelID, m.Message.TS)
+			return nil
 		}
-		if m.ChannelID == a.threadPanel.ChannelID() {
-			a.threadPanel.UpdateMessageInPlace(m.Message.TS, m.Message.Text)
-			a.threadPanel.UpdateParentInPlace(m.Message.TS, m.Message.Text)
-		}
+		a.shownSinks(m.ChannelID).patch(m.Message.TS, setEditedText(m.Message.Text, true))
 		return nil
 	}
 	// Skip the WS echo of our own optimistic add. The corresponding
@@ -464,4 +455,63 @@ func reduceSendMessage(a *App, m SendMessageMsg) tea.Cmd {
 	return stampLocalTS(ins, func() tea.Msg {
 		return messageSvc.Send(chID, text)
 	})
+}
+
+// setEditedText is a row patch that shows text, marked edited or not.
+func setEditedText(text string, edited bool) func(*messages.MessageItem) {
+	return func(r *messages.MessageItem) { r.Text, r.IsEdited = text, edited }
+}
+
+// reduceEditMessage handles EditMessageMsg: the new text shows at once,
+// converted to mrkdwn as chat.update converts it and marked edited, in
+// every pane that shows the message, and the edit is recorded in
+// pendingOps until its result settles it (reduceMessageEdited).
+func reduceEditMessage(a *App, m EditMessageMsg) tea.Cmd {
+	converted, _ := mrkdwn.Convert(m.NewText)
+	prior, shown := a.shownSinks(m.ChannelID).patch(m.TS, setEditedText(converted, true))
+	e := a.pendingOps.BeginEdit(pendingEdit{
+		channelID: m.ChannelID, ts: m.TS, text: converted,
+		panel: m.Panel, threadTS: m.ThreadTS, teamID: m.TeamID, typed: m.Typed,
+	}, prior, shown)
+	messageSvc := a.messageSvc
+	chID, ts, text := ids.ChannelID(m.ChannelID), ids.MessageTS(m.TS), m.NewText
+	return stampEditID(e, func() tea.Msg {
+		return messageSvc.Edit(chID, ts, text)
+	})
+}
+
+// reduceMessageEdited handles MessageEditedMsg, the chat.update result.
+// The message then shows what pendingOps says it should: Slack's text
+// on success, or on failure what was there before (or a newer pending
+// edit's text). A failed edit that no newer edit replaced is reopened
+// where it was typed, or, when the user has moved on, its text is given
+// back as that conversation's draft. The editor is never closed here:
+// submitEdit already closed it, and an editor open now is a newer edit.
+func reduceMessageEdited(a *App, m MessageEditedMsg) tea.Cmd {
+	e, shown, newest, found := a.pendingOps.EndEdit(m.EditID, m.Err == nil, m.Text)
+	switch {
+	case found && shown.known:
+		a.shownSinks(m.ChannelID).patch(m.TS, setEditedText(shown.text, shown.edited))
+	case !found && m.Err == nil && m.Text != "" && !a.pendingOps.EditPending(m.ChannelID, m.TS):
+		// A result with no pending edit (one fired directly).
+		a.shownSinks(m.ChannelID).patch(m.TS, setEditedText(m.Text, true))
+	}
+	if m.Err == nil {
+		return nil
+	}
+	var reopen tea.Cmd
+	if found && newest {
+		var ok bool
+		if reopen, ok = a.reopenEdit(e); !ok {
+			a.offerTypedBack(e.origin())
+		}
+	}
+	reason := m.Err.Error()
+	toast := func() tea.Msg {
+		return statusbar.EditFailedMsg{Reason: reason}
+	}
+	if reopen == nil {
+		return toast
+	}
+	return tea.Batch(toast, reopen)
 }

@@ -3,9 +3,9 @@ package messages
 // Row operations on a pane's []MessageItem, located by TS. Both content
 // panes (messages.Model and thread.Model) use them, then fix up their
 // own selection and caches from the RowChange. The optimistic send
-// paths (append, settle, roll back, upsert) and the delete path write
-// through them; the edit, reaction and reply-count paths only locate
-// their row with FirstIndexOfTS and write it themselves.
+// paths (append, settle, roll back, upsert), the edit path and the
+// delete path write through them; the reaction and reply-count paths
+// only locate their row with FirstIndexOfTS and write it themselves.
 //
 // The functions write through the input's backing array the way the
 // panes always have (an in-place replace, an append-based remove), so a
@@ -85,12 +85,12 @@ func RemoveAt(rows []MessageItem, i int) ([]MessageItem, RowChange) {
 	return append(rows[:i], rows[i+1:]...), RowChange{Op: RowRemoved, Index: i}
 }
 
-// PatchTS applies f to the last row with TS ts, in place. Nothing calls
-// it yet: it is here for the optimistic edit, which will patch a row's
-// text before Slack answers. The edit paths scan from the front
-// (FirstIndexOfTS), so that change has to pick one direction for both.
+// PatchTS applies f to the first row with TS ts, in place. It scans
+// from the front, like the edit paths it serves (the optimistic edit,
+// its rollback and the message_changed echo), so the edit and its echo
+// always write the same row.
 func PatchTS(rows []MessageItem, ts string, f func(*MessageItem)) ([]MessageItem, RowChange) {
-	i := IndexOfTS(rows, ts)
+	i := FirstIndexOfTS(rows, ts)
 	if i < 0 {
 		return rows, noRowChange
 	}

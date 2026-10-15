@@ -602,12 +602,20 @@ type MessageSendFailedMsg struct {
 }
 
 // EditMessageMsg is emitted when the user submits an edit. App.Update
-// invokes the configured messageEditor and converts the result to
-// MessageEditedMsg.
+// shows the new text at once, records the edit in pendingOps and
+// invokes the message service, whose result is MessageEditedMsg.
 type EditMessageMsg struct {
 	ChannelID string
 	TS        string
-	NewText   string
+	NewText   string // mentions translated to wire form
+	// Typed, TeamID, Panel and ThreadTS say where the edit was typed
+	// and what, so a failed edit can be reopened there, or its text
+	// given back as a draft. ThreadTS is the open thread for a
+	// PanelThread edit, "" otherwise.
+	Typed    string
+	TeamID   string
+	Panel    Panel
+	ThreadTS string
 }
 
 // DeleteMessageMsg is emitted when the user confirms a delete.
@@ -620,7 +628,12 @@ type DeleteMessageMsg struct {
 type MessageEditedMsg struct {
 	ChannelID string
 	TS        string
-	Err       error
+	// Text is the mrkdwn Slack stored, on success.
+	Text string
+	// EditID names the pending edit the result settles. Services never
+	// set it; stampEditID does.
+	EditID uint64
+	Err    error
 }
 
 // MessageDeletedMsg carries the result of the chat.delete API call.

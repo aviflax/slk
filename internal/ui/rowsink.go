@@ -4,12 +4,15 @@
 // write the same pending row to every pane that shows it: an
 // instant-display placeholder under a "local:N" TS, then the
 // authoritative message from the chat.postMessage response, or the
-// placeholder's removal when the post fails. rowSink is that write
-// surface, sinksFor picks the panes, and localRow builds the
-// placeholder.
+// placeholder's removal when the post fails. The optimistic edit
+// patches an existing row the same way. rowSink is that write surface,
+// sinksFor, replySinksFor and shownSinks pick the panes, and localRow
+// builds the placeholder.
 package ui
 
 import (
+	"errors"
+
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/gammons/slk/internal/slack/mrkdwn"
@@ -31,6 +34,10 @@ type rowSink interface {
 	// RemoveLocal drops the placeholder localTS, reporting whether it
 	// was there.
 	RemoveLocal(localTS string) bool
+	// Patch applies f to the row with TS ts (in the thread pane, the
+	// parent as well) and returns that row as it was. ok is false when
+	// the pane does not show ts.
+	Patch(ts string, f func(*messages.MessageItem)) (prior messages.MessageItem, ok bool)
 }
 
 var (
@@ -85,6 +92,35 @@ func (s rowSinks) settle(localTS string, item messages.MessageItem) {
 	for _, c := range s.channel {
 		c.Settle(localTS, cloneMessageItem(item))
 	}
+}
+
+// shownSinks returns the panes that may show an existing message of
+// channelID, wherever it sits: every window on the channel, and the
+// thread panel when it holds a thread of that channel (as a reply or
+// as the parent). The edit and delete paths and their echoes write
+// these.
+func (a *App) shownSinks(channelID string) rowSinks {
+	s := a.sinksFor(channelID)
+	if channelID != "" && channelID == a.threadPanel.ChannelID() {
+		s.thread = a.threadPanel
+	}
+	return s
+}
+
+// patch applies f to the row with TS ts in every pane, and returns the
+// row as the first pane holding it showed it before.
+func (s rowSinks) patch(ts string, f func(*messages.MessageItem)) (prior messages.MessageItem, ok bool) {
+	for _, c := range s.channel {
+		if p, found := c.Patch(ts, f); found && !ok {
+			prior, ok = p, true
+		}
+	}
+	if s.thread != nil {
+		if p, found := s.thread.Patch(ts, f); found && !ok {
+			prior, ok = p, true
+		}
+	}
+	return prior, ok
 }
 
 // insertSinks returns the panes showing a pending send's row: the same
@@ -158,6 +194,24 @@ func stampLocalTS(ins pendingInsert, call func() tea.Msg) tea.Cmd {
 		case ThreadReplySendFailedMsg:
 			r.LocalTS = ins.localTS
 			r.Broadcast = ins.broadcast
+			return r
+		default:
+			return r
+		}
+	}
+}
+
+// stampEditID wraps an edit's service call so its result carries the
+// pending edit's id, which the result's reducer arm settles; services
+// never set it. A nil result (no active workspace) becomes a failed
+// edit.
+func stampEditID(e pendingEdit, call func() tea.Msg) tea.Cmd {
+	return func() tea.Msg {
+		switch r := call().(type) {
+		case nil:
+			return MessageEditedMsg{ChannelID: e.channelID, TS: e.ts, EditID: e.id, Err: errors.New(noWorkspaceReason)}
+		case MessageEditedMsg:
+			r.EditID = e.id
 			return r
 		default:
 			return r

@@ -2186,9 +2186,9 @@ func (a *App) SetMode(mode Mode) {
 // vim convention where finishing an action drops you back to command
 // mode. Used by every send branch in handleInsertMode that actually
 // dispatches a message (plain-text and attachment, channel and
-// thread). Edits intentionally bypass this and instead exit insert
-// mode via cancelEdit on MessageEditedMsg, so a transient edit
-// failure doesn't strand the user one keystroke away from resuming.
+// thread). Edits leave insert mode through cancelEdit in submitEdit,
+// which also restores the stashed draft; a failed edit is reopened by
+// reopenEdit.
 func (a *App) exitInsertAfterSend() {
 	a.SetMode(ModeNormal)
 	a.compose.Blur()
@@ -3883,7 +3883,13 @@ func (a *App) beginEditOfSelected() tea.Cmd {
 	if channelID == "" || ts == "" {
 		return nil
 	}
+	return a.enterEdit(channelID, ts, panel, text)
+}
 
+// enterEdit opens the editor on message ts of channelID in panel's
+// composer, seeded with text. The composer's own text is stashed and
+// comes back when the edit ends.
+func (a *App) enterEdit(channelID, ts string, panel Panel, text string) tea.Cmd {
 	var stashed string
 	switch panel {
 	case PanelMessages:
@@ -4249,23 +4255,60 @@ func (a *App) openImagePreviewOfSelected() tea.Cmd {
 	return nil
 }
 
-// submitEdit emits an EditMessageMsg if the edit text is non-empty.
-// Empty text refuses with an inline toast and keeps edit mode open.
+// submitEdit emits an EditMessageMsg if the edit text is non-empty and
+// closes the editor, as a send leaves insert mode: the edit shows at
+// once, and a failure reopens it with rawValue (reopenEdit). Empty
+// text refuses with an inline toast and keeps edit mode open.
 func (a *App) submitEdit(rawValue, translated string) tea.Cmd {
 	if strings.TrimSpace(rawValue) == "" {
 		return func() tea.Msg {
 			return editEmptyToastMsg{}
 		}
 	}
-	chID := a.editing.ChannelID()
-	ts := a.editing.TS()
-	return func() tea.Msg {
-		return EditMessageMsg{
-			ChannelID: chID,
-			TS:        ts,
-			NewText:   translated,
-		}
+	edit := EditMessageMsg{
+		ChannelID: a.editing.ChannelID(),
+		TS:        a.editing.TS(),
+		NewText:   translated,
+		Typed:     rawValue,
+		TeamID:    a.activeTeamID,
+		Panel:     a.editing.Panel(),
 	}
+	if edit.Panel == PanelThread {
+		edit.ThreadTS = a.threadPanel.ThreadTS()
+	}
+	a.cancelEdit()
+	return func() tea.Msg { return edit }
+}
+
+// reopenEdit reopens a failed edit on its message, with the text as
+// typed, in the composer it came from. It does so only when the user
+// is where they left it: the same workspace, in normal mode with no
+// other edit open, the same panel focused and still showing the
+// message. Otherwise it reports false and the caller gives the text
+// back as a draft.
+func (a *App) reopenEdit(e pendingEdit) (tea.Cmd, bool) {
+	if a.activeTeamID != e.teamID || a.editing.IsActive() || a.mode != ModeNormal || a.focusedPanel != e.panel {
+		return nil, false
+	}
+	var rows []messages.MessageItem
+	switch e.panel {
+	case PanelMessages:
+		if a.activeChannelID != e.channelID {
+			return nil, false
+		}
+		rows = a.messagepane.Messages()
+	case PanelThread:
+		if !a.threadVisible || a.threadPanel.ChannelID() != e.channelID || a.threadPanel.ThreadTS() != e.threadTS {
+			return nil, false
+		}
+		rows = a.threadPanel.Replies()
+	default:
+		return nil, false
+	}
+	if messages.FirstIndexOfTS(rows, e.ts) < 0 {
+		return nil, false
+	}
+	return a.enterEdit(e.channelID, e.ts, e.panel, e.typed), true
 }
 
 // truncateReason returns s truncated to max characters with an ellipsis.

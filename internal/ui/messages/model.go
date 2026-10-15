@@ -1032,15 +1032,21 @@ func (m *Model) IncrementReplyCount(parentTS, replyTS string) {
 // marks it as edited. Returns true if the message was found.
 // Invalidates the render cache.
 func (m *Model) UpdateMessageInPlace(ts, newText string) bool {
-	i := FirstIndexOfTS(m.messages, ts)
-	if i < 0 {
-		return false
+	_, ok := m.Patch(ts, func(r *MessageItem) { r.Text = newText; r.IsEdited = true })
+	return ok
+}
+
+// Patch applies f to the first message with TS ts (PatchTS) and returns
+// the message as it was before. ok is false when no message has ts.
+func (m *Model) Patch(ts string, f func(*MessageItem)) (prior MessageItem, ok bool) {
+	rows, ch := PatchTS(m.messages, ts, func(r *MessageItem) { prior = *r; f(r) })
+	if ch.Op == RowNone {
+		return MessageItem{}, false
 	}
-	m.messages[i].Text = newText
-	m.messages[i].IsEdited = true
+	m.messages = rows
 	m.dropCache()
 	m.dirty()
-	return true
+	return prior, true
 }
 
 // RemoveMessageByTS removes a message with the given TS, adjusting the
