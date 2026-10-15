@@ -341,7 +341,8 @@ earlier one. The failure toast adds "Your text is on the clipboard.",
 or "N unsent messages are on the clipboard." (`OnClipboard` on
 `statusbar.SendFailedMsg` / `EditFailedMsg`, `unsentTexts.note`). A
 text leaves the list when it goes back to a composer, or when a
-message or edit Slack accepts contains it (`delivered`): typed again,
+message or edit Slack accepts holds it as whole lines (`delivered`,
+`containsLines`; "yes" is not delivered by "yesterday works"): typed again,
 or pasted from the clipboard, so sending the whole bundle empties the
 list. The list keeps the 20
 newest (`unsentLimit`); once any were dropped, the toast says how

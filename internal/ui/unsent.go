@@ -6,7 +6,7 @@
 // kept in a list for the session and the clipboard always gets all of
 // them: a second failure must not overwrite the first. A text leaves the
 // list when it goes back to a composer or when a message Slack accepts
-// contains it.
+// holds it as whole lines.
 package ui
 
 import (
@@ -44,10 +44,24 @@ func (u *unsentTexts) remove(text string) {
 	u.texts = slices.DeleteFunc(u.texts, func(t string) bool { return t == text })
 }
 
-// sent forgets every text that sent contains: Slack has it, typed
-// again or pasted from the clipboard, alone or in the whole bundle.
+// sent forgets every text that sent holds as whole lines
+// (containsLines): Slack has it, typed again or pasted from the
+// clipboard, alone, in the whole bundle or under a note. A text that
+// is only part of a line ("yes" in "yesterday works") stays.
 func (u *unsentTexts) sent(sent string) {
-	u.texts = slices.DeleteFunc(u.texts, func(t string) bool { return strings.Contains(sent, t) })
+	u.texts = slices.DeleteFunc(u.texts, func(t string) bool { return containsLines(sent, t) })
+}
+
+// containsLines reports whether text's lines appear in sent as whole,
+// consecutive lines.
+func containsLines(sent, text string) bool {
+	have, want := strings.Split(sent, "\n"), strings.Split(text, "\n")
+	for i := 0; i+len(want) <= len(have); i++ {
+		if slices.Equal(have[i:i+len(want)], want) {
+			return true
+		}
+	}
+	return false
 }
 
 // clipboard is what the clipboard holds: every unsent text, oldest

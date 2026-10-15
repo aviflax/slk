@@ -182,7 +182,7 @@ func TestUnsentTextLeavesWhenASentMessageContainsIt(t *testing.T) {
 	failSends(t, a, "one", "two", "three")
 	a.compose.SetValue("")
 	bundle := "two\n\nthree"
-	_, local := sendFromComposer(t, a, PanelMessages, "fyi: "+bundle)
+	_, local := sendFromComposer(t, a, PanelMessages, "fyi:\n"+bundle)
 	a.Update(MessageSentMsg{ChannelID: "C1", LocalTS: local, Message: messages.MessageItem{TS: "20.000000", UserID: "USELF", Text: bundle}})
 	_, local = sendFromComposer(t, a, PanelMessages, "four")
 	a.compose.SetValue("busy")
@@ -193,6 +193,46 @@ func TestUnsentTextLeavesWhenASentMessageContainsIt(t *testing.T) {
 	}
 	if !strings.Contains(toast, "Your text is on the clipboard") {
 		t.Errorf("toast = %q, want the single-text note", toast)
+	}
+}
+
+// A text is recovered only by a message that holds it as whole lines:
+// "yes" is not delivered by "yesterday works", nor by "oh yes".
+func TestUnsentTextNotRecoveredByAPartialMatch(t *testing.T) {
+	a := typedApp(t)
+	copied := clipboardLog(a)
+	failSends(t, a, "first", "yes")
+	a.compose.SetValue("")
+	for i, text := range []string{"yesterday works", "oh yes"} {
+		_, local := sendFromComposer(t, a, PanelMessages, text)
+		a.Update(MessageSentMsg{ChannelID: "C1", LocalTS: local, Message: messages.MessageItem{TS: fmt.Sprintf("2%d.000000", i), UserID: "USELF", Text: text}})
+	}
+	_, local := sendFromComposer(t, a, PanelMessages, "four")
+	a.compose.SetValue("busy")
+	a.Update(MessageSendFailedMsg{ChannelID: "C1", LocalTS: local, Reason: "boom"})
+	if n := len(*copied); (*copied)[n-1] != "yes\n\nfour" {
+		t.Fatalf("clipboard = %q, want yes kept beside four", (*copied)[n-1])
+	}
+}
+
+// Whole lines of a longer message do recover a text, as when the user
+// pastes the clipboard under a note.
+func TestUnsentLinesBlock(t *testing.T) {
+	for _, c := range []struct {
+		sent, text string
+		want       bool
+	}{
+		{"yes", "yes", true},
+		{"yesterday works", "yes", false},
+		{"oh yes", "yes", false},
+		{"note\nyes\nbye", "yes", true},
+		{"a\nb\n\nc", "a\nb", true},
+		{"a\nbb", "a\nb", false},
+		{"x\na\nb", "a\nb", true},
+	} {
+		if got := containsLines(c.sent, c.text); got != c.want {
+			t.Errorf("containsLines(%q, %q) = %v, want %v", c.sent, c.text, got, c.want)
+		}
 	}
 }
 
