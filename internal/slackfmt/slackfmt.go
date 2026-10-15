@@ -28,8 +28,9 @@ var (
 	// typed emails into <mailto:X|X>. Bare-link substitution keeps the URL
 	// as-is for http(s) but strips the mailto: prefix so the text reads as
 	// just the address.
+	// An empty label (<url|>) is a bare link: Slack shows the URL.
 	linkWithLabelRe = regexp.MustCompile(`<((?:https?://|mailto:)[^|>]+)\|([^>]+)>`)
-	linkBareRe      = regexp.MustCompile(`<((?:https?://|mailto:)[^>]+)>`)
+	linkBareRe      = regexp.MustCompile(`<((?:https?://|mailto:)[^|>]+)\|?>`)
 )
 
 // MentionedUserIDs returns the user IDs of every <@U…> mention in text,

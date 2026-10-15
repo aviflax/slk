@@ -27,6 +27,12 @@ func TestExtractLinks(t *testing.T) {
 			want: []Link{{URL: "https://example.com/page", Label: "the docs"}},
 		},
 		{
+			// Slack sends an empty label for a link it shows as its URL.
+			name: "empty label is a bare link",
+			text: "<https://b.example/|> then <https://a.example/x> then <https://b.example/>",
+			want: []Link{{URL: "https://b.example/"}, {URL: "https://a.example/x"}},
+		},
+		{
 			name: "mixed, order of appearance",
 			text: "<https://a.example/1|first> then <https://b.example/2>",
 			want: []Link{
@@ -52,5 +58,13 @@ func TestExtractLinks(t *testing.T) {
 				t.Errorf("ExtractLinks(%q) = %#v, want %#v", tc.text, got, tc.want)
 			}
 		})
+	}
+}
+
+// An empty label shows the URL, as Slack draws it, not the URL with
+// the separator left on.
+func TestFlattenEmptyLabelLink(t *testing.T) {
+	if got := FlattenMrkdwn("<https://b.example/|>", nil, nil); got != "https://b.example/" {
+		t.Errorf("FlattenMrkdwn = %q, want the URL alone", got)
 	}
 }

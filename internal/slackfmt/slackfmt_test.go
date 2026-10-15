@@ -69,3 +69,10 @@ func TestMentionedUserIDs(t *testing.T) {
 		t.Errorf("MentionedUserIDs(none) = %v; want empty", got)
 	}
 }
+
+// An empty label shows the URL alone, as Slack draws it.
+func TestStripMarkup_EmptyLabelLink(t *testing.T) {
+	if got := StripMarkup("<https://x.io/|>", nil); got != "https://x.io/" {
+		t.Fatalf("StripMarkup = %q, want the URL alone", got)
+	}
+}

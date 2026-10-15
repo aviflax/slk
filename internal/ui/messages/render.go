@@ -26,7 +26,8 @@ var (
 	inlineCodeRe    = regexp.MustCompile("`([^`\n]+)`")
 	codeBlockRe     = regexp.MustCompile("(?s)```(.+?)```")
 
-	// Slack link patterns: <url|label> or <url>.
+	// Slack link patterns: <url|label> or <url>. An empty label (<url|>)
+	// is a bare link: Slack shows the URL.
 	// linkWithLabelRe matches both http(s) URLs and mailto: addresses
 	// (Slack auto-linkifies typed emails into <mailto:X|X> form). The
 	// scheme restriction means we do NOT match channel mentions
@@ -34,7 +35,7 @@ var (
 	// other Slack-internal angle-bracket forms — those are handled by
 	// dedicated regexes below.
 	linkWithLabelRe = regexp.MustCompile(`<((?:https?://|mailto:)[^|>]+)\|([^>]+)>`)
-	linkBareRe      = regexp.MustCompile(`<((?:https?://|mailto:)[^>]+)>`)
+	linkBareRe      = regexp.MustCompile(`<((?:https?://|mailto:)[^|>]+)\|?>`)
 
 	// Slack user/channel mentions: <@U1234> <#C1234|channel-name>
 	userMentionRe = regexp.MustCompile(`<@([A-Z0-9]+)>`)
