@@ -178,10 +178,9 @@ func shortcodeGlyph(code string) string {
 		return ""
 	}
 	g := emoji.CodeMap()[":"+emoji.StripSkinTone(name)+":"]
-	// Multi-codepoint glyphs (base+VS16, ZWJ) draw at a width the
-	// terminal and lipgloss disagree on; callers use FallbackGlyph.
-	if !emoji.ShouldRenderUnicode(g) {
-		return ""
-	}
-	return g
+	// base+VS16 loses its selector (terminals and lipgloss disagree on
+	// the pair's width); ZWJ and the like give "", and callers use
+	// FallbackGlyph.
+	glyph, _ := emoji.TextGlyph(g)
+	return glyph
 }

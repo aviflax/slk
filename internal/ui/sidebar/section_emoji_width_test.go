@@ -7,18 +7,20 @@ import (
 	"charm.land/lipgloss/v2"
 )
 
-// A section emoji that resolves to more than one codepoint (base +
-// VS16, ZWJ, ...) draws at a width terminals disagree with lipgloss
-// about, shifting everything to its right. The header must fall back to
-// the :shortcode: text, as message bodies do (gammons/slk#301).
-func TestSectionHeader_MultiCodepointEmojiFallsBackToShortcode(t *testing.T) {
+// A section emoji that resolves to base + VS16 draws at a width terminals
+// disagree with lipgloss about, shifting everything to its right. The
+// header draws the bare base instead, whose width they agree on. A
+// sequence that cannot be made safe (ZWJ) falls back to the :shortcode:
+// text, as message bodies do (gammons/slk#301).
+func TestSectionHeader_MultiCodepointEmojiIsWidthSafe(t *testing.T) {
 	cases := []struct {
 		emoji string
 		want  string
 	}{
-		{"hammer_and_wrench", ":hammer_and_wrench: Tools"},
-		{"mountain", ":mountain: Tools"},
+		{"hammer_and_wrench", "\U0001F6E0  Tools"},
+		{"mountain", "⛰  Tools"},
 		{"hammer", "\U0001F528  Tools"},
+		{"rainbow-flag", ":rainbow-flag: Tools"},
 	}
 	for _, c := range cases {
 		provider := &fakeProvider{

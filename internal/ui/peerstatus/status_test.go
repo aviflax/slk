@@ -9,8 +9,15 @@ import (
 
 var testNow = time.Unix(1700000000, 0)
 
-func TestStatusGlyph_MultiCodepointEmojiUsesFallback(t *testing.T) {
+func TestStatusGlyph_VS16EmojiUsesBareGlyph(t *testing.T) {
 	s := Status{Emoji: ":mountain:", Text: "hiking"}
+	if got, want := s.StatusGlyph(testNow), "⛰"; got != want {
+		t.Errorf("StatusGlyph = %q, want %q", got, want)
+	}
+}
+
+func TestStatusGlyph_ZWJEmojiUsesFallback(t *testing.T) {
+	s := Status{Emoji: ":rainbow-flag:", Text: "pride"}
 	if got := s.StatusGlyph(testNow); got != FallbackGlyph {
 		t.Errorf("StatusGlyph = %q, want fallback %q", got, FallbackGlyph)
 	}

@@ -240,8 +240,8 @@ func TestMarksOverlay_ClickOutsideCloses(t *testing.T) {
 	}
 }
 
-func TestPreviewText_KeepsMultiCodepointEmojiAsShortcode(t *testing.T) {
-	if got := previewText("on :mountain: duty"); got != "on :mountain: duty" {
+func TestPreviewText_ZWJEmojiStaysShortcodeAndVS16DropsSelector(t *testing.T) {
+	if got := previewText("on :rainbow-flag: duty"); got != "on :rainbow-flag: duty" {
 		t.Errorf("previewText = %q, want the shortcode kept", got)
 	}
 }

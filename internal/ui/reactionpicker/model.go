@@ -392,8 +392,8 @@ func (m *Model) renderBox(termWidth int) string {
 		if preview == "" {
 			// Legacy fallback path (image mode off, no URL, or
 			// Place returned false).
-			if slkemoji.ShouldRenderUnicode(entry.Unicode) {
-				preview = entry.Unicode
+			if g, ok := slkemoji.TextGlyph(entry.Unicode); ok {
+				preview = g
 			} else {
 				preview = ":" + entry.Name + ":"
 			}

@@ -64,13 +64,12 @@ func TestViewOverlayPreservesFireGlyph(t *testing.T) {
 	}
 }
 
-// TestPickerFallsBackForVS16Emoji guards that VS16-anchored emoji
-// (single base + U+FE0F) now fall back to :name: text rather than
-// rendering the Unicode glyph. Many terminal+font combos render
-// VS16 emoji from legacy blocks at a different visual width than
-// lipgloss reports, breaking border alignment; the shortcode form
-// is layout-safe.
-func TestPickerFallsBackForVS16Emoji(t *testing.T) {
+// TestPickerRendersVS16EmojiAsBareGlyph guards that VS16-anchored emoji
+// (single base + U+FE0F) show a glyph, not a literal :name: among rows of
+// glyphs. The selector is dropped: terminals and lipgloss disagree on the
+// width of the pair (breaking border alignment) but agree on the bare
+// base codepoint.
+func TestPickerRendersVS16EmojiAsBareGlyph(t *testing.T) {
 	m := New()
 	m.SetFrecentEmoji([]core.EmojiEntry{})
 	m.Open("Cxxx", "1.0", nil)
@@ -78,11 +77,14 @@ func TestPickerFallsBackForVS16Emoji(t *testing.T) {
 		m.HandleKey(string(ch))
 	}
 	view := m.View(120)
-	if !strings.Contains(view, ":heart:") {
-		t.Errorf("rendered picker does NOT contain literal :heart: text for VS16-anchored emoji")
+	if strings.Contains(view, ":heart:") {
+		t.Errorf("rendered picker shows literal :heart: where other rows show glyphs")
+	}
+	if !strings.Contains(view, "❤ heart") {
+		t.Errorf("rendered picker does not show the bare heart glyph before the name")
 	}
 	if strings.Contains(view, "\u2764\uFE0F") {
-		t.Errorf("rendered picker contains ❤️ Unicode glyph; expected :heart: text fallback")
+		t.Errorf("rendered picker emits VS16, whose width terminals disagree on")
 	}
 }
 

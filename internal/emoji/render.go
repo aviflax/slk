@@ -12,7 +12,8 @@ var shortcodeRe = regexp.MustCompile(`:[A-Za-z0-9_+\-]+:`)
 // ResolveShortcodesInText substitutes safe Slack-style :shortcode:
 // sequences in s with their Unicode glyphs (with a trailing space, for
 // byte-for-byte parity with the previous emoji.Sprint(text) behavior).
-// Shortcodes whose resolved Unicode form fails ShouldRenderUnicode (ZWJ
+// base+VS16 shortcodes resolve to the bare base glyph (see TextGlyph).
+// Shortcodes with no safe form (ZWJ
 // sequences, flag pairs, skin-tone modifiers) are left as the literal
 // :name: text so they render as readable shortcodes instead of broken
 // glyphs. Unknown shortcodes pass through unchanged.
@@ -23,9 +24,8 @@ func ResolveShortcodesInText(s string) string {
 			// Unrecognized shortcode; pass through.
 			return match
 		}
-		resolved := glyph + " "
-		if ShouldRenderUnicode(resolved) {
-			return resolved
+		if g, ok := TextGlyph(glyph); ok {
+			return g + " "
 		}
 		return match
 	})

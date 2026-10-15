@@ -94,9 +94,8 @@ func (m *Model) HandleKey(keyStr string) {
 func emojiGlyph(name string) string {
 	code := ":" + name + ":"
 	if u, ok := slkemoji.CodeMap()[code]; ok {
-		u = strings.TrimRight(u, " ")
-		if slkemoji.ShouldRenderUnicode(u) {
-			return u
+		if g, ok := slkemoji.TextGlyph(u); ok {
+			return g
 		}
 	}
 	return code

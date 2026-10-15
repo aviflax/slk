@@ -253,8 +253,8 @@ func RenderMessage(msg MessageItem, width int, rc *RenderContext, opt RenderOpti
 				// the glyph renderer still needs the workaround.
 				legacyName := emojiutil.StripSkinTone(r.Emoji)
 				resolved := emojiutil.Sprint(":" + legacyName + ":")
-				if emojiutil.ShouldRenderUnicode(resolved) {
-					emojiStr = resolved
+				if g, ok := emojiutil.TextGlyph(resolved); ok {
+					emojiStr = g + " "
 				} else {
 					emojiStr = ":" + legacyName + ":"
 				}
