@@ -166,13 +166,23 @@ func TestFetchLatestReleaseErrors(t *testing.T) {
 	}
 }
 
+// The server never answers; the context is cancelled once the request has
+// reached it, which is what a timeout firing mid-request looks like. No
+// clock is involved, so the request is always in flight when the context
+// ends.
 func TestFetchLatestReleaseTimeout(t *testing.T) {
+	arrived := make(chan struct{})
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		close(arrived)
 		<-r.Context().Done()
 	}))
 	defer srv.Close()
-	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
+	go func() {
+		<-arrived
+		cancel()
+	}()
 	if _, err := fetchLatestRelease(ctx, srv.Client(), srv.URL, "0.25.0"); err == nil {
 		t.Error("want timeout error")
 	}
