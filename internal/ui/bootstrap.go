@@ -144,7 +144,7 @@ func (b *workspaceBootstrap) checkDone() {
 // Used by the SpinnerTickMsg arm to keep the chain alive while
 // either the bootstrap overlay or the messages pane is loading.
 func spinnerTickCmd() tea.Cmd {
-	return tea.Tick(100*time.Millisecond, func(time.Time) tea.Msg {
+	return tick(100*time.Millisecond, func(time.Time) tea.Msg {
 		return SpinnerTickMsg{}
 	})
 }

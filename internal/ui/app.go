@@ -990,10 +990,10 @@ func (a *App) defaultHelpHint() string {
 func (a *App) Init() tea.Cmd {
 	if a.bootstrap.IsLoading() {
 		return tea.Batch(
-			tea.Tick(100*time.Millisecond, func(time.Time) tea.Msg {
+			tick(100*time.Millisecond, func(time.Time) tea.Msg {
 				return SpinnerTickMsg{}
 			}),
-			tea.Tick(15*time.Second, func(time.Time) tea.Msg {
+			tick(15*time.Second, func(time.Time) tea.Msg {
 				return LoadingTimeoutMsg{}
 			}),
 		)
@@ -1683,7 +1683,7 @@ const scrollFlushInterval = 16 * time.Millisecond
 type scrollFlushMsg struct{}
 
 func scrollFlushTickCmd() tea.Cmd {
-	return tea.Tick(scrollFlushInterval, func(time.Time) tea.Msg {
+	return tick(scrollFlushInterval, func(time.Time) tea.Msg {
 		return scrollFlushMsg{}
 	})
 }
@@ -1973,7 +1973,7 @@ func (a *App) maybeFetchOlderHistory(atTop bool) tea.Cmd {
 	// fully loaded), no tick is alive and the glyph would freeze on its
 	// last frame.
 	return tea.Batch(
-		tea.Tick(100*time.Millisecond, func(time.Time) tea.Msg {
+		tick(100*time.Millisecond, func(time.Time) tea.Msg {
 			return SpinnerTickMsg{}
 		}),
 		failNil(func() tea.Msg {
@@ -2444,7 +2444,7 @@ func (a *App) openSelectedThreadCmd(debounce bool) tea.Cmd {
 	}
 	a.pendingThreadFetchGen++
 	gen := a.pendingThreadFetchGen
-	return tea.Tick(openThreadDebounceDelay, func(time.Time) tea.Msg {
+	return tick(openThreadDebounceDelay, func(time.Time) tea.Msg {
 		return threadFetchDebounceMsg{channelID: chID, threadTS: threadTS, gen: gen}
 	})
 }
@@ -2491,7 +2491,7 @@ func (a *App) scheduleThreadsDirty() tea.Cmd {
 	if d == 0 {
 		d = defaultThreadsDirtyDebounce
 	}
-	return tea.Tick(d, func(time.Time) tea.Msg {
+	return tick(d, func(time.Time) tea.Msg {
 		return ThreadsListDirtyMsg{TeamID: team}
 	})
 }
@@ -2579,7 +2579,7 @@ func (a *App) scheduleMarkFlush() tea.Cmd {
 	if d == 0 {
 		d = defaultMarkFlushDebounce
 	}
-	return tea.Tick(d, func(time.Time) tea.Msg { return markFlushMsg{} })
+	return tick(d, func(time.Time) tea.Msg { return markFlushMsg{} })
 }
 
 // flushPendingMarks clears both slots and returns the commands that
@@ -4448,7 +4448,7 @@ func (a *App) scheduleChannelSearch(query string) tea.Cmd {
 	if delay <= 0 {
 		delay = channelSearchDebounceDelay
 	}
-	return tea.Tick(delay, func(time.Time) tea.Msg {
+	return tick(delay, func(time.Time) tea.Msg {
 		return channelSearchDebounceMsg{query: query, gen: gen}
 	})
 }

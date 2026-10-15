@@ -149,7 +149,7 @@ const autoScrollTickInterval = 50 * time.Millisecond
 // self-terminates when the drag ends or the cursor leaves the edge
 // (see Handle's autoScrollTickMsg arm).
 func autoScrollTickCmd() tea.Cmd {
-	return tea.Tick(autoScrollTickInterval, func(time.Time) tea.Msg {
+	return tick(autoScrollTickInterval, func(time.Time) tea.Msg {
 		return autoScrollTickMsg{}
 	})
 }
@@ -169,7 +169,7 @@ type motionFlushTickMsg struct{}
 // motionFlushTickCmd schedules the next motionFlushTickMsg. See
 // Handle's MouseMotionMsg / motionFlushTickMsg arms.
 func motionFlushTickCmd() tea.Cmd {
-	return tea.Tick(motionFlushInterval, func(time.Time) tea.Msg {
+	return tick(motionFlushInterval, func(time.Time) tea.Msg {
 		return motionFlushTickMsg{}
 	})
 }

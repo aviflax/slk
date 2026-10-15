@@ -298,7 +298,7 @@ func (b *typingBroadcaster) MaybeSend(channelID string) bool {
 // second out. Used by both the UserTypingMsg arm (kick the chain
 // alive) and TypingExpiredMsg arm (reschedule while typers remain).
 func typingExpiredTickCmd() tea.Cmd {
-	return tea.Tick(time.Second, func(time.Time) tea.Msg {
+	return tick(time.Second, func(time.Time) tea.Msg {
 		return TypingExpiredMsg{}
 	})
 }

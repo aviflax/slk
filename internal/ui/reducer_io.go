@@ -49,7 +49,7 @@
 // AGENTS.md): toastWithClear shows a toast and schedules its clear
 // (copiedClearAfter), and toastUntilReplaced shows one that a later
 // toast replaces on purpose (upload progress). toastWithClear also
-// collapses the `cmds = append(cmds, tea.Tick(Ns, ... CopiedClearMsg))`
+// collapses the `cmds = append(cmds, tick(Ns, ... CopiedClearMsg))`
 // idiom that recurred ~11 times in the original switch.
 package ui
 
@@ -73,7 +73,7 @@ import (
 // toast replaced this one in the meantime (statusbar ToastSeq).
 func copiedClearAfter(a *App, d time.Duration) tea.Cmd {
 	seq := a.statusbar.ToastSeq()
-	return tea.Tick(d, func(time.Time) tea.Msg {
+	return tick(d, func(time.Time) tea.Msg {
 		return statusbar.CopiedClearMsg{Seq: seq}
 	})
 }
@@ -277,7 +277,7 @@ var reduceIO reducerFunc = func(a *App, msg tea.Msg) (tea.Cmd, bool) {
 			return nil, true
 		}
 		a.emojiInvalidatePending = true
-		return tea.Tick(emojiInvalidateDebounce, func(time.Time) tea.Msg {
+		return tick(emojiInvalidateDebounce, func(time.Time) tea.Msg {
 			return emojiInvalidateMsg{}
 		}), true
 

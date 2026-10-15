@@ -38,7 +38,7 @@ const previewSpinnerTickInterval = 100 * time.Millisecond
 // Update arm reschedules until the overlay either closes or the image
 // has loaded; the chain self-terminates.
 func previewSpinnerTickCmd() tea.Cmd {
-	return tea.Tick(previewSpinnerTickInterval, func(time.Time) tea.Msg {
+	return tick(previewSpinnerTickInterval, func(time.Time) tea.Msg {
 		return previewSpinnerTickMsg{}
 	})
 }

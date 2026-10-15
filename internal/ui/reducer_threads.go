@@ -309,7 +309,7 @@ var reduceThreads reducerFunc = func(a *App, msg tea.Msg) (tea.Cmd, bool) {
 		if d == 0 {
 			d = defaultThreadsDirtyDebounce
 		}
-		return tea.Tick(d, func(time.Time) tea.Msg {
+		return tick(d, func(time.Time) tea.Msg {
 			return threadsListFetchMsg{teamID: team}
 		}), true
 

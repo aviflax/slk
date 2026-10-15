@@ -81,7 +81,7 @@ func (a *App) cycleTheme(step int) tea.Cmd {
 	a.pendingTheme = pendingThemeSave{name: name, teamID: a.activeTeamID}
 	a.themeSaveGen++
 	gen := a.themeSaveGen
-	return tea.Batch(toast, tea.Tick(themeSaveDelay, func(time.Time) tea.Msg {
+	return tea.Batch(toast, tick(themeSaveDelay, func(time.Time) tea.Msg {
 		return themeSaveDueMsg{gen: gen}
 	}))
 }

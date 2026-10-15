@@ -34,7 +34,7 @@ const peerStatusTickInterval = time.Minute
 const dmTopicLayout = "15:04"
 
 func peerStatusTick() tea.Cmd {
-	return tea.Tick(peerStatusTickInterval, func(time.Time) tea.Msg {
+	return tick(peerStatusTickInterval, func(time.Time) tea.Msg {
 		return peerStatusTickMsg{}
 	})
 }
@@ -228,7 +228,7 @@ func (p *presenceController) Handle(a *App, msg tea.Msg) (tea.Cmd, bool) {
 		if !(st.DNDEnabled && !st.DNDEndTS.IsZero() && time.Now().Before(st.DNDEndTS) && p.ClaimTicker()) {
 			return nil, true
 		}
-		return tea.Tick(time.Minute, func(time.Time) tea.Msg {
+		return tick(time.Minute, func(time.Time) tea.Msg {
 			return statusbar.DNDTickMsg{}
 		}), true
 
@@ -252,7 +252,7 @@ func (p *presenceController) Handle(a *App, msg tea.Msg) (tea.Cmd, bool) {
 		a.statusbar.SetStatus(pres, dndEnabled, dndEnd)
 		if dndEnabled && !dndEnd.IsZero() {
 			// Still in DND — reschedule (dndTickerOn stays true).
-			return tea.Tick(time.Minute, func(time.Time) tea.Msg {
+			return tick(time.Minute, func(time.Time) tea.Msg {
 				return statusbar.DNDTickMsg{}
 			}), true
 		}
