@@ -32,7 +32,9 @@ this, but it has never been wired up.
 4. **Chrome stays put.** The workspace rail and channel sidebar remain
    fixed chrome to the left of the tree (sidebar keeps its existing
    `ctrl+b` toggle and `[`/`]` resize). One global thread pane stays at
-   the right edge and follows the focused window.
+   the right edge and follows the focused window. (Amended 2026-10-15:
+   the sidebar now auto-hides on narrow terminals; see "Narrow
+   terminals" in `2026-09-24-thread-stacked-layout-design.md`.)
 
 ## Non-Goals (v1)
 

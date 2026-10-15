@@ -24,7 +24,45 @@
 // drawn. Otherwise the two stack: only one is drawn, across the whole
 // content area, and the caller's threadFront decides which. Compute is
 // pure geometry; App.threadInFront owns the focus rule.
+//
+// Sidebar: Compute draws it when told to. Whether a sidebar the user
+// has not hidden fits is sidebarFits; App.sidebarShown combines that
+// with the user's ctrl+b choices.
 package ui
+
+// Layout constants, shared by Compute and sidebarFits.
+const (
+	paneBorder = 2 // left + right border cols of every non-rail pane
+	// minMsgWidth and minThreadW are the side-by-side minima; below
+	// their sum the channel and thread stack.
+	minMsgWidth = 40
+	minThreadW  = 80
+	// minSidebarMsgW is the channel pane width a shown sidebar must
+	// leave; narrower than this and the sidebar is auto-hidden.
+	minSidebarMsgW = 60
+	floorPaneW     = 10
+)
+
+// sideBySide reports whether a content area this wide (everything
+// right of the rail and sidebar) holds the channel and a thread side
+// by side.
+func sideBySide(area int) bool {
+	return area-2*paneBorder >= minMsgWidth+minThreadW
+}
+
+// sidebarFits reports whether a sidebar the user has not hidden is
+// drawn at this terminal width: only if the channel pane keeps
+// minSidebarMsgW columns beside it (≥100 cols with the default 6-col
+// rail and 30-col sidebar).
+//
+// A width of 0 means the terminal has not reported its size yet; the
+// sidebar counts as fitting so nothing flips before the first resize.
+func sidebarFits(width, railWidth, sidebarWidth int) bool {
+	if width <= 0 {
+		return true
+	}
+	return width-railWidth-sidebarWidth-2*paneBorder >= minSidebarMsgW
+}
 
 // panelLayout owns the per-frame layout state.
 type panelLayout struct {
@@ -78,13 +116,7 @@ type panelLayoutFrame struct {
 // Border bits are 2 cols on each non-rail pane (1 col left + 1 col
 // right rounded border).
 func (l *panelLayout) Compute(width, height, railWidth, sidebarWidth int, sidebarVisible, threadVisible, threadFront bool) panelLayoutFrame {
-	const (
-		statusHeight = 1
-		paneBorder   = 2 // left + right border cols
-		minMsgWidth  = 40
-		minThreadW   = 80
-		floorPaneW   = 10
-	)
+	const statusHeight = 1
 	contentHeight := height - statusHeight
 
 	sbWidth := 0
@@ -99,7 +131,7 @@ func (l *panelLayout) Compute(width, height, railWidth, sidebarWidth int, sideba
 	switch {
 	case !threadVisible:
 		msgWidth, msgBorder = msgAreaWidth-paneBorder, paneBorder
-	case msgAreaWidth-2*paneBorder >= minMsgWidth+minThreadW:
+	case sideBySide(msgAreaWidth):
 		threadWidth = max(msgAreaWidth*35/100, minThreadW)
 		threadWidth = min(threadWidth, msgAreaWidth-2*paneBorder-minMsgWidth)
 		threadBorder, msgBorder = paneBorder, paneBorder

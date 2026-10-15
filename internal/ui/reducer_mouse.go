@@ -99,7 +99,7 @@ func reduceMouseWheel(a *App, m tea.MouseWheelMsg) tea.Cmd {
 	case x < a.layout.RailWidth():
 		// Workspace rail: no scroll here.
 		return nil
-	case a.sidebarVisible && x < a.layout.SidebarEnd():
+	case a.sidebarShown() && x < a.layout.SidebarEnd():
 		if up {
 			a.sidebar.ScrollUp(wheelLinesPerNotch)
 		} else {
@@ -215,7 +215,7 @@ func reduceMouseClick(a *App, m tea.MouseClickMsg) tea.Cmd {
 		}
 		return a.switchWorkspace(item.ID)
 
-	case a.sidebarVisible && x < a.layout.SidebarEnd():
+	case a.sidebarShown() && x < a.layout.SidebarEnd():
 		a.focusedPanel = PanelSidebar
 		sidebarY := m.Y - 1 // account for top border
 		if sidebarY < 0 {

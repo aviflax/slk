@@ -138,9 +138,15 @@ type App struct {
 	activityView     activityview.Model
 
 	// State
-	mode           Mode
-	focusedPanel   Panel
+	mode         Mode
+	focusedPanel Panel
+	// sidebarVisible is the user's ctrl+b choice: false means hidden
+	// by hand. A sidebar left visible can still be auto-hidden on a
+	// narrow terminal (sidebarFits) unless sidebarPinned, set when the
+	// user shows or resizes it at a width where it would not fit.
+	// Read sidebarShown for what is on screen.
 	sidebarVisible bool
+	sidebarPinned  bool
 	threadVisible  bool
 	// threadCloseAfterUpload records a close that CloseThread refused
 	// while an upload was in flight (the open thread's parent was
@@ -1015,8 +1021,31 @@ func (a *App) threadDrawnAlone() bool {
 	}
 	var scratch panelLayout
 	frame := scratch.Compute(a.width, a.height, a.workspaceRail.Width(), a.sidebar.Width(),
-		a.sidebarVisible, a.threadVisible, a.threadInFront())
+		a.sidebarShown(), a.threadVisible, a.threadInFront())
 	return frame.MsgWidth == 0
+}
+
+// sidebarShown reports whether the sidebar is drawn this frame: the
+// user has not hidden it, and either it fits (sidebarFits) or the user
+// pinned it. Everything that asks "is the sidebar on screen" (layout,
+// focus cycling, mouse routing) reads this, not sidebarVisible.
+func (a *App) sidebarShown() bool {
+	return a.sidebarVisible && (a.sidebarPinned ||
+		sidebarFits(a.width, a.workspaceRail.Width(), a.sidebar.Width()))
+}
+
+// keepFocusOnScreen moves focus off a sidebar that is no longer drawn
+// (auto-hidden by a resize), to whichever content pane is: the thread when it is drawn alone,
+// else the channel.
+func (a *App) keepFocusOnScreen() {
+	if a.focusedPanel != PanelSidebar || a.sidebarShown() {
+		return
+	}
+	if a.threadDrawnAlone() {
+		a.focusedPanel = PanelThread
+	} else {
+		a.focusedPanel = PanelMessages
+	}
 }
 
 // computeFrame resolves this frame's layout from the App's state and
@@ -1024,7 +1053,7 @@ func (a *App) threadDrawnAlone() bool {
 // assembled; tests call it instead of repeating Compute's arguments.
 func (a *App) computeFrame() panelLayoutFrame {
 	return a.layout.Compute(a.width, a.height, a.workspaceRail.Width(), a.sidebar.Width(),
-		a.sidebarVisible, a.threadVisible, a.threadInFront())
+		a.sidebarShown(), a.threadVisible, a.threadInFront())
 }
 
 func (a *App) update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -1117,6 +1146,7 @@ func (a *App) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		a.confirmPrompt.SetWidth(msg.Width)
 		a.confirmPrompt.SetHeight(msg.Height)
+		a.keepFocusOnScreen()
 		return a, nil
 
 	case scrollFlushMsg:
@@ -1824,7 +1854,7 @@ func (a *App) halfPageSize() int {
 // panelAt is a thin wrapper around panelLayout.PanelAt that forwards
 // the App's current height + visibility flags.
 func (a *App) panelAt(x, y int) (panel Panel, paneX, paneY int, ok bool) {
-	return a.layout.PanelAt(x, y, a.height, a.sidebarVisible, a.threadVisible)
+	return a.layout.PanelAt(x, y, a.height, a.sidebarShown(), a.threadVisible)
 }
 
 // scrollFocusedPanel scrolls the focused panel by delta lines (negative = up).
@@ -2180,7 +2210,7 @@ func (a *App) clearSelections() {
 func (a *App) FocusNext() {
 	a.cancelEdit()
 	a.clearSelections()
-	if !a.sidebarVisible {
+	if !a.sidebarShown() {
 		if a.threadVisible {
 			if a.focusedPanel == PanelMessages {
 				a.focusedPanel = PanelThread
@@ -2207,7 +2237,7 @@ func (a *App) FocusNext() {
 func (a *App) FocusPrev() {
 	a.cancelEdit()
 	a.clearSelections()
-	if !a.sidebarVisible {
+	if !a.sidebarShown() {
 		if a.threadVisible {
 			if a.focusedPanel == PanelThread {
 				a.focusedPanel = PanelMessages
@@ -2231,13 +2261,23 @@ func (a *App) FocusPrev() {
 	}
 }
 
+// ToggleSidebar flips whether the sidebar is on screen, at any width.
+// Hiding clears any pin. Showing a sidebar that sidebarFits would
+// auto-hide pins it, so it squeezes the content panes (stacking the
+// thread if need be) until ctrl+b hides it again; showing one that
+// fits does not, so it still yields on a later narrowing.
 func (a *App) ToggleSidebar() {
 	a.clearSelections()
 	// Must be read before the flip: threadDrawnAlone consults
-	// a.sidebarVisible, and the question is whether the thread was
-	// alone in front WITH the sidebar still shown.
+	// sidebarShown, and the question is whether the thread was alone
+	// in front WITH the sidebar still shown.
 	wasThreadAlone := a.threadDrawnAlone()
-	a.sidebarVisible = !a.sidebarVisible
+	if a.sidebarShown() {
+		a.sidebarVisible, a.sidebarPinned = false, false
+	} else {
+		a.sidebarVisible, a.sidebarPinned = true, false
+		a.sidebarPinned = !a.sidebarShown()
+	}
 	if !a.sidebarVisible && a.focusedPanel == PanelSidebar {
 		if wasThreadAlone {
 			a.focusedPanel = PanelThread
@@ -2310,6 +2350,7 @@ func (a *App) openSelectedThreadCmd(debounce bool) tea.Cmd {
 	a.lastOpenedThreadTS = sum.ThreadTS
 	a.threadVisible = true
 	a.statusbar.SetInThread(true)
+	a.keepFocusOnScreen()
 	parent := messages.MessageItem{
 		TS:       sum.ParentTS,
 		UserID:   sum.ParentUserID,
@@ -3444,7 +3485,7 @@ func (a *App) View() tea.View {
 
 	var panels []string
 	panels = append(panels, a.renderRail(frame.RailWidth, frame.ContentHeight, themeVer))
-	if a.sidebarVisible {
+	if frame.SidebarBorder > 0 {
 		panels = append(panels, a.renderSidebar(frame.SidebarWidth, frame.SidebarBorder, frame.ContentHeight, themeVer))
 	}
 	if frame.MsgWidth > 0 {
@@ -3514,7 +3555,7 @@ func (a *App) View() tea.View {
 		debuglog.Perf("App.View total=%s memo=%v w=%d h=%d panel=%d view=%d mode=%s thread=%v sidebar=%v preview=%v",
 			time.Since(viewPerfStart), memoHit, a.width, a.height,
 			int(a.focusedPanel), int(a.view), a.mode.String(),
-			a.threadVisible, a.sidebarVisible, previewActive)
+			a.threadVisible, a.sidebarShown(), previewActive)
 	}
 	return a.finalizeSixelView(v, a.collectSixelPlacements(frame))
 }

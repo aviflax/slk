@@ -185,7 +185,13 @@ func handleNormalMode(a *App, msg tea.KeyMsg) tea.Cmd {
 		a.ToggleSidebar()
 
 	case key.Matches(msg, a.keys.SidebarGrow):
+		// Widening a shown sidebar past what sidebarFits allows must
+		// not make it vanish under the user: pin it instead.
+		wasShown := a.sidebarShown()
 		a.sidebar.GrowWidth()
+		if wasShown && !a.sidebarShown() {
+			a.sidebarPinned = true
+		}
 		if a.settings != nil {
 			a.settings.SaveSidebarWidth(a.sidebar.Width())
 		}

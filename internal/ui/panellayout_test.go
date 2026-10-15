@@ -103,3 +103,33 @@ func TestPanelLayoutCompute_Sweep(t *testing.T) {
 		}
 	}
 }
+
+// sidebarFits decides whether a sidebar the user has not hidden is
+// drawn. Default chrome: 6-column rail, 30-column sidebar.
+func TestSidebarFits(t *testing.T) {
+	tests := []struct {
+		width, sidebarW int
+		want            bool
+	}{
+		{0, testSidebarW, true}, // size not reported yet
+		{60, testSidebarW, false},
+		{80, testSidebarW, false},
+		{99, testSidebarW, false},
+		{100, testSidebarW, true}, // channel keeps exactly 60
+		{120, testSidebarW, true},
+		{140, testSidebarW, true},
+		{160, testSidebarW, true},
+		{200, testSidebarW, true},
+		// A configured width moves the threshold with it.
+		{119, 50, false},
+		{120, 50, true},
+		{89, 20, false},
+		{90, 20, true},
+	}
+	for _, tt := range tests {
+		if got := sidebarFits(tt.width, testRailW, tt.sidebarW); got != tt.want {
+			t.Errorf("sidebarFits(width %d, sidebar %d) = %v, want %v",
+				tt.width, tt.sidebarW, got, tt.want)
+		}
+	}
+}

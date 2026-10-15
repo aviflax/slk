@@ -1480,9 +1480,9 @@ func goldenScenarios() []goldenScenario {
 			build: func(t *testing.T) *App { return goldenThreadScenario(t, 200, 50) },
 		},
 		{
-			// 80x24 with the thread focused: a 40-column stacked
-			// thread, narrow enough that the breadcrumb drops its
-			// author and hint.
+			// 80x24 with the thread focused: the sidebar is
+			// auto-hidden and the thread, stacked, takes the 72
+			// columns right of the rail.
 			name: "narrow", w: 80, h: 24, layout: goldenStackedThread,
 			build: func(t *testing.T) *App {
 				a := goldenThreadApp(t, 80, 24)

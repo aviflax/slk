@@ -28,7 +28,7 @@ import (
 
 // renderSidebar returns the composed sidebar panel string,
 // reading-or-storing through the panel-render cache. Caller is
-// responsible for gating on a.sidebarVisible before invoking;
+// responsible for gating on a.sidebarShown() before invoking;
 // this helper does not check visibility.
 //
 // As a side effect, pushes the resolved sidebar height back into
