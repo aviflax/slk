@@ -6,6 +6,8 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
+	"github.com/gammons/slk/internal/core"
+	"github.com/gammons/slk/internal/ids"
 	"github.com/gammons/slk/internal/ui/messages"
 )
 
@@ -87,10 +89,25 @@ func TestSetMarkRefusesPlaceholder(t *testing.T) {
 
 // Clicking a placeholder to open its thread is refused like Enter.
 func TestOpenThreadClickRefusesPlaceholder(t *testing.T) {
-	a := placeholderApp(t, PanelMessages)
-	a.openThreadForSelectedMessage()
-	if a.threadVisible {
-		t.Error("a thread was opened on the placeholder")
+	a := newTestApp(t, withSize(120, 30), withActiveChannel("C1"))
+	a.SetCurrentUserID("USELF")
+	a.Update(SendMessageMsg{ChannelID: "C1", Text: "pending"})
+	a.View() // lay out the pane so the click lands on the placeholder's row
+	fetched := 0
+	a.setThreadFetcherForTest(func(ids.ChannelID, ids.ThreadTS) core.Msg {
+		fetched++
+		return nil
+	})
+	// The placeholder's row: below the pane's header, with no date
+	// separator above it (the placeholder carries no date).
+	x, y := a.layout.sidebarEnd+2, 3
+	a.Update(tea.MouseClickMsg{X: x, Y: y, Button: tea.MouseLeft})
+	if m, ok := a.messagepane.SelectedMessage(); !ok || !messages.IsLocalTS(m.TS) {
+		t.Fatalf("the click selected %+v, want the placeholder", m)
+	}
+	a.Update(tea.MouseReleaseMsg{X: x, Y: y, Button: tea.MouseLeft})
+	if a.threadVisible || fetched != 0 {
+		t.Errorf("threadVisible=%v fetches=%d: a thread was opened on the placeholder", a.threadVisible, fetched)
 	}
 	if got := statusbarText(a); !strings.Contains(got, stillSendingText) {
 		t.Errorf("status bar = %q, want %q", got, stillSendingText)
