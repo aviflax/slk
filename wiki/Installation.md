@@ -1,6 +1,6 @@
 # Installation
 
-Grab a prebuilt binary from the [latest release](https://github.com/gammons/slk/releases/latest), or use one of the methods below.
+Grab a prebuilt binary from the [latest release](https://github.com/kirahowe/slk/releases/latest), or use one of the methods below.
 
 The shell snippets resolve the latest version automatically.
 
@@ -9,23 +9,23 @@ The shell snippets resolve the latest version automatically.
 ### Debian / Ubuntu
 
 ```bash
-VERSION=$(curl -fsSL https://api.github.com/repos/gammons/slk/releases/latest | grep -oE '"tag_name": *"v[^"]+"' | grep -oE 'v[0-9]+\.[0-9]+\.[0-9]+' | sed 's/^v//')
-curl -fsSLO "https://github.com/gammons/slk/releases/latest/download/slk_${VERSION}_linux_amd64.deb"
+VERSION=$(curl -fsSL https://api.github.com/repos/kirahowe/slk/releases/latest | grep -oE '"tag_name": *"v[^"]+"' | grep -oE 'v[0-9]+\.[0-9]+\.[0-9]+' | sed 's/^v//')
+curl -fsSLO "https://github.com/kirahowe/slk/releases/latest/download/slk_${VERSION}_linux_amd64.deb"
 sudo dpkg -i "slk_${VERSION}_linux_amd64.deb"
 ```
 
 ### Fedora / RHEL
 
 ```bash
-VERSION=$(curl -fsSL https://api.github.com/repos/gammons/slk/releases/latest | grep -oE '"tag_name": *"v[^"]+"' | grep -oE 'v[0-9]+\.[0-9]+\.[0-9]+' | sed 's/^v//')
-sudo rpm -i "https://github.com/gammons/slk/releases/latest/download/slk_${VERSION}_linux_amd64.rpm"
+VERSION=$(curl -fsSL https://api.github.com/repos/kirahowe/slk/releases/latest | grep -oE '"tag_name": *"v[^"]+"' | grep -oE 'v[0-9]+\.[0-9]+\.[0-9]+' | sed 's/^v//')
+sudo rpm -i "https://github.com/kirahowe/slk/releases/latest/download/slk_${VERSION}_linux_amd64.rpm"
 ```
 
 ### Alpine
 
 ```bash
-VERSION=$(curl -fsSL https://api.github.com/repos/gammons/slk/releases/latest | grep -oE '"tag_name": *"v[^"]+"' | grep -oE 'v[0-9]+\.[0-9]+\.[0-9]+' | sed 's/^v//')
-curl -fsSLO "https://github.com/gammons/slk/releases/latest/download/slk_${VERSION}_linux_amd64.apk"
+VERSION=$(curl -fsSL https://api.github.com/repos/kirahowe/slk/releases/latest | grep -oE '"tag_name": *"v[^"]+"' | grep -oE 'v[0-9]+\.[0-9]+\.[0-9]+' | sed 's/^v//')
+curl -fsSLO "https://github.com/kirahowe/slk/releases/latest/download/slk_${VERSION}_linux_amd64.apk"
 sudo apk add --allow-untrusted "slk_${VERSION}_linux_amd64.apk"
 ```
 
@@ -43,8 +43,8 @@ yay -S slk    # or: paru -S slk
 Swap `x86_64` for `arm64` on ARM:
 
 ```bash
-VERSION=$(curl -fsSL https://api.github.com/repos/gammons/slk/releases/latest | grep -oE '"tag_name": *"v[^"]+"' | grep -oE 'v[0-9]+\.[0-9]+\.[0-9]+' | sed 's/^v//')
-curl -fsSL "https://github.com/gammons/slk/releases/latest/download/slk_${VERSION}_linux_x86_64.tar.gz" | tar xz
+VERSION=$(curl -fsSL https://api.github.com/repos/kirahowe/slk/releases/latest | grep -oE '"tag_name": *"v[^"]+"' | grep -oE 'v[0-9]+\.[0-9]+\.[0-9]+' | sed 's/^v//')
+curl -fsSL "https://github.com/kirahowe/slk/releases/latest/download/slk_${VERSION}_linux_x86_64.tar.gz" | tar xz
 sudo mv slk /usr/local/bin/
 ```
 
@@ -53,36 +53,54 @@ sudo mv slk /usr/local/bin/
 ### Homebrew (macOS and Linux)
 
 ```bash
-brew install --cask gammons/tap/slk
+brew install --cask kirahowe/tap/slk
+```
+
+The cask carries per-OS/arch tarballs and serves both macOS and Linux. It installs this fork's releases.
+
+### Tarball (any distro)
+
+Swap `x86_64` for `arm64` on ARM:
+
+```bash
+VERSION=$(curl -fsSL https://api.github.com/repos/kirahowe/slk/releases/latest | grep -oE '"tag_name": *"v[^"]+"' | grep -oE 'v[0-9]+\.[0-9]+\.[0-9]+' | sed 's/^v//')
+curl -fsSL "https://github.com/kirahowe/slk/releases/latest/download/slk_${VERSION}_linux_x86_64.tar.gz" | tar xz
+sudo mv slk /usr/local/bin/
+```
+
+## macOS
+
+### Homebrew (macOS and Linux)
+
+```bash
+brew install --cask kirahowe/tap/slk
 ```
 
 The cask carries per-OS/arch tarballs and serves both macOS and Linux.
 Anyone who installed via the old pre-v0.13.0 formula is migrated to the
 cask automatically on `brew upgrade` (the formula was removed from the tap
 and a `tap_migrations.json` entry added); if that ever fails, run
-`brew uninstall slk && brew install --cask gammons/tap/slk` once.
+`brew uninstall slk && brew install --cask kirahowe/tap/slk` once.
 
 ### Tarball
 
 ```bash
-VERSION=$(curl -fsSL https://api.github.com/repos/gammons/slk/releases/latest | grep -oE '"tag_name": *"v[^"]+"' | grep -oE 'v[0-9]+\.[0-9]+\.[0-9]+' | sed 's/^v//')
+VERSION=$(curl -fsSL https://api.github.com/repos/kirahowe/slk/releases/latest | grep -oE '"tag_name": *"v[^"]+"' | grep -oE 'v[0-9]+\.[0-9]+\.[0-9]+' | sed 's/^v//')
 # Apple Silicon
-curl -fsSL "https://github.com/gammons/slk/releases/latest/download/slk_${VERSION}_darwin_arm64.tar.gz" | tar xz
+curl -fsSL "https://github.com/kirahowe/slk/releases/latest/download/slk_${VERSION}_darwin_arm64.tar.gz" | tar xz
 # Intel
-curl -fsSL "https://github.com/gammons/slk/releases/latest/download/slk_${VERSION}_darwin_x86_64.tar.gz" | tar xz
+curl -fsSL "https://github.com/kirahowe/slk/releases/latest/download/slk_${VERSION}_darwin_x86_64.tar.gz" | tar xz
 
 sudo mv slk /usr/local/bin/
 ```
 
 ## Windows
 
-Download the `windows_x86_64.zip` from the [latest release](https://github.com/gammons/slk/releases/latest), extract `slk.exe`, and add it to your `PATH`.
+Download the `windows_x86_64.zip` from the [latest release](https://github.com/kirahowe/slk/releases/latest), extract `slk.exe`, and add it to your `PATH`.
 
 ## Go
 
-```bash
-go install github.com/gammons/slk/cmd/slk@latest
-```
+`go install` is not a supported route for this fork. The Go module path is still `github.com/gammons/slk`, so `go install github.com/gammons/slk/cmd/slk@latest` installs upstream's slk, not this fork. Use a release, the Homebrew cask, or build from source.
 
 ## Build from source
 
@@ -105,7 +123,7 @@ On Linux, `Ctrl+V` paste-to-upload needs slightly different setup depending on y
 slk auto-detects the session via `WAYLAND_DISPLAY` at startup. On headless Linux (or when neither dependency is met), slk runs but `Ctrl+V` smart-paste is disabled.
 
 ```bash
-git clone https://github.com/gammons/slk.git
+git clone https://github.com/kirahowe/slk.git
 cd slk
 make build       # binary at bin/slk
 ```
@@ -113,10 +131,10 @@ make build       # binary at bin/slk
 ## Verify your download
 
 ```bash
-curl -fsSLO https://github.com/gammons/slk/releases/latest/download/checksums.txt
+curl -fsSLO https://github.com/kirahowe/slk/releases/latest/download/checksums.txt
 sha256sum -c checksums.txt --ignore-missing
 ```
 
 ## Next steps
 
-After installation, head to **[[Setup]]** to add your first workspace.
+After installation, head to **[Setup](Setup.md)** to add your first workspace.

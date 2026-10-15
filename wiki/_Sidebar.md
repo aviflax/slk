@@ -3,20 +3,20 @@
 - [Home](Home)
 
 **Getting started**
-- [[Installation]]
-- [[Setup]]
-- [[Configuration]]
+- [Installation](Installation.md)
+- [Setup](Setup.md)
+- [Configuration](Configuration.md)
 
 **Using slk**
-- [[Features]]
-- [[Keybindings]]
-- [[Terminal Compatibility|Terminal-Compatibility]]
-- [[Clipboard and OSC 52|Clipboard-and-OSC-52]]
+- [Features](Features.md)
+- [Keybindings](Keybindings.md)
+- [Terminal Compatibility](Terminal-Compatibility.md)
+- [Clipboard and OSC 52](Clipboard-and-OSC-52.md)
 
 **Reference**
-- [[Tradeoffs and Non-Goals|Tradeoffs-and-Non-Goals]]
-- [[Architecture]]
+- [Tradeoffs and Non-Goals](Tradeoffs-and-Non-Goals.md)
+- [Architecture](Architecture.md)
 
 ---
 
-[Marketing site](https://getslk.sh) · [Source](https://github.com/gammons/slk)
+[Upstream marketing site](https://getslk.sh) · [Source](https://github.com/kirahowe/slk)

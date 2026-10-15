@@ -22,7 +22,7 @@
 
 ## Compose
 
-![Composing a DM to Sam and getting a live reply](https://github.com/gammons/slk/raw/main/docs/assets/demo/compose.gif)
+![Composing a DM to Sam and getting a live reply](https://github.com/kirahowe/slk/raw/main/docs/assets/demo/compose.gif)
 
 - Multi-line input, `Shift+Enter` for newlines
 - External editor (`Ctrl+X`) — opens the draft in `$VISUAL`, then `$EDITOR`, then `[compose] editor` from config; the edited text replaces the draft when the editor exits
@@ -44,14 +44,16 @@
 - Inside tmux, slk falls back to half-block to avoid pixel-protocol pass-through pitfalls
 - Configurable via `[appearance] image_protocol` (`auto` / `kitty` / `sixel` / `halfblock` / `off`) and `max_image_rows`
 
-See [[Terminal Compatibility|Terminal-Compatibility]] for which protocol your terminal supports.
+See [Terminal Compatibility](Terminal-Compatibility.md) for which protocol your terminal supports.
 
 ## Threads
 
-![Opening a deploy thread, a live reply arriving, and replying in the thread](https://github.com/gammons/slk/raw/main/docs/assets/demo/threads.gif)
+![Opening a deploy thread, a live reply arriving, and replying in the thread](https://github.com/kirahowe/slk/raw/main/docs/assets/demo/threads.gif)
 
-- Opens beside the channel (at least 80 columns wide) with `Enter`, toggled
-  with `Ctrl+]`. On terminals too narrow to fit both panes, the thread and
+- Opens beside the channel with `Enter`, toggled with `Ctrl+]`. Side by side
+  needs a 50-column channel and a 60-column thread (see [narrow
+  terminals](#narrow-terminals)); the thread grows to 80 columns before the
+  channel gets more than its minimum. On terminals too narrow to fit both, the thread and
   channel stack instead: only one is shown at a time, and focus decides which
   — `Tab` / `Shift+Tab` switch between them, `Esc` or `q` closes the thread.
   The header is a breadcrumb naming the channel, the thread's author, and the
@@ -91,7 +93,7 @@ See [[Terminal Compatibility|Terminal-Compatibility]] for which protocol your te
 
 ## Reactions
 
-![Teammates' reactions arriving live, then adding one with the reaction picker](https://github.com/gammons/slk/raw/main/docs/assets/demo/reactions.gif)
+![Teammates' reactions arriving live, then adding one with the reaction picker](https://github.com/kirahowe/slk/raw/main/docs/assets/demo/reactions.gif)
 
 - Search-first picker overlay (`r`) with frecent emoji
 - Quick-toggle nav across existing pills (`R`, then `h/l/Enter`)
@@ -100,9 +102,10 @@ See [[Terminal Compatibility|Terminal-Compatibility]] for which protocol your te
 
 ## Channels & Workspaces
 
-![A workspace's unread badge lighting up in the rail, then switching to it](https://github.com/gammons/slk/raw/main/docs/assets/demo/workspaces.gif)
+![A workspace's unread badge lighting up in the rail, then switching to it](https://github.com/kirahowe/slk/raw/main/docs/assets/demo/workspaces.gif)
 
 - Three-panel layout: workspace rail, channel sidebar, message pane
+- <a id="narrow-terminals"></a>Narrow terminals: a sidebar you have not hidden stays off screen while the channel pane beside it would be under 60 columns, which is below 100 columns with the default rail and sidebar widths. With a thread open, the sidebar also steps aside whenever that lets the thread sit beside the channel: 120 to 151 columns show channel and thread, 152 and up show all three, and below 120 the thread and channel stack. `Ctrl+b` flips what is on screen at any width. Showing a hidden sidebar pins it, and the channel pane is squeezed until `Ctrl+b` hides it again (widening it with `]` past what fits pins it too)
 - Public (`#`), private (`◆`), DM (`●`/`○` for presence, `⊘` while the other person is in Do Not Disturb), and group DM channels
 - **Slack-native sidebar sections** — slk reads your sections directly from Slack and reflects them live: section names, emoji, linked-list order, and channel/DM membership are kept in sync via the same WebSocket events the official client uses. Reorder, rename, create, or delete sections in any other Slack client; slk catches up within a couple seconds. Read-only: section editing still happens in the official client. Falls back to glob-based config sections when disabled or if the API is unavailable.
 - Collapsible sections — `Enter`/`Space` on a section header toggles it. The default Channels section starts collapsed (`▸ Channels •3` shows aggregate unreads); pinned sections and DMs start expanded
@@ -143,8 +146,20 @@ slk open "$url" || open "$url"
   running.
 - slk does not switch workspaces for these links, and does not raise its
   terminal window.
+- slk declines with `slk is busy: <what>` (exit `1`) while a dialog, a `:` command, a search, the image preview or a message edit is open, or while an upload runs. If you are composing, slk leaves insert mode as `Esc` does, keeps the draft with its conversation, and then shows the link.
 - Only one slk listens at a time. A second instance runs without the
   socket. Not available on Windows.
+
+## Update notice
+
+Once a day slk asks GitHub for the latest stable release of kirahowe/slk and
+caches the answer, so a launch within 24 hours makes no request. When a newer
+version exists, a 12-second status-bar toast names the command for your
+install (`brew upgrade --cask slk` for Homebrew, otherwise the release page),
+and a muted `↑ <version>` stays at the right of the status bar for the rest of
+the session (it is the first thing dropped when the bar is narrow). `slk
+--version` prints the same hint from the cache. Dev builds skip the check, and
+`[general] check_for_updates = false` turns it off.
 
 ## Notifications
 
@@ -164,7 +179,7 @@ slk open "$url" || open "$url"
 
 ## Export
 
-- Save the open thread to Markdown with `S` (see [[Keybindings]])
+- Save the open thread to Markdown with `S` (see [Keybindings](Keybindings.md))
 - Export one channel's messages and threads for a date range, without
   launching the TUI:
 
@@ -201,7 +216,7 @@ slk open "$url" || open "$url"
 
 ## Customization
 
-![Switching between themes with the theme switcher](https://github.com/gammons/slk/raw/main/docs/assets/demo/themes.gif)
+![Switching between themes with the theme switcher](https://github.com/kirahowe/slk/raw/main/docs/assets/demo/themes.gif)
 
 - 59 built-in themes (including `ANSI Dark` / `ANSI Light` that inherit your terminal palette)
 - Drop-in custom themes (`~/.config/slk/themes/*.toml`)
@@ -209,4 +224,4 @@ slk open "$url" || open "$url"
 - TOML config for appearance, animations, notifications, and channel sections
 - Deterministic per-user username coloring, opt-in via `colored_usernames`
 
-See [[Configuration]] for the full `config.toml` reference and [[Keybindings]] for the key map.
+See [Configuration](Configuration.md) for the full `config.toml` reference and [Keybindings](Keybindings.md) for the key map.

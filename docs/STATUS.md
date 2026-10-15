@@ -1,6 +1,6 @@
 # slk Implementation Status
 
-Last updated: 2026-05-03
+Last updated: 2026-10-15
 
 ## What's Working
 
@@ -70,8 +70,9 @@ Last updated: 2026-05-03
 - [x] Block Kit & legacy attachment rendering -- bot messages render with structure (sections, fields, color stripes), with disabled controls visible and an "↗ open in Slack to interact" hint
 
 ### Threads
-- [x] Thread panel -- opens beside the channel (at least 80 columns wide) for
-      viewing and replying to threads; on narrow terminals the thread and
+- [x] Thread panel -- opens beside the channel from 120 columns (a 50-column
+      channel plus a 60-column thread) for viewing and replying to threads;
+      the sidebar steps aside first, and on narrower terminals the thread and
       channel stack, with focus deciding which is shown
 - [x] Enter on message opens thread, Escape closes
 - [x] Ctrl+] toggles thread panel
@@ -119,6 +120,13 @@ Last updated: 2026-05-03
 - [ ] Search (`:search <query>` or `Ctrl+/`)
 - [ ] File downloads (browser-style "save attachment" command; uploads via Ctrl+V paste are implemented)
 - [x] Self presence and DND/snooze controls (Ctrl+S menu, live status bar segment, notification suppression)
+### Fork additions (kirahowe/slk, v0.27.0)
+- [x] `slk open <permalink>` shows a Slack permalink in the running slk over a unix socket
+- [x] Update hint: daily GitHub release check, status-bar toast and note (`[general] check_for_updates`)
+- [x] Sidebar auto-hides on narrow terminals; threads open side by side from 120 columns
+- [x] Grouped `?` help overlay; `:help`, `:quit`, `:qa`; `:q` quits on the last window
+- [x] `Ctrl+X` opens `$EDITOR`; `Ctrl+E` / `Ctrl+A` move within the line
+
 ### Low Priority
 
 - [ ] Quiet hours for notifications

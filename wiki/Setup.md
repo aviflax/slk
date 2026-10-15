@@ -91,7 +91,7 @@ untouched.
 You can add as many workspaces as you like by running `slk --add-workspace`
 again. They all stay connected in parallel for live unread badges. Use
 `:ws` for the picker, or `1`–`9` to jump directly. Configure rail order
-and per-workspace settings in [[Configuration]].
+and per-workspace settings in [Configuration](Configuration.md).
 
 ## Token expiry
 
@@ -101,7 +101,7 @@ needed), so sessions stay fresh on their own.
 
 If you ever sign out of the desktop app, just sign back in — slk will pick the
 session back up the next time it needs to re-mint. See the auth caveat in
-[[Tradeoffs and Non-Goals|Tradeoffs-and-Non-Goals]].
+[Tradeoffs and Non-Goals](Tradeoffs-and-Non-Goals.md).
 
 ## Enterprise Grid
 

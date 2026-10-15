@@ -35,7 +35,8 @@
 | `:delmarks abc` | Normal | Delete marks by letter (`:delmarks a b c` works too) |
 | `Backspace` | Marks overlay | Delete the selected mark |
 | `Ctrl+f` | Any | Search workspace (Slack server-side; supports modifiers like `from:@user`, `in:#channel`, `before:YYYY-MM-DD`) |
-| `Ctrl+b` | Any | Toggle sidebar |
+| `Ctrl+b` | Any | Toggle sidebar. At any width this flips what is on screen; see [narrow terminals](Features.md#narrow-terminals) |
+| `?` | Normal | Keybinding overlay, grouped into Navigation, Search, Messages, Threads, Composer, Windows, Views, Commands and App; type to filter |
 | `Ctrl+]` | Any | Toggle thread panel |
 | `Ctrl+a` | Normal | Toggle the Activity view (mentions, thread replies, reactions, DMs) |
 | `:activity` | Normal | Open the Activity view |
@@ -62,8 +63,13 @@
 | `Ctrl+y` | Any | Switch theme |
 | `Alt+y` / `Alt+Shift+y` | Normal | Next / previous theme (wraps; saved per workspace) |
 | `Ctrl+s` | Any | Set status (Active / Away / DND snooze) |
-| `q` | Normal | Quit (with confirmation) |
-| `Q` | Normal | Quit immediately |
+| `q` | Normal | Close the open thread view (does nothing when no thread is open) |
+| `Q` / `:quit` / `:qa` | Normal | Quit (with confirmation) |
+| `Ctrl+w s` / `:sp`, `Ctrl+w v` / `:vsp` | Normal | Split the focused window stacked / side by side |
+| `Ctrl+w h/j/k/l`, `Ctrl+w w` | Normal | Focus the window in that direction / cycle windows |
+| `Ctrl+w o` / `:only` | Normal | Close every window but the focused one |
+| `:help` | Normal | Open the keybinding overlay, same as `?` |
+| `:q` | Normal | Close the focused window; on the last window, quit (with confirmation) like `:quit`. `Ctrl+w q` only closes, and toasts "Cannot close last window" on the last one |
 | `Ctrl+c` | Any | Quit (with confirmation) |
 
-Custom keybinding overrides are on the roadmap — see [[Tradeoffs and Non-Goals|Tradeoffs-and-Non-Goals]].
+Custom keybinding overrides are on the roadmap — see [Tradeoffs and Non-Goals](Tradeoffs-and-Non-Goals.md).

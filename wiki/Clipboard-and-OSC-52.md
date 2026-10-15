@@ -39,4 +39,4 @@ environment variables.
 
 ## Related
 
-- [[Terminal Compatibility|Terminal-Compatibility]] — per-terminal OSC 52 support summary
+- [Terminal Compatibility](Terminal-Compatibility.md) — per-terminal OSC 52 support summary

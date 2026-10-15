@@ -1172,9 +1172,8 @@ func (a *App) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 func (a *App) handleKey(msg tea.KeyMsg) tea.Cmd {
 	// Ctrl+C is intercepted globally and routed through the same
-	// confirm prompt as lowercase `q`, so an accidental Ctrl+C while
-	// reading or typing doesn't yank the whole app out from under the
-	// user. `Q` (capital) remains the no-prompt force-quit, and an
+	// confirm prompt as `Q`, so an accidental Ctrl+C while reading or
+	// typing doesn't yank the whole app out from under the user. An
 	// already-open quit prompt isn't reopened (Enter confirms, Esc
 	// cancels via the existing confirm-mode handler).
 	if key.Matches(msg, a.keys.Quit) {
@@ -1945,7 +1944,7 @@ func (a *App) maybeFetchOlderHistory(atTop bool) tea.Cmd {
 }
 
 // openQuitConfirm raises the centered "Quit slk?" overlay. Called from
-// both lowercase `q` and Ctrl+C (the latter intercepted globally so an
+// `Q`, `:quit`, `:qa`, `:q` on the last window, and Ctrl+C (the latter intercepted globally so an
 // accidental Ctrl+C in any mode never silently kills the app).
 func (a *App) openQuitConfirm() {
 	a.openConfirmPrompt(

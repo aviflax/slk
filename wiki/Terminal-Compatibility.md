@@ -140,7 +140,7 @@ everyone, it is not.
 
 You can override slk's image-protocol pick via the `[appearance] image_protocol`
 config key (`auto` / `kitty` / `sixel` / `halfblock` / `off`). See
-[[Configuration]] for details.
+[Configuration](Configuration.md) for details.
 
 ## Keybindings and terminal quirks
 
@@ -149,5 +149,5 @@ config key (`auto` / `kitty` / `sixel` / `halfblock` / `off`). See
 
 ## Related
 
-- [[Clipboard and OSC 52|Clipboard-and-OSC-52]] — getting copy/paste to land
-- [[Tradeoffs and Non-Goals|Tradeoffs-and-Non-Goals]] — image rendering caveats (animated GIFs, unfurls, threads pane sixel)
+- [Clipboard and OSC 52](Clipboard-and-OSC-52.md) — getting copy/paste to land
+- [Tradeoffs and Non-Goals](Tradeoffs-and-Non-Goals.md) — image rendering caveats (animated GIFs, unfurls, threads pane sixel)

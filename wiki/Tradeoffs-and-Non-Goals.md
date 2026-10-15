@@ -32,7 +32,7 @@ slk is intentionally not a 1:1 port of the desktop client. Some Slack features a
 
 Browser-cookie auth means tokens expire when you log out of the browser or
 Slack rotates them. Re-run `--add-workspace` and you're back in business. See
-[[Setup]] for the token-extraction walkthrough.
+[Setup](Setup.md) for the token-extraction walkthrough.
 
 ## Unofficial / TOS caveat
 
