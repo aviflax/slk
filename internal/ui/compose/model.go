@@ -1112,6 +1112,13 @@ func (m *Model) CloseMention() {
 // must be tried before a shorter one with the same prefix, and a user
 // named "here" (if such a thing existed) must not match inside @heretic.
 func (m Model) TranslateMentionsForSend(text string) string {
+	return translateMentions(text, m.reverseNames, m.reverseChannels, m.userGroups)
+}
+
+// translateMentions is TranslateMentionsForSend's pure core. names maps
+// display name -> user ID, channels maps channel name -> channel ID and
+// groups maps usergroup ID -> handle.
+func translateMentions(text string, names, channels, groups map[string]string) string {
 	// trigger is the leading character ('@' for users/specials, '#' for
 	// channels); name is what follows; replacement is the wire form.
 	// rank breaks ties when two kinds of mention share a name (a user
@@ -1139,7 +1146,7 @@ func (m Model) TranslateMentionsForSend(text string) string {
 	)
 
 	// User mentions
-	for name, userID := range m.reverseNames {
+	for name, userID := range names {
 		entries = append(entries, entry{'@', name, "<@" + userID + ">", rankUser})
 	}
 
@@ -1147,7 +1154,7 @@ func (m Model) TranslateMentionsForSend(text string) string {
 	// wire form <!subteam^SID|@handle> so the optimistically-added
 	// echo renders the handle even if the server echo arrives before
 	// usergroups.list refreshes this workspace's map.
-	for id, handle := range m.userGroups {
+	for id, handle := range groups {
 		entries = append(entries, entry{'@', handle, "<!subteam^" + id + "|@" + handle + ">", rankUserGroup})
 	}
 
@@ -1158,7 +1165,7 @@ func (m Model) TranslateMentionsForSend(text string) string {
 	// message would render as the raw "<#CID>" until the next reload.
 	// Slack accepts both forms on the wire and normalizes echoes
 	// to the |name form anyway.
-	for name, channelID := range m.reverseChannels {
+	for name, channelID := range channels {
 		entries = append(entries, entry{'#', name, "<#" + channelID + "|" + name + ">", rankChannel})
 	}
 
