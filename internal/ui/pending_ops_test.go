@@ -4,6 +4,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/gammons/slk/internal/ui/mentionpicker"
 	"github.com/gammons/slk/internal/ui/messages"
 )
 
@@ -202,5 +203,97 @@ func TestPendingSend_EmptyTSResult(t *testing.T) {
 		a.Update(echo("C1", "10.000001", "", "hello"))
 		a.Update(MessageSentMsg{ChannelID: "C1", LocalTS: local})
 		wantRows(t, "channel", a.messagepane.Messages(), "10.000001=hello")
+	})
+}
+
+// sendFromComposer types text into the composer of panel (the channel
+// composer for C1, or the thread composer for thread 5.000000 of C1),
+// presses Enter and applies the send it produces. It returns the
+// placeholder id.
+func sendFromComposer(t *testing.T, a *App, panel Panel, text string) (SendMessageMsg, SendThreadReplyMsg, string) {
+	t.Helper()
+	a.mode = ModeInsert
+	a.focusedPanel = panel
+	if panel == PanelThread {
+		a.threadCompose.SetValue(text)
+		got := deliveredMsgs[SendThreadReplyMsg](t, pressEnter(a))[0]
+		a.Update(got)
+		return SendMessageMsg{}, got, a.threadPanel.Replies()[len(a.threadPanel.Replies())-1].TS
+	}
+	a.compose.SetValue(text)
+	got := deliveredMsgs[SendMessageMsg](t, pressEnter(a))[0]
+	a.Update(got)
+	return got, SendThreadReplyMsg{}, a.messagepane.Messages()[len(a.messagepane.Messages())-1].TS
+}
+
+// typedApp is a slashApp whose composers know user alice (U9), with
+// thread 5.000000 of C1 open and bound to the thread composer.
+func typedApp(t *testing.T) *App {
+	t.Helper()
+	a, _ := slashApp(t, nil)
+	a.SetCurrentUserID("USELF")
+	users := []mentionpicker.User{{ID: "U9", DisplayName: "alice"}}
+	a.compose.SetUsers(users)
+	a.threadCompose.SetUsers(users)
+	openThread(a, "5.000000")
+	a.threadCompose.SetDraftContext("T1", "C1", "5.000000")
+	return a
+}
+
+// A send that fails gives the text back to the composer it was typed
+// in, as typed (with @names, not the <@U…> tokens sent to Slack), and
+// still reports the failure.
+func TestPendingSend_FailureGivesTypedTextBack(t *testing.T) {
+	t.Run("channel", func(t *testing.T) {
+		a := typedApp(t)
+		sent, _, local := sendFromComposer(t, a, PanelMessages, "hi @alice")
+		if sent.Typed != "hi @alice" || sent.TeamID != "T1" || !strings.Contains(sent.Text, "<@U9>") {
+			t.Fatalf("send = %+v, want Typed as typed, TeamID T1 and the mention translated in Text", sent)
+		}
+		if a.compose.Value() != "" {
+			t.Fatalf("composer = %q after Enter, want it reset", a.compose.Value())
+		}
+		_, cmd := a.Update(MessageSendFailedMsg{ChannelID: "C1", LocalTS: local, Reason: "boom"})
+		if cmd == nil {
+			t.Error("failure reported nothing")
+		}
+		if got := a.compose.Value(); got != "hi @alice" {
+			t.Errorf("composer = %q, want the typed text back", got)
+		}
+	})
+	t.Run("thread", func(t *testing.T) {
+		a := typedApp(t)
+		_, sent, local := sendFromComposer(t, a, PanelThread, "hi @alice")
+		if sent.Typed != "hi @alice" || sent.TeamID != "T1" {
+			t.Fatalf("reply = %+v, want Typed and TeamID", sent)
+		}
+		_, cmd := a.Update(ThreadReplySendFailedMsg{ChannelID: "C1", ThreadTS: "5.000000", LocalTS: local, Reason: "boom"})
+		if cmd == nil {
+			t.Error("failure reported nothing")
+		}
+		if got := a.threadCompose.Value(); got != "hi @alice" {
+			t.Errorf("thread composer = %q, want the typed text back", got)
+		}
+		if got := a.compose.Value(); got != "" {
+			t.Errorf("channel composer = %q, want it untouched", got)
+		}
+	})
+	t.Run("newer draft wins", func(t *testing.T) {
+		a := typedApp(t)
+		_, _, local := sendFromComposer(t, a, PanelMessages, "first")
+		a.compose.SetValue("second")
+		a.Update(MessageSendFailedMsg{ChannelID: "C1", LocalTS: local, Reason: "boom"})
+		if got := a.compose.Value(); got != "second" {
+			t.Errorf("composer = %q, want the newer text kept", got)
+		}
+	})
+	t.Run("not after adoption", func(t *testing.T) {
+		a := typedApp(t)
+		_, _, local := sendFromComposer(t, a, PanelMessages, "posted")
+		a.Update(echo("C1", "10.000001", "", "posted"))
+		a.Update(MessageSendFailedMsg{ChannelID: "C1", LocalTS: local, Reason: "timeout"})
+		if got := a.compose.Value(); got != "" {
+			t.Errorf("composer = %q, want nothing given back for a posted message", got)
+		}
 	})
 }

@@ -135,6 +135,12 @@ type (
 	SendMessageMsg struct {
 		ChannelID string
 		Text      string
+		// TeamID and Typed say where the text was typed and how: the
+		// composer text before mentions were translated for sending.
+		// A failed send gives Typed back to that conversation's
+		// composer; empty means there is nothing to give back.
+		TeamID string
+		Typed  string
 	}
 	ThreadOpenedMsg struct {
 		ChannelID string
@@ -160,6 +166,9 @@ type (
 		// (reply_broadcast=true; Slack echoes it with the
 		// thread_broadcast subtype).
 		Broadcast bool
+		// TeamID and Typed are as in SendMessageMsg.
+		TeamID string
+		Typed  string
 	}
 	ThreadReplySentMsg struct {
 		ChannelID string

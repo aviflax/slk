@@ -18,9 +18,10 @@
 //	                           chat.postMessage call.
 //	MessageSentMsg           - send landed: swap placeholder for
 //	                           authoritative message.
-//	MessageSendFailedMsg     - send failed: roll back placeholder
-//	                           + fire SendFailed toast, unless the
-//	                           echo already showed it posted.
+//	MessageSendFailedMsg     - send failed: roll back placeholder,
+//	                           give the typed text back + fire
+//	                           SendFailed toast, unless the echo
+//	                           already showed it posted.
 //	EditMessageMsg           - user edit: chat.update call.
 //	MessageEditedMsg         - edit result: leave edit mode + on
 //	                           failure fire EditFailed toast.
@@ -115,11 +116,17 @@ var reduceSend reducerFunc = func(a *App, msg tea.Msg) (tea.Cmd, bool) {
 		// echo was adopted, Slack posted the message (the call
 		// failed after it was accepted, e.g. a timeout), so the row
 		// stays and nothing is reported.
-		if ins, ok := a.pendingOps.EndInsert(m.LocalTS); ok && ins.adopted {
+		// Otherwise the composer was reset at Enter, so the text as
+		// typed goes back to it unless it holds something newer.
+		ins, ok := a.pendingOps.EndInsert(m.LocalTS)
+		if ok && ins.adopted {
 			return nil, true
 		}
 		if m.LocalTS != "" {
 			a.sinksFor(m.ChannelID).removeLocal(m.LocalTS)
+		}
+		if ok {
+			a.offerTypedBack(ins.origin())
 		}
 		reason := m.Reason
 		return func() tea.Msg {
@@ -447,7 +454,9 @@ func reduceSendMessage(a *App, m SendMessageMsg) tea.Cmd {
 	localTS := a.pendingOps.NextLocalTS()
 	// Recorded whether or not a pane shows the placeholder, so the
 	// echo is adopted rather than appended either way.
-	a.pendingOps.BeginInsert(pendingInsert{localTS: localTS, channelID: m.ChannelID})
+	a.pendingOps.BeginInsert(pendingInsert{
+		localTS: localTS, channelID: m.ChannelID, teamID: m.TeamID, typed: m.Typed,
+	})
 	for _, s := range a.sinksFor(m.ChannelID).channel {
 		s.InsertLocal(a.localRow(localTS, m.Text, "", ""))
 	}

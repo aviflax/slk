@@ -323,6 +323,7 @@ var reduceThreads reducerFunc = func(a *App, msg tea.Msg) (tea.Cmd, bool) {
 		localTS := a.pendingOps.NextLocalTS()
 		a.pendingOps.BeginInsert(pendingInsert{
 			localTS: localTS, channelID: m.ChannelID, threadTS: m.ThreadTS, broadcast: m.Broadcast,
+			teamID: m.TeamID, typed: m.Typed,
 		})
 		sinks := a.replySinksFor(m.ChannelID, m.ThreadTS, m.Broadcast)
 		if sinks.thread != nil {
@@ -400,11 +401,17 @@ var reduceThreads reducerFunc = func(a *App, msg tea.Msg) (tea.Cmd, bool) {
 		// optimistically added to the channel feed. As with
 		// MessageSendFailedMsg, an adopted echo means the reply was
 		// posted: keep it and report nothing.
-		if ins, ok := a.pendingOps.EndInsert(m.LocalTS); ok && ins.adopted {
+		// Otherwise the typed text goes back to the thread
+		// composer, as there.
+		ins, ok := a.pendingOps.EndInsert(m.LocalTS)
+		if ok && ins.adopted {
 			return nil, true
 		}
 		if m.LocalTS != "" {
 			a.replySinksFor(m.ChannelID, m.ThreadTS, m.Broadcast).removeLocal(m.LocalTS)
+		}
+		if ok {
+			a.offerTypedBack(ins.origin())
 		}
 		reason := m.Reason
 		return func() tea.Msg {

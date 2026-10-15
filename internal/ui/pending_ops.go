@@ -17,9 +17,10 @@
 //  2. After: the HTTP result has called RecordSent with the real TS,
 //     and IsSelfSent drops the echo carrying it.
 //
-// The HTTP result ends the insert (EndInsert). A failure on an adopted
-// insert is not a failure the user needs to see: the echo proves Slack
-// posted the message.
+// The HTTP result ends the insert (EndInsert). A failed send gives the
+// text as typed back to the composer it came from. A failure on an
+// adopted insert is not a failure the user needs to see: the echo
+// proves Slack posted the message.
 package ui
 
 import (
@@ -35,9 +36,18 @@ type pendingInsert struct {
 	channelID string
 	threadTS  string // the parent's TS for a reply, "" for a top-level send
 	broadcast bool   // a reply also sent to the channel
+	// teamID and typed are the workspace the text was typed in and the
+	// text as typed, given back to its composer if the send fails.
+	teamID string
+	typed  string
 	// adopted is set once the send's echo has settled the placeholder;
 	// the message is then known to be posted.
 	adopted bool
+}
+
+// origin is where ins was typed, for offerTypedBack.
+func (ins pendingInsert) origin() commandOrigin {
+	return commandOrigin{teamID: ins.teamID, channelID: ins.channelID, threadTS: ins.threadTS, typed: ins.typed}
 }
 
 // pendingOps tracks the user's sends from this session. See the

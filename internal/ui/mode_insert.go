@@ -219,13 +219,14 @@ func handleInsertMode(a *App, msg tea.KeyMsg) tea.Cmd {
 			if a.editing.IsActive() && a.editing.Panel() == PanelThread {
 				return a.submitEdit(a.threadCompose.Value(), a.threadCompose.TranslateMentionsForSend(a.threadCompose.Value()))
 			}
-			text := a.threadCompose.Value()
-			if text != "" {
-				text = a.threadCompose.TranslateMentionsForSend(text)
+			typed := a.threadCompose.Value()
+			if typed != "" {
+				text := a.threadCompose.TranslateMentionsForSend(typed)
 				broadcast := a.threadCompose.Broadcast() || isAltEnter
 				a.threadCompose.Reset()
 				threadTS := a.threadPanel.ThreadTS()
 				channelID := a.threadPanel.ChannelID()
+				teamID := a.activeTeamID
 				a.exitInsertAfterSend()
 				send := func() tea.Msg {
 					return SendThreadReplyMsg{
@@ -233,6 +234,8 @@ func handleInsertMode(a *App, msg tea.KeyMsg) tea.Cmd {
 						ThreadTS:  threadTS,
 						Text:      text,
 						Broadcast: broadcast,
+						TeamID:    teamID,
+						Typed:     typed,
 					}
 				}
 				return tea.Batch(send, a.tryOpenActionPrompt())
@@ -273,19 +276,21 @@ func handleInsertMode(a *App, msg tea.KeyMsg) tea.Cmd {
 		if a.editing.IsActive() && a.editing.Panel() == PanelMessages {
 			return a.submitEdit(a.compose.Value(), a.compose.TranslateMentionsForSend(a.compose.Value()))
 		}
-		text := a.compose.Value()
-		if text != "" {
-			text = a.compose.TranslateMentionsForSend(text)
-			// Capture the target channel before the reset/closure:
+		typed := a.compose.Value()
+		if typed != "" {
+			text := a.compose.TranslateMentionsForSend(typed)
+			// Capture the target conversation before the reset/closure:
 			// a.activeChannelID may mutate before the deferred cmd
 			// runs, so the send must use this local snapshot.
-			channelID := a.activeChannelID
+			channelID, teamID := a.activeChannelID, a.activeTeamID
 			a.compose.Reset()
 			a.exitInsertAfterSend()
 			send := func() tea.Msg {
 				return SendMessageMsg{
 					ChannelID: channelID,
 					Text:      text,
+					TeamID:    teamID,
+					Typed:     typed,
 				}
 			}
 			return tea.Batch(send, a.tryOpenActionPrompt())
