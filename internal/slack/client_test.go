@@ -2487,7 +2487,7 @@ func TestGetUsersInConversationRetriesOnRateLimit(t *testing.T) {
 			calls++
 			seenCursors = append(seenCursors, params.Cursor)
 			if calls == 1 {
-				return nil, "", &slack.RateLimitedError{RetryAfter: 10 * time.Millisecond}
+				return nil, "", &slack.RateLimitedError{RetryAfter: time.Nanosecond}
 			}
 			return []string{"U1", "U2"}, "", nil
 		},

@@ -85,7 +85,7 @@ func TestWalkHistory_RetriesSamePageAfterRateLimit(t *testing.T) {
 			case 1:
 				return historyPage("cur1", "300.000000"), nil
 			case 2:
-				return nil, &slack.RateLimitedError{RetryAfter: time.Millisecond}
+				return nil, &slack.RateLimitedError{RetryAfter: time.Nanosecond}
 			default:
 				return historyPage("", "100.000000"), nil
 			}
@@ -195,7 +195,7 @@ func TestGetRepliesBetween_RetriesAfterRateLimit(t *testing.T) {
 		getConversationRepliesFn: func(params *slack.GetConversationRepliesParameters) ([]slack.Message, bool, string, error) {
 			calls++
 			if calls == 1 {
-				return nil, false, "", &slack.RateLimitedError{RetryAfter: time.Millisecond}
+				return nil, false, "", &slack.RateLimitedError{RetryAfter: time.Nanosecond}
 			}
 			return []slack.Message{{Msg: slack.Msg{Timestamp: "200.000000"}}}, false, "", nil
 		},
@@ -231,7 +231,7 @@ func TestWaitOutRateLimit(t *testing.T) {
 		t.Errorf("plain error: limited = %v, err = %v; want false, nil", limited, err)
 	}
 
-	wrapped := fmt.Errorf("getting user info: %w", &slack.RateLimitedError{RetryAfter: time.Millisecond})
+	wrapped := fmt.Errorf("getting user info: %w", &slack.RateLimitedError{RetryAfter: time.Nanosecond})
 	limited, err = WaitOutRateLimit(context.Background(), wrapped)
 	if !limited || err != nil {
 		t.Errorf("wrapped rate limit: limited = %v, err = %v; want true, nil", limited, err)
