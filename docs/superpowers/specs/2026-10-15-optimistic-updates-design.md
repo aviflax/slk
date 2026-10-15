@@ -409,10 +409,20 @@ a query string differs from what was sent) but keeps the rich_text
 block as sent, so the echo's mrkdwn is compared with those escapes
 undone once, or the two blocks' text when both have one. The rule can
 only err the other way (Slack stored a form of the text neither
-comparison recognises), which reopens an edit Slack already has. One case
-stays ambiguous: an edit succeeds, its echo is lost (a reconnect), and
-a stale echo of an older change by another client arrives after the
-result. The message then shows that echo until the next change.
+comparison recognises), which reopens an edit Slack already has.
+
+Two cases stay ambiguous, both needing the edit's own echo to be lost
+(a reconnect). An edit succeeds and a stale echo of an older change by
+another client arrives after the result: the message shows that echo
+until the next change. Or an edit A succeeds, another client changes
+the message after Slack applied A, and that change's echo arrives
+before A's result: the App settles on A while Slack has the other
+change, until the next change. Telling A's order from the other
+change's would take A's `edited.ts`, which chat.update's response does
+not carry as slack-go returns it (`UpdateMessageContext` gives back
+the channel, ts and text only); the echo's `edited.ts`, decoded since
+phase 7, alone does not decide it. Both are excluded from the rapid
+model below, by name.
 
 The flow for a delete:
 
@@ -439,15 +449,20 @@ The flow for a delete:
 
 A rapid stateful test (`TestEditsAndDeletesEndOnSlacksState`,
 `pending_edit_prop_test.go`) models Slack as the source of truth,
-applying each chat.update when it receives it, and interleaves edits,
-their results (success, failure, failure after Slack stored it), echoes
-(some lost, for edits Slack accepted), other clients' edits, deletes
-and their results (including message_not_found) and older history.
-It checks that one chat.update per message is in flight and Slack gets
-them in the order typed, that rows stay in TS order, that a failed
-edit's text Slack lacks is given back, and that once everything has
-settled every pane shows exactly Slack's body, or nothing for a
-deleted message.
+applying each chat.update when the App sends it, as Slack applies it on
+receipt, so another client's edit can land between that and the
+result. It interleaves edits, their results (success, failure, failure
+after Slack stored it), echoes before or after the result (some lost,
+for edits Slack accepted), other clients' edits, deletes and their
+results (including message_not_found), older history and reloads of
+both panes. Its expectations come from the model and the edit
+service's call log, not the ledger. It checks that one chat.update per
+message is in flight and Slack gets them in the order typed, that rows
+stay in TS order, that a message being deleted is never shown and one
+with an edit in flight shows the newest edit, that a failed edit's text
+Slack lacks is given back, and that once everything has settled every
+pane shows exactly Slack's body (or nothing for a deleted message), no
+editor is open and the ledger holds nothing.
 
 Kept pessimistic: the thread panel of a deleted parent closes only once
 Slack confirms, since a closed panel cannot be put back as it was; and

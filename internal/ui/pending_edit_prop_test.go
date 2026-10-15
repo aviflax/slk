@@ -34,7 +34,7 @@ func firstEdited(cmd tea.Cmd) (MessageEditedMsg, bool) {
 // slackModel is Slack as the source of truth for the edit and delete
 // test below: each message's stored body, which messages are deleted,
 // and the WebSocket events it has sent and the App has not yet seen,
-// in order. It applies a chat.update when it receives it.
+// in order. The test applies a chat.update when the App sends it.
 type slackModel struct {
 	body    map[string]messages.Body
 	deleted map[string]bool
@@ -90,21 +90,52 @@ func (s *slackModel) rows(tss ...string) []messages.MessageItem {
 	return out
 }
 
+// keep makes every echo of ts on its way undroppable: the model's one
+// exclusion (see TestEditsAndDeletesEndOnSlacksState).
+func (s *slackModel) keep(ts string) {
+	for i, e := range s.events {
+		if nm, ok := e.msg.(NewMessageMsg); ok && nm.Message.TS == ts {
+			s.events[i].droppable = false
+		}
+	}
+}
+
 // However the user's edits and deletes of their messages interleave
 // with their results (success, failure, or a failure after Slack
-// stored the edit), Slack's echoes, other clients' edits, older history
-// loading and both panes being reloaded from Slack:
+// stored the edit), Slack's echoes (before or after the result),
+// other clients' edits, older history loading and both panes being
+// reloaded from Slack:
 //
 //   - at most one chat.update per message is in flight, and Slack
 //     receives a message's edits in the order the user made them;
 //   - the rows Slack knows stay in TS order in both panes;
+//   - a message being deleted is never shown, and one with an edit in
+//     flight shows the newest edit typed;
 //   - a failed edit's text that Slack does not have goes back to the
 //     user: the editor, a composer or the clipboard;
 //   - once nothing is in flight and every event has arrived (or been
-//     lost, for the echo of an edit Slack accepted), every
-//     pane shows exactly Slack's body for each message (text, blocks
-//     and edited mark), and a message is absent exactly when Slack
-//     deleted it.
+//     lost, for the echo of an edit Slack accepted), every pane shows
+//     exactly Slack's body for each message (text, blocks and edited
+//     mark), a message is absent exactly when Slack deleted it, no
+//     editor is open and nothing is left pending.
+//
+// Slack applies a chat.update when it receives it, so the model applies
+// each edit when the App sends it (not when its result arrives), and
+// another client's edit can land between that and the result.
+//
+// One case is excluded, because the App cannot decide it: our edit A
+// succeeds, another client changes the message after it, A's echo is
+// lost and the other change's echo arrives before A's result. The App
+// then shows A while Slack has the other change, until the next
+// change. Telling the two orders apart needs A's edited.ts, which
+// chat.update's response (as slack-go returns it) does not carry. So an
+// echo of an edit is never lost once another change of the message
+// follows it while it is in flight (slackModel.keep), and no other
+// change follows one whose echo was lost while it is in flight. Nor is
+// an edit's
+// echo lost while an older change's echo is still on its way: that
+// older echo arriving after the result, the newer one lost, looks like
+// a newer change by another client.
 func TestEditsAndDeletesEndOnSlacksState(t *testing.T) {
 	rapid.Check(t, func(rt *rapid.T) {
 		a, sent := editAppLog(t, nil)
@@ -117,49 +148,76 @@ func TestEditsAndDeletesEndOnSlacksState(t *testing.T) {
 			},
 		}))
 		slack := &slackModel{body: map[string]messages.Body{}, deleted: map[string]bool{}}
-		for _, ts := range []string{"1.000000", "5.000000", "6.000000"} {
+		all := []string{"1.000000", "5.000000", "6.000000"}
+		for _, ts := range all {
 			row, _ := findRow(a, ts)
 			slack.body[ts] = messages.BodyOf(row)
 		}
 
-		// inFlight holds each message's chat.update result, not yet
-		// delivered; wire is the text of each edit by id; echoed is set
-		// when an echo of the in-flight edit's text has been delivered.
+		// Per message: the result of the edit in flight, not yet
+		// delivered, and its text; the newest edit typed while it is
+		// out, waiting ("" for none); whether an echo carrying the
+		// in-flight edit has been delivered; and whether the App has
+		// been told the message is deleted.
 		inFlight := map[string]MessageEditedMsg{}
-		wire := map[uint64]string{}
+		inFlightText := map[string]string{}
+		waiting := map[string]string{}
 		echoed := map[string]bool{}
+		appGone := map[string]bool{}
+		lost := map[string]bool{}           // the in-flight edit's echo was lost
 		typedOrder := map[string][]string{} // per message, every text typed
 		older := 0
 		words := 0
 
-		// collect takes the result of the edit the App now has in
-		// flight for ts, if it sent a new one, from cmd.
-		collect := func(ts string, cmd tea.Cmd) {
-			m := a.pendingOps.edits[editKey{"C1", ts}]
-			if m == nil {
-				return
-			}
-			if have, ok := inFlight[ts]; ok && have.EditID == m.inFlight.id {
-				return
-			}
+		// send checks that cmd sends text's chat.update for ts, once,
+		// and has Slack receive it: Slack applies it now, or refuses
+		// it (failure), or applies it but the call fails (timeout).
+		send := func(ts, text string, cmd tea.Cmd) {
 			before := len(*sent)
 			res, ok := firstEdited(cmd)
-			if !ok || res.EditID != m.inFlight.id {
-				rt.Fatalf("%s: edit %d in flight but its chat.update was not sent (got %+v)", ts, m.inFlight.id, res)
+			if !ok || res.TS != ts {
+				rt.Fatalf("%s: edit %q due but its chat.update was not sent (got %+v)", ts, text, res)
 			}
-			if len(*sent) != before+1 || (*sent)[before] != m.inFlight.wire {
-				rt.Fatalf("%s: sent %q, want %q once", ts, (*sent)[before:], m.inFlight.wire)
+			if len(*sent) != before+1 || (*sent)[before] != text {
+				rt.Fatalf("%s: sent %q, want %q once", ts, (*sent)[before:], text)
 			}
-			inFlight[ts] = res
-			echoed[ts] = false
+			switch outcome := rapid.SampledFrom([]string{"ok", "fail", "timeout"}).Draw(rt, "outcome"); {
+			case slack.deleted[ts]:
+				res.Err, res.NotFound = errors.New("message_not_found"), true
+			case outcome == "ok":
+				// Its echo may be lost, unless an older change's echo
+				// is still on its way (see the test's comment).
+				slack.change(ts, editedBody(text), !slack.queued(ts))
+			case outcome == "timeout":
+				slack.change(ts, editedBody(text), false)
+				res.Err = errors.New("timeout")
+			default:
+				res.Err = errors.New("boom")
+			}
+			inFlight[ts], inFlightText[ts], echoed[ts], lost[ts] = res, text, false, false
 		}
 
 		shown := func(ts string) bool { _, ok := findRow(a, ts); return ok }
 
+		// deliver hands the App Slack's next WebSocket event.
+		deliver := func() {
+			ev := slack.events[0].msg
+			slack.events = slack.events[1:]
+			switch m := ev.(type) {
+			case NewMessageMsg:
+				if text, out := inFlightText[m.Message.TS]; out && messages.EchoCarries(messages.BodyOf(m.Message), editedBody(text)) {
+					echoed[m.Message.TS] = true
+				}
+			case WSMessageDeletedMsg:
+				appGone[m.TS] = true
+			}
+			a.Update(ev)
+		}
+
 		step := func(action string) {
 			switch action {
 			case "edit":
-				ts := rapid.SampledFrom([]string{"1.000000", "5.000000", "6.000000"}).Draw(rt, "editTS")
+				ts := rapid.SampledFrom(all).Draw(rt, "editTS")
 				if !shown(ts) {
 					return
 				}
@@ -171,53 +229,56 @@ func TestEditsAndDeletesEndOnSlacksState(t *testing.T) {
 				}
 				_, cmd := a.Update(msg)
 				typedOrder[ts] = append(typedOrder[ts], text)
-				wire[a.pendingOps.editID] = text
-				collect(ts, cmd)
+				if _, out := inFlight[ts]; out {
+					waiting[ts] = text // replaces any older waiting edit
+					return
+				}
+				send(ts, text, cmd)
 			case "result":
-				ts := rapid.SampledFrom([]string{"1.000000", "5.000000", "6.000000"}).Draw(rt, "resultTS")
+				ts := rapid.SampledFrom(all).Draw(rt, "resultTS")
 				res, ok := inFlight[ts]
 				if !ok {
 					return
 				}
-				delete(inFlight, ts)
-				text := wire[res.EditID]
-				outcome := rapid.SampledFrom([]string{"ok", "fail", "timeout"}).Draw(rt, "outcome")
-				switch {
-				case slack.deleted[ts]:
-					res.Err, res.NotFound = errors.New("message_not_found"), true
-				case outcome == "ok":
-					// Its echo may be lost, unless an older change of
-					// the message is still on its way: an echo that
-					// stale arriving after the result, with the newer
-					// echo lost, is indistinguishable from a newer
-					// change by another client.
-					slack.change(ts, editedBody(text), !slack.queued(ts))
-				case outcome == "timeout":
-					slack.change(ts, editedBody(text), false)
-					res.Err = errors.New("timeout")
-				default:
-					res.Err = errors.New("boom")
+				text := inFlightText[ts]
+				if !res.NotFound && rapid.Bool().Draw(rt, "echoFirst") {
+					// Slack's echo of the edit, if it stored it,
+					// arrives before the HTTP result.
+					for slices.ContainsFunc(slack.events, func(e slackEvent) bool {
+						nm, ok := e.msg.(NewMessageMsg)
+						return ok && nm.Message.TS == ts && messages.EchoCarries(messages.BodyOf(nm.Message), editedBody(text))
+					}) {
+						deliver()
+					}
 				}
-				m := a.pendingOps.edits[editKey{"C1", ts}]
-				queued := m != nil && m.queued != nil
-				gone := slack.deleted[ts]
+				delete(inFlight, ts)
+				delete(inFlightText, ts)
+				next := waiting[ts]
+				delete(waiting, ts)
+				_, deleting := deleteRes[ts]
+				gone := appGone[ts] || res.NotFound
 				// The user hears of it and gets the text back unless
 				// Slack's echo proved it stored it, or a newer edit is
 				// on its way.
-				wantGiveBack := res.Err != nil && !echoed[ts] && (!queued || gone)
+				wantGiveBack := res.Err != nil && !echoed[ts] && (next == "" || gone)
 				giveBack := text
-				if queued && gone {
-					giveBack = m.queued.typed
+				if next != "" && gone {
+					giveBack = next
 				}
 				_, cmd := a.Update(res)
-				collect(ts, cmd)
+				if res.NotFound {
+					appGone[ts] = true
+				}
+				if next != "" && !gone {
+					send(ts, next, cmd)
+				}
 				if wantGiveBack {
 					got := a.compose.Value() == giveBack || a.threadCompose.Value() == giveBack || clipboardHas(*copied, giveBack)
 					if !got {
 						rt.Fatalf("%s: failed edit %q lost: composer %q, thread composer %q, clipboard %q",
 							ts, giveBack, a.compose.Value(), a.threadCompose.Value(), *copied)
 					}
-					if gone && (a.compose.Value() == giveBack || a.threadCompose.Value() == giveBack) && !a.editing.IsActive() {
+					if (gone || deleting) && (a.compose.Value() == giveBack || a.threadCompose.Value() == giveBack) && !a.editing.IsActive() {
 						rt.Fatalf("%s: text of an edit of a deleted message left as a draft", ts)
 					}
 				}
@@ -229,21 +290,22 @@ func TestEditsAndDeletesEndOnSlacksState(t *testing.T) {
 				a.mode = ModeNormal
 				*copied = nil
 			case "event":
-				if len(slack.events) == 0 {
-					return
+				if len(slack.events) > 0 {
+					deliver()
 				}
-				ev := slack.events[0].msg
-				slack.events = slack.events[1:]
-				if nm, ok := ev.(NewMessageMsg); ok {
-					if res, pending := inFlight[nm.Message.TS]; pending && nm.Message.Text == editedBody(wire[res.EditID]).Text {
-						echoed[nm.Message.TS] = true
-					}
-				}
-				a.Update(ev)
 			case "other":
-				ts := rapid.SampledFrom([]string{"1.000000", "5.000000", "6.000000"}).Draw(rt, "otherTS")
+				ts := rapid.SampledFrom(all).Draw(rt, "otherTS")
 				if slack.deleted[ts] {
 					return
+				}
+				if _, out := inFlight[ts]; out {
+					// The excluded case: the echo of the edit in
+					// flight must not be lost when another change
+					// follows it.
+					if lost[ts] {
+						return
+					}
+					slack.keep(ts)
 				}
 				words++
 				slack.change(ts, editedBody(fmt.Sprintf("o%d", words)), false)
@@ -270,9 +332,17 @@ func TestEditsAndDeletesEndOnSlacksState(t *testing.T) {
 				default:
 					res.Err = errors.New("boom")
 				}
+				if res.Err == nil || res.NotFound {
+					appGone[ts] = true
+				}
 				a.Update(res)
 			case "drop":
 				if len(slack.events) > 0 && slack.events[0].droppable {
+					if nm, ok := slack.events[0].msg.(NewMessageMsg); ok {
+						if _, out := inFlight[nm.Message.TS]; out {
+							lost[nm.Message.TS] = true
+						}
+					}
 					slack.events = slack.events[1:]
 				}
 			case "refetch":
@@ -298,14 +368,15 @@ func TestEditsAndDeletesEndOnSlacksState(t *testing.T) {
 			// Whatever reloaded the panes, a message being deleted
 			// stays out of them, and one with an edit in flight shows
 			// the newest edit typed.
-			for _, ts := range []string{"1.000000", "5.000000", "6.000000"} {
+			for _, ts := range all {
 				for _, pane := range panesOf(a, ts) {
 					_, deleting := deleteRes[ts]
+					_, editing := inFlight[ts]
 					switch {
 					case !pane.ok:
 					case deleting:
 						rt.Fatalf("%s shown in %s while its delete is pending", ts, pane.name)
-					case inFlight[ts].EditID != 0:
+					case editing:
 						typed := typedOrder[ts]
 						if want := editedBody(typed[len(typed)-1]); !reflect.DeepEqual(pane.body, want) {
 							rt.Fatalf("%s in %s shows %+v while its edit to %q is in flight", ts, pane.name, pane.body, typed[len(typed)-1])
@@ -348,6 +419,18 @@ func TestEditsAndDeletesEndOnSlacksState(t *testing.T) {
 						rt.Fatalf("%s in %s shows %+v, Slack has %+v", ts, pane.name, body, want)
 					}
 				}
+			}
+			p := a.pendingOps
+			if len(p.edits) != 0 || len(p.deletes) != 0 || len(p.inserts) != 0 {
+				rt.Fatalf("pending at quiescence: edits %v, deletes %v, inserts %v", p.edits, p.deletes, p.inserts)
+			}
+			for k, held := range p.held {
+				if len(held) != 0 {
+					rt.Fatalf("held in %v at quiescence: %+v", k, held)
+				}
+			}
+			if a.editing.IsActive() {
+				rt.Fatalf("an editor is open at quiescence")
 			}
 		}
 
