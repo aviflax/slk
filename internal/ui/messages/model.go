@@ -585,8 +585,11 @@ func (m *Model) AppendMessage(msg MessageItem) {
 
 	// Always scroll to the newest message. Advancing `selected` to the
 	// last index forces View() to re-snap yOffset to the bottom on the
-	// next render (because the snap mark != selected).
+	// next render (because the snap mark != selected). Reaction
+	// navigation was on the message selected before, so it ends: its
+	// next Enter must not act on the new row.
 	m.selected = len(m.messages) - 1
+	m.nav = ReactionNav{}
 }
 
 // RemoveLocalSent removes an optimistic placeholder identified by
@@ -657,6 +660,7 @@ func (m *Model) UpsertSelfSent(msg MessageItem) {
 		return
 	}
 	m.selected = len(m.messages) - 1
+	m.nav = ReactionNav{}
 }
 
 // InsertLocal shows a placeholder for a message the user is sending.
@@ -1409,11 +1413,17 @@ func (m *Model) LastReadTS() string {
 	return m.lastReadTS
 }
 
+// OldestTS is the TS of the oldest row Slack assigned one to, the
+// anchor for fetching older history; "" when there is none. A
+// placeholder still sending can head the list (a send into an empty
+// conversation), and Slack has never seen its TS.
 func (m *Model) OldestTS() string {
-	if len(m.messages) == 0 {
-		return ""
+	for _, r := range m.messages {
+		if !IsLocalTS(r.TS) {
+			return r.TS
+		}
 	}
-	return m.messages[0].TS
+	return ""
 }
 
 // cacheStyles bundles the lipgloss styles and pre-rendered strings that

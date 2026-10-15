@@ -37,7 +37,7 @@ func (a *App) handleMarkChord(msg tea.KeyMsg) tea.Cmd {
 // has no session copy, so a lost write means the mark silently does
 // not exist.
 func (a *App) setMark(letter string) tea.Cmd {
-	loc, ok := a.currentLocation()
+	loc, ok := a.selectedLocation()
 	if !ok {
 		return toastWithClear(a, "No message selected to mark", 2*time.Second)
 	}
@@ -51,7 +51,7 @@ func (a *App) setMark(letter string) tea.Cmd {
 	if name, _, found := a.channels.Lookup(loc.ChannelID); found {
 		m.ChannelName = name
 	}
-	// The same order as currentLocation: the thread pane, then the
+	// The same order as selectedLocation: the thread pane, then the
 	// Threads view, then the channel pane. focusedContentPane does not
 	// fit, because a mark set with the sidebar focused still names the
 	// channel pane's selection.

@@ -415,14 +415,12 @@ var reduceThreads reducerFunc = func(a *App, msg tea.Msg) (tea.Cmd, bool) {
 }
 
 // newestMarkableReplyTS returns the ts of the newest reply a read
-// cursor may land on, or "" when there is none. Ephemeral replies are
-// skipped: Slack never returns them from conversations.replies, so a
+// cursor may land on, or "" when there is none. Ephemeral replies and
+// placeholders still sending are skipped (messages.KnownToSlack): a
 // cursor on one would sit behind a message Slack does not know.
 func newestMarkableReplyTS(replies []messages.MessageItem) string {
-	for i := len(replies) - 1; i >= 0; i-- {
-		if !replies[i].Ephemeral && replies[i].TS != "" {
-			return replies[i].TS
-		}
+	if i := messages.LastIndexBefore(replies, len(replies), messages.KnownToSlack); i >= 0 {
+		return replies[i].TS
 	}
 	return ""
 }

@@ -20,14 +20,14 @@ func placeholderApp(t *testing.T, panel Panel) *App {
 		openThread(a, "1.000000")
 		a.Update(SendThreadReplyMsg{ChannelID: "C1", ThreadTS: "1.000000", Text: "pending"})
 		a.focusedPanel = PanelThread
-		if r, ok := a.threadPanel.SelectedMessage(); !ok || !isLocalTS(r.TS) {
+		if r, ok := a.threadPanel.SelectedMessage(); !ok || !messages.IsLocalTS(r.TS) {
 			t.Fatalf("selected reply = %+v, want the placeholder", r)
 		}
 		return a
 	}
 	a.Update(SendMessageMsg{ChannelID: "C1", Text: "pending"})
 	a.focusedPanel = PanelMessages
-	if m, ok := a.messagepane.SelectedMessage(); !ok || !isLocalTS(m.TS) {
+	if m, ok := a.messagepane.SelectedMessage(); !ok || !messages.IsLocalTS(m.TS) {
 		t.Fatalf("selected message = %+v, want the placeholder", m)
 	}
 	return a

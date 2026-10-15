@@ -1,6 +1,10 @@
 package messages
 
-import "slices"
+import (
+	"fmt"
+	"slices"
+	"strings"
+)
 
 // Row operations on a pane's []MessageItem, located by TS. Both content
 // panes (messages.Model and thread.Model) use them, then fix up their
@@ -14,6 +18,39 @@ import "slices"
 // caller that needs the old slice afterwards must clone it first.
 // Matching is literal: an empty ts matches a row with an empty TS, so
 // callers that must not touch such rows keep their own empty-ts guard.
+
+// localTSPrefix starts every optimistic placeholder's TS.
+const localTSPrefix = "local:"
+
+// LocalTS is the TS of the n-th optimistic placeholder: a row the user
+// sent that Slack has not answered for yet. It never looks like a TS
+// Slack assigns ("<seconds>.<microseconds>").
+func LocalTS(n uint64) string { return fmt.Sprintf("%s%d", localTSPrefix, n) }
+
+// IsLocalTS reports whether ts is a placeholder's (from LocalTS) rather
+// than one Slack assigned. Slack has never heard of such a TS: it must
+// not reach a Slack request, the cache, a mark, the navigation history
+// or a link.
+func IsLocalTS(ts string) bool { return strings.HasPrefix(ts, localTSPrefix) }
+
+// KnownToSlack reports whether Slack knows msg as a message of its
+// conversation, so a read cursor or an unread boundary may sit on it:
+// not a placeholder still sending, and not an ephemeral (Slack never
+// returns one from history).
+func KnownToSlack(msg MessageItem) bool {
+	return msg.TS != "" && !IsLocalTS(msg.TS) && !msg.Ephemeral
+}
+
+// LastIndexBefore returns the index of the last row before index i
+// for which keep is true, or -1. i may be len(rows) to search them all.
+func LastIndexBefore(rows []MessageItem, i int, keep func(MessageItem) bool) int {
+	for j := min(i, len(rows)) - 1; j >= 0; j-- {
+		if keep(rows[j]) {
+			return j
+		}
+	}
+	return -1
+}
 
 // RowOp is what a row operation did to the slice.
 type RowOp int

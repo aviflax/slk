@@ -143,6 +143,9 @@ var reduceSend reducerFunc = func(a *App, msg tea.Msg) (tea.Cmd, bool) {
 		return reduceMessageEdited(a, m), true
 
 	case DeleteMessageMsg:
+		if cmd, blocked := a.sendingGuard(m.TS); blocked {
+			return cmd, true
+		}
 		// The message leaves every pane that shows it at once; the
 		// rows are kept to put back if the delete fails. A deleted
 		// thread parent's panel closes only once Slack confirms
@@ -159,6 +162,12 @@ var reduceSend reducerFunc = func(a *App, msg tea.Msg) (tea.Cmd, bool) {
 		}), true
 
 	case MarkUnreadMsg:
+		if cmd, blocked := a.sendingGuard(m.BoundaryTS); blocked {
+			return cmd, true
+		}
+		if cmd, blocked := a.sendingGuard(m.ThreadTS); blocked {
+			return cmd, true
+		}
 		messageSvc := a.messageSvc
 		chID := ids.ChannelID(m.ChannelID)
 		threadTS := ids.ThreadTS(m.ThreadTS)
@@ -471,6 +480,10 @@ func setEditedText(text string, edited bool) func(*messages.MessageItem) {
 // every pane that shows the message, and the edit is recorded in
 // pendingOps until its result settles it (reduceMessageEdited).
 func reduceEditMessage(a *App, m EditMessageMsg) tea.Cmd {
+	if cmd, blocked := a.sendingGuard(m.TS); blocked {
+		a.offerTypedBack(commandOrigin{teamID: m.TeamID, channelID: m.ChannelID, threadTS: m.ThreadTS, typed: m.Typed})
+		return cmd
+	}
 	converted, _ := mrkdwn.Convert(m.NewText)
 	prior, shown := a.shownSinks(m.ChannelID).patch(m.TS, setEditedText(converted, true))
 	e := a.pendingOps.BeginEdit(pendingEdit{

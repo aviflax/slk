@@ -1,7 +1,6 @@
 package messages
 
 import (
-	"fmt"
 	"slices"
 	"strings"
 	"testing"
@@ -14,7 +13,7 @@ import (
 // placeholder id.
 func drawRowTS(t *rapid.T, label string) string {
 	if rapid.IntRange(0, 4).Draw(t, label+"Local") == 0 {
-		return fmt.Sprintf("local:%d", rapid.IntRange(1, 50).Draw(t, label+"N"))
+		return LocalTS(uint64(rapid.IntRange(1, 50).Draw(t, label+"N")))
 	}
 	return proptest.TS().Draw(t, label)
 }
@@ -274,3 +273,37 @@ func sameRow(a, b MessageItem) bool {
 }
 
 func sameRows(a, b []MessageItem) bool { return slices.EqualFunc(a, b, sameRow) }
+
+// Every LocalTS is a placeholder and no Slack TS is.
+func TestIsLocalTSTellsPlaceholdersFromSlackTSes(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		if n := rapid.Uint64().Draw(t, "n"); !IsLocalTS(LocalTS(n)) {
+			t.Fatalf("LocalTS(%d) = %q is not local", n, LocalTS(n))
+		}
+		if ts := proptest.TS().Draw(t, "ts"); IsLocalTS(ts) {
+			t.Fatalf("Slack TS %q counted as local", ts)
+		}
+	})
+}
+
+// LastIndexBefore finds the last row before i that keep accepts: that
+// row passes, every row between it and i fails, and -1 means none
+// before i passes.
+func TestLastIndexBeforeIsTheNearestKeptRow(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		rows := drawRows(t)
+		for i := range rows {
+			rows[i].Ephemeral = rapid.Bool().Draw(t, "ephemeral")
+		}
+		i := rapid.IntRange(0, len(rows)).Draw(t, "i")
+		j := LastIndexBefore(rows, i, KnownToSlack)
+		if j >= i || j < -1 || (j >= 0 && !KnownToSlack(rows[j])) {
+			t.Fatalf("LastIndexBefore(%d) = %d", i, j)
+		}
+		for k := j + 1; k < i; k++ {
+			if KnownToSlack(rows[k]) {
+				t.Fatalf("LastIndexBefore(%d) = %d skipped row %d (%+v)", i, j, k, rows[k])
+			}
+		}
+	})
+}

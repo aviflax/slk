@@ -47,9 +47,7 @@ package ui
 
 import (
 	"cmp"
-	"fmt"
 	"slices"
-	"strings"
 	"time"
 
 	tea "charm.land/bubbletea/v2"
@@ -395,13 +393,6 @@ func (p *pendingOps) IsSelfSent(ts string) bool {
 	return ok
 }
 
-// localTSPrefix starts every placeholder id.
-const localTSPrefix = "local:"
-
-// isLocalTS reports whether ts is a placeholder id from NextLocalTS
-// rather than a TS Slack assigned.
-func isLocalTS(ts string) bool { return strings.HasPrefix(ts, localTSPrefix) }
-
 // stillSendingText is the toast for an action on a message that is
 // still sending.
 const stillSendingText = "Still sending…"
@@ -421,17 +412,15 @@ func (a *App) sendingSelectionGuard() (tea.Cmd, bool) {
 // sendingGuard is the verdict on an action targeting the message with
 // TS ts: a placeholder is refused with a toast.
 func (a *App) sendingGuard(ts string) (tea.Cmd, bool) {
-	if !isLocalTS(ts) {
+	if !messages.IsLocalTS(ts) {
 		return nil, false
 	}
 	return toastWithClear(a, stillSendingText, 2*time.Second), true
 }
 
-// NextLocalTS mints a unique placeholder id for an optimistic instant-
-// display message. The "local:" prefix makes it trivially distinguishable
-// from a Slack-assigned TS (which is always of the form
-// "<seconds>.<microseconds>").
+// NextLocalTS mints a unique placeholder id (messages.LocalTS) for an
+// optimistic instant-display message.
 func (p *pendingOps) NextLocalTS() string {
 	p.localTSCounter++
-	return fmt.Sprintf("%s%d", localTSPrefix, p.localTSCounter)
+	return messages.LocalTS(p.localTSCounter)
 }

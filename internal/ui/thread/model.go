@@ -330,6 +330,9 @@ func (m *Model) AddReply(msg messages.MessageItem) {
 	m.replies = rows
 	m.InvalidateCache()
 	m.selected = len(m.replies) - 1
+	// Reaction navigation was on the reply selected before; its next
+	// Enter must not act on the new one.
+	m.nav = messages.ReactionNav{}
 }
 
 // RemoveLocalSentReply removes an optimistic placeholder reply
@@ -382,6 +385,7 @@ func (m *Model) UpsertSelfSentReply(msg messages.MessageItem) {
 	m.InvalidateCache()
 	if ch.Op == messages.RowAdded {
 		m.selected = len(m.replies) - 1
+		m.nav = messages.ReactionNav{}
 	}
 }
 

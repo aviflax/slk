@@ -59,6 +59,9 @@ func handleReactionPickerMode(a *App, msg tea.KeyMsg) tea.Cmd {
 
 	a.reactionPicker.Close()
 	a.SetMode(ModeNormal)
+	if cmd, blocked := a.sendingGuard(messageTSStr); blocked {
+		return cmd
+	}
 
 	// Record frecent usage on add (not remove).
 	if !result.Remove {

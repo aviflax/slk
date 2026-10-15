@@ -10,6 +10,7 @@ import (
 	"mime"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 
@@ -1311,6 +1312,10 @@ func (a *App) openReactionPicker(p contentPane, channelID string) tea.Cmd {
 	if !ok {
 		return nil
 	}
+	if cmd, blocked := a.sendingGuard(msg.TS); blocked {
+		p.ExitReactionNav()
+		return cmd
+	}
 	var existing []string
 	for _, r := range msg.Reactions {
 		if r.HasReacted {
@@ -1418,6 +1423,9 @@ func (a *App) toggleReactionOnSelected(p contentPane, channelID, emojiName strin
 // toggleReactionOnSelected: optimistic in-memory update + an async
 // tea.Cmd that issues the Slack add/remove call.
 func (a *App) toggleReactionOnMessageItem(channelIDStr string, msg messages.MessageItem, emojiName string) tea.Cmd {
+	if cmd, blocked := a.sendingGuard(msg.TS); blocked {
+		return cmd
+	}
 	remove := false
 	for _, r := range msg.Reactions {
 		if r.Emoji == emojiName && r.HasReacted {
@@ -1479,6 +1487,9 @@ func (a *App) copyPermalinkOfSelected() tea.Cmd {
 	ts := msg.TS
 	if channelID == "" || ts == "" {
 		return nil
+	}
+	if cmd, blocked := a.sendingGuard(ts); blocked {
+		return cmd
 	}
 	messageSvc := a.messageSvc
 	cID := ids.ChannelID(channelID)
@@ -1606,6 +1617,11 @@ func (a *App) saveThreadToFile() tea.Cmd {
 	}
 	parent := a.threadPanel.ParentMsg()
 	replies := a.threadPanel.Replies()
+	// A reply still sending has no TS of its own yet; save once it has.
+	if i := slices.IndexFunc(replies, func(r messages.MessageItem) bool { return messages.IsLocalTS(r.TS) }); i >= 0 {
+		cmd, _ := a.sendingGuard(replies[i].TS)
+		return cmd
+	}
 	// Cloned: the export runs in the Cmd goroutine below, and the
 	// thread panel's userNames is written on the UI goroutine by
 	// PatchUserName. Handing the live map across is the
@@ -2460,7 +2476,7 @@ func (a *App) scheduleThreadsDirty() tea.Cmd {
 // strings of equal shape, so the string comparison orders them
 // correctly without parsing.
 func (a *App) recordChannelMark(channelID, ts string) {
-	if channelID == "" || ts == "" {
+	if channelID == "" || ts == "" || messages.IsLocalTS(ts) {
 		return
 	}
 	if a.pendingChannelMark.channelID == channelID && a.pendingChannelMark.ts >= ts {
@@ -2472,7 +2488,7 @@ func (a *App) recordChannelMark(channelID, ts string) {
 // recordThreadMark stages a thread read-cursor advance. Newest-wins for
 // the same (channel, thread); a different thread replaces the slot.
 func (a *App) recordThreadMark(channelID, threadTS, ts string) {
-	if channelID == "" || threadTS == "" || ts == "" {
+	if channelID == "" || threadTS == "" || ts == "" || messages.IsLocalTS(ts) || messages.IsLocalTS(threadTS) {
 		return
 	}
 	if a.pendingThreadMark.channelID == channelID &&
@@ -4152,10 +4168,12 @@ func (a *App) beginDeleteOfSelected() tea.Cmd {
 //
 // Boundary semantics:
 //   - Channel pane, selection is i-th of N loaded messages →
-//     BoundaryTS = messages[i-1].TS (or "0" if i == 0)
+//     BoundaryTS = the TS of the nearest message before i that Slack
+//     knows (messages.KnownToSlack: not a placeholder, not an
+//     ephemeral), or "0" if there is none
 //     UnreadCount = N - i
 //   - Thread pane, selection is i-th of N replies →
-//     BoundaryTS = replies[i-1].TS (or threadTS if i == 0)
+//     BoundaryTS = the nearest such reply before i (or threadTS)
 //     UnreadCount = 0 (sidebar isn't updated for thread-level)
 func (a *App) markUnreadOfSelected() tea.Cmd {
 	channelID, ts, _, _, panel, ok := a.selectedMessageContext()
@@ -4177,8 +4195,8 @@ func (a *App) markUnreadOfSelected() tea.Cmd {
 			return nil
 		}
 		boundary := "0"
-		if idx > 0 {
-			boundary = msgs[idx-1].TS
+		if j := messages.LastIndexBefore(msgs, idx, messages.KnownToSlack); j >= 0 {
+			boundary = msgs[j].TS
 		}
 		unreadCount := len(msgs) - idx
 		chID := channelID
@@ -4207,8 +4225,8 @@ func (a *App) markUnreadOfSelected() tea.Cmd {
 			return nil
 		}
 		boundary := threadTS
-		if idx > 0 {
-			boundary = replies[idx-1].TS
+		if j := messages.LastIndexBefore(replies, idx, messages.KnownToSlack); j >= 0 {
+			boundary = replies[j].TS
 		}
 		chID := channelID
 		tTS := threadTS

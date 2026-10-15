@@ -8,7 +8,10 @@
 // what workspaceContext and every cache table key on.
 package ui
 
-import "github.com/gammons/slk/internal/ids"
+import (
+	"github.com/gammons/slk/internal/ids"
+	"github.com/gammons/slk/internal/ui/messages"
+)
 
 // Location identifies a workspace, a channel, and optionally a message
 // within that channel and a thread the message belongs to. A location
@@ -31,13 +34,23 @@ type Location struct {
 	ThreadTS ids.ThreadTS
 }
 
-// currentLocation snapshots the message the user is looking at right
+// currentLocation names where the user is, for the navigation history
+// and back-jumps: selectedLocation, except that a placeholder (a message
+// still sending, whose TS Slack has never seen) is named by the nearest
+// sent message before it (sentLocation).
+func (a *App) currentLocation() (Location, bool) {
+	loc, ok := a.selectedLocation()
+	return a.sentLocation(loc), ok
+}
+
+// selectedLocation snapshots the message the user is looking at right
 // now: the thread panel's selected reply when the thread panel is
 // focused; in the Threads view, the parent of the selected thread; and
 // otherwise the messages pane's selection. In the Activity view nothing
 // is named: the messages pane is hidden behind the list there. ok=false
-// when there is nothing to name.
-func (a *App) currentLocation() (Location, bool) {
+// when there is nothing to name. It may name a placeholder; setMark
+// refuses one.
+func (a *App) selectedLocation() (Location, bool) {
 	if a.focusedPanel != PanelThread {
 		switch a.view {
 		case ViewThreads:
@@ -57,7 +70,7 @@ func (a *App) currentLocation() (Location, bool) {
 		case ViewActivity:
 			return Location{}, false
 		}
-		return a.channelPaneLocation()
+		return a.selectedChannelPaneLocation()
 	}
 	reply := a.threadPanel.SelectedReply()
 	if reply == nil {
@@ -82,8 +95,42 @@ func (a *App) currentLocation() (Location, bool) {
 }
 
 // channelPaneLocation names the messages pane's selection in the
-// active channel.
+// active channel, a placeholder by the sent message before it.
 func (a *App) channelPaneLocation() (Location, bool) {
+	loc, ok := a.selectedChannelPaneLocation()
+	return a.sentLocation(loc), ok
+}
+
+// sentLocation is loc with a placeholder's MessageTS replaced by the
+// nearest message before it in the same pane that is not one: a
+// navigation must never ask Slack for a TS it never issued. With none,
+// a thread location names the parent and a channel location the
+// channel alone.
+func (a *App) sentLocation(loc Location) Location {
+	if !messages.IsLocalTS(string(loc.MessageTS)) {
+		return loc
+	}
+	local := string(loc.MessageTS)
+	rows := a.messagepane.Messages()
+	loc.MessageTS = ""
+	if loc.ThreadTS != "" {
+		rows = a.threadPanel.Replies()
+		loc.MessageTS = ids.MessageTS(loc.ThreadTS)
+	}
+	i := messages.FirstIndexOfTS(rows, local)
+	if i < 0 {
+		i = len(rows)
+	}
+	sent := func(r messages.MessageItem) bool { return !messages.IsLocalTS(r.TS) }
+	if j := messages.LastIndexBefore(rows, i, sent); j >= 0 {
+		loc.MessageTS = ids.MessageTS(rows[j].TS)
+	}
+	return loc
+}
+
+// selectedChannelPaneLocation names the messages pane's selection in
+// the active channel as it is, placeholder or not.
+func (a *App) selectedChannelPaneLocation() (Location, bool) {
 	msg, ok := a.messagepane.SelectedMessage()
 	if !ok {
 		return Location{}, false
