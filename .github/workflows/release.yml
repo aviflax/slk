@@ -28,12 +28,19 @@ jobs:
           go-version: stable
           cache: true
 
+      # The release body is the CHANGELOG.md section for this tag. The step
+      # fails when there is no section, so a release cannot ship without a
+      # changelog entry. The file lives outside the checkout so it does not
+      # dirty the tree goreleaser checks.
+      - name: Extract release notes
+        run: scripts/changelog-section.sh "$GITHUB_REF_NAME" > "$RUNNER_TEMP/release-notes.md"
+
       - name: Run GoReleaser
         uses: goreleaser/goreleaser-action@v6
         with:
           distribution: goreleaser
           version: "~> v2"
-          args: release --clean
+          args: release --clean --release-notes ${{ runner.temp }}/release-notes.md
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           HOMEBREW_TAP_GITHUB_TOKEN: ${{ secrets.HOMEBREW_TAP_GITHUB_TOKEN }}

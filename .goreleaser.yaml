@@ -237,9 +237,6 @@ homebrew_casks:
     commit_msg_template: "slk: brew cask update for {{ .ProjectName }} version {{ .Tag }}"
     homepage: https://github.com/kirahowe/slk
     description: A blazingly fast, keyboard-driven Slack TUI
-    # Helps `brew audit` when the homepage and the download domain differ.
-    url:
-      verified: github.com/kirahowe/slk
     # Skip the prerelease tags goreleaser auto-flags so the tap only
     # tracks stable releases.
     skip_upload: auto
