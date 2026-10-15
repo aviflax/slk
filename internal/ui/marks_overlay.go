@@ -65,7 +65,7 @@ func (a *App) refreshMarksOverlay() tea.Cmd {
 }
 
 // previewText renders stored snapshot text for one overlay row:
-// :shortcode: sequences resolved to glyphs (emoji.Sprint, the same
+// :shortcode: sequences resolved to glyphs (emoji.ResolveShortcodesInText, the same
 // helper the sidebar uses), and every run of whitespace collapsed to a
 // single space.
 //
@@ -77,5 +77,5 @@ func (a *App) refreshMarksOverlay() tea.Cmd {
 // before this existed render correctly too, and so the stored snapshot
 // stays the faithful original.
 func previewText(s string) string {
-	return strings.Join(strings.Fields(emoji.Sprint(s)), " ")
+	return strings.Join(strings.Fields(emoji.ResolveShortcodesInText(s)), " ")
 }

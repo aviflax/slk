@@ -9,6 +9,13 @@ import (
 
 var testNow = time.Unix(1700000000, 0)
 
+func TestStatusGlyph_MultiCodepointEmojiUsesFallback(t *testing.T) {
+	s := Status{Emoji: ":mountain:", Text: "hiking"}
+	if got := s.StatusGlyph(testNow); got != FallbackGlyph {
+		t.Errorf("StatusGlyph = %q, want fallback %q", got, FallbackGlyph)
+	}
+}
+
 func TestGlyph_ResolvesShortcodesAndFallsBack(t *testing.T) {
 	calendar := emoji.CodeMap()[":calendar:"]
 	thumbs := emoji.CodeMap()[":+1:"]

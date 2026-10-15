@@ -2042,16 +2042,14 @@ func (m *Model) renderSectionHeaderLabel(name, cursor string, dotStyle lipgloss.
 	displayName, emojiCode := m.sectionDisplayMeta(name)
 	emojiPrefix := ""
 	if emojiCode != "" {
-		// kyokomi/emoji.Sprint resolves :shortcode: to unicode; on
-		// unknown shortcodes it returns the input unchanged (which
-		// keeps the colons, giving a graceful textual fallback).
+		// ResolveShortcodesInText only substitutes single-codepoint
+		// glyphs; base+VS16, ZWJ and similar sequences stay as the
+		// :shortcode: text, since terminals disagree with lipgloss on
+		// their width and shift the rest of the row. Unknown
+		// shortcodes also keep their colons.
 		token := ":" + emojiCode + ":"
-		rendered := emojiutil.Sprint(token)
-		if rendered != token {
-			emojiPrefix = rendered + " "
-		} else {
-			emojiPrefix = token + " "
-		}
+		rendered := emojiutil.ResolveShortcodesInText(token)
+		emojiPrefix = rendered + " "
 	}
 
 	glyph := "▾" // expanded

@@ -177,5 +177,11 @@ func shortcodeGlyph(code string) string {
 	if name == "" {
 		return ""
 	}
-	return emoji.CodeMap()[":"+emoji.StripSkinTone(name)+":"]
+	g := emoji.CodeMap()[":"+emoji.StripSkinTone(name)+":"]
+	// Multi-codepoint glyphs (base+VS16, ZWJ) draw at a width the
+	// terminal and lipgloss disagree on; callers use FallbackGlyph.
+	if !emoji.ShouldRenderUnicode(g) {
+		return ""
+	}
+	return g
 }

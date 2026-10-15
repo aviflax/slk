@@ -239,3 +239,9 @@ func TestMarksOverlay_ClickOutsideCloses(t *testing.T) {
 		t.Errorf("an outside click must close the list: mode=%v visible=%v", app.mode, app.marksOverlay.IsVisible())
 	}
 }
+
+func TestPreviewText_KeepsMultiCodepointEmojiAsShortcode(t *testing.T) {
+	if got := previewText("on :mountain: duty"); got != "on :mountain: duty" {
+		t.Errorf("previewText = %q, want the shortcode kept", got)
+	}
+}

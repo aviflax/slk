@@ -141,6 +141,7 @@ scrollbars, date formatting, case folding, or ID formatting: it already exists.
 | Run a slash command from the UI | `core.CommandService.Run` (App field `a.commandSvc`); wired in `cmd/slk` via `runCommand` to the `Client.RunCommand` of the workspace the command was typed in (`teamID`, looked up with `router.ByID`, not the active one). Slack's refusal arrives as `*core.CommandError{Code}` |
 | A web-client `client_token` (`web-<unix ms>`) for any request that sends one | `newClientToken()` (`internal/slack`); the only generator |
 | Emoji shortcode → glyph | `emoji.Sprint`, `emoji.CodeMap`, `emoji.StripSkinTone` |
+| Emoji shortcode → glyph on any row whose width matters (sidebar, overlays, status glyphs) | `emoji.ResolveShortcodesInText(s)` or `emoji.ShouldRenderUnicode(glyph)` on a `CodeMap` lookup. Multi-codepoint glyphs (base+VS16 like `:mountain:`, ZWJ, flags) are left as `:shortcode:` because terminals and lipgloss disagree on their width. Never call `emoji.Sprint` or read `CodeMap` for display without the gate (#301) |
 | Does Block Kit already render the message body? | `blockkit.RendersBody(blocks)`, `messages.BlocksCarryBody(msg)` |
 | Current DND state from a Slack API result | `slack.DNDStateFromStatus` |
 | Persist a full Web API profile's custom status and huddle (including clears) | `cmd/slk/applyProfileStatus(teamID, userID, profile, db, send)` after `UpsertUser`, before any resolved-user notice or row repair; `UpsertUser` alone deliberately preserves status on conflict |
