@@ -1047,37 +1047,25 @@ func (m *Model) IncrementReplyCount(parentTS, replyTS string) {
 		}
 		set[replyTS] = struct{}{}
 	}
-	// Same bottom-anchor preservation as UpdateReaction: if the increment
-	// is going to add a "[N replies ->]" line under a message that's
-	// currently at the bottom of the visible window, advance yOffset by
-	// the height delta so the message stays pinned to the bottom instead
-	// of being pushed under the fold.
-	wasAnchoredAtBottom := false
-	oldTotalLines := m.list.Total()
-	if m.cache != nil && m.list.Height() > 0 && m.list.Total() > 0 {
-		wasAnchoredAtBottom = m.list.YOffset()+m.list.Height() >= m.list.Total()
-	}
-
+	// The count may add a "[N replies ->]" line: a window at the
+	// bottom stays there (HoldBottom).
+	m.list.HoldBottom()
 	m.messages[i].ReplyCount++
 	m.dropCache()
 	m.dirty()
-	if wasAnchoredAtBottom && m.cacheWidth > 0 {
-		m.buildCache(m.cacheWidth, false)
-		if delta := m.list.Total() - oldTotalLines; delta > 0 {
-			y := min(m.list.YOffset()+delta, m.list.Total()-m.list.Height())
-			m.list.SetYOffset(max(y, 0))
-			m.list.MarkSnapped(m.selected)
-		}
-	}
 }
 
 // Patch applies f to the first message with TS ts (PatchTS) and returns
 // the message as it was before. ok is false when no message has ts.
+//
+// A window at the bottom stays there when the patch changes the row's
+// height (a multi-line edit of the last message), as for a reaction.
 func (m *Model) Patch(ts string, f func(*MessageItem)) (prior MessageItem, ok bool) {
 	rows, ch := PatchTS(m.messages, ts, func(r *MessageItem) { prior = *r; f(r) })
 	if ch.Op == RowNone {
 		return MessageItem{}, false
 	}
+	m.list.HoldBottom()
 	m.messages = rows
 	m.dropCache()
 	m.dirty()
@@ -1155,41 +1143,19 @@ func (m *Model) Restore(r RemovedRow) {
 }
 
 func (m *Model) UpdateReaction(messageTS, emojiName, userID string, remove bool) {
-	// Capture pre-mutation viewport state so we can preserve "anchored at
-	// bottom" across the reaction's height change. Without this, adding
-	// the first reaction to the last visible message grows the list total by
-	// 1 while yOffset stays put -- the bottom message gets pushed below
-	// the fold and a "-- more below --" hint replaces it. We want the
-	// reaction to push content *up* (yOffset++) instead, keeping the
-	// reacted-to message anchored to the bottom of the pane.
-	wasAnchoredAtBottom := false
-	oldTotalLines := m.list.Total()
-	if m.cache != nil && m.list.Height() > 0 && m.list.Total() > 0 {
-		wasAnchoredAtBottom = m.list.YOffset()+m.list.Height() >= m.list.Total()
-	}
-
 	i := FirstIndexOfTS(m.messages, messageTS)
 	if i < 0 {
 		return
 	}
+	// Adding the first reaction to the last visible message grows the
+	// list by a row: a window at the bottom moves the content up
+	// (HoldBottom) rather than pushing the message below the fold.
+	m.list.HoldBottom()
 	ApplyReaction(&m.messages[i], emojiName, userID, m.currentUserID, remove)
 	m.dropCache()
 	m.dirty()
 	if m.nav.Active {
 		m.ClampReactionNav()
-	}
-	// Re-anchor the viewport bottom if it was at the bottom before.
-	// We need the new list total, which only buildCache computes;
-	// rebuild now (cheap, and the next View() would do it anyway).
-	if wasAnchoredAtBottom && m.cacheWidth > 0 {
-		m.buildCache(m.cacheWidth, false)
-		if delta := m.list.Total() - oldTotalLines; delta > 0 {
-			y := min(m.list.YOffset()+delta, m.list.Total()-m.list.Height())
-			m.list.SetYOffset(max(y, 0))
-			// Mark snapped so View() doesn't re-snap to the
-			// (unchanged) selection and undo our adjustment.
-			m.list.MarkSnapped(m.selected)
-		}
 	}
 }
 

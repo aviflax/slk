@@ -1836,3 +1836,20 @@ func reactionHitsOf(e entrylist.Entry) []entrylist.Hit {
 
 func cursorStart(m *Model) int { s, _ := m.list.CursorSpan(); return s }
 func cursorEnd(m *Model) int   { _, e := m.list.CursorSpan(); return e }
+
+// A body change that makes the selected bottom message taller (a
+// multi-line edit, or its echo) keeps that message's end on screen,
+// as a reaction does: the content moves up rather than the message
+// moving below the fold.
+func TestPatchKeepsTheBottomAnchored(t *testing.T) {
+	var msgs []MessageItem
+	for i := 1; i <= 20; i++ {
+		msgs = append(msgs, MessageItem{TS: fmt.Sprintf("%d.000000", i), UserName: "u", Text: fmt.Sprintf("m%d", i)})
+	}
+	m := New(msgs, "general")
+	_ = m.View(12, 60)
+	m.Patch("20.000000", Body{Text: "one\ntwo\nthree\nfour\nfive\nlast-line", Edited: true}.Apply)
+	if v := ansi.Strip(m.View(12, 60)); !strings.Contains(v, "last-line") {
+		t.Errorf("the edited bottom message's end is below the fold:\n%s", v)
+	}
+}

@@ -167,6 +167,7 @@ type Model struct {
 
 	height, prevHeight int
 	yOffset            int
+	holdBottom         bool // see HoldBottom
 	snapped            int
 	hasSnapped         bool
 	selStart, selEnd   int
@@ -225,7 +226,7 @@ func (m *Model) YOffset() int { return m.yOffset }
 
 // SetYOffset assigns the first visible line (clamped when eager). It does
 // not bump Version, matching viewport.SetYOffset.
-func (m *Model) SetYOffset(n int) { m.setY(n) }
+func (m *Model) SetYOffset(n int) { m.holdBottom = false; m.setY(n) }
 
 // IndexOf returns the index of the entry with id.
 func (m *Model) IndexOf(id string) (int, bool) {
@@ -261,6 +262,18 @@ func (m *Model) SetHeight(h, sel int) {
 	m.prevHeight, m.height = m.height, h
 }
 
+// HoldBottom is called before a change to an entry's height (an edited
+// body, a reaction, a reply count): if the window shows the end of the
+// list, the next SetEntries keeps it at the end, so the content moves
+// up rather than pushing the last rows below the fold. A window
+// scrolled up is left where it is, and a scroll before the next
+// SetEntries cancels the hold.
+func (m *Model) HoldBottom() {
+	if m.total > 0 && m.height > 0 && m.yOffset+m.height >= m.total {
+		m.holdBottom = true
+	}
+}
+
 // SetEntries replaces the entries, rendered at width. The list takes
 // ownership of es.
 //
@@ -285,6 +298,11 @@ func (m *Model) SetEntries(es []Entry, width int, keepPosition bool) {
 	m.recompute()
 	if m.eager {
 		m.setY(m.yOffset)
+	}
+	if m.holdBottom {
+		m.holdBottom = false
+		m.setY(m.maxOffset())
+		return
 	}
 	if !reanchor {
 		return
@@ -341,6 +359,7 @@ func (m *Model) ScrollUp(n, sel int) {
 	if n <= 0 {
 		return
 	}
+	m.holdBottom = false
 	if m.eager {
 		if m.yOffset > 0 && m.total > 0 {
 			m.setY(m.yOffset - n)
@@ -359,6 +378,7 @@ func (m *Model) ScrollDown(n, sel int) {
 	if n <= 0 {
 		return
 	}
+	m.holdBottom = false
 	if m.eager {
 		if m.yOffset < m.maxOffset() && m.total > 0 {
 			m.setY(m.yOffset + n)

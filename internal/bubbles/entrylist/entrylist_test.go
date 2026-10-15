@@ -471,3 +471,38 @@ func TestReplaceEntries(t *testing.T) {
 		t.Fatalf("a partial rebuild moved the window: %d -> %d", y, m.YOffset())
 	}
 }
+
+// HoldBottom keeps a window that showed the end of the list at the end
+// across the next SetEntries, whichever way the entries' heights went;
+// a window scrolled up keeps its offset.
+func TestHoldBottom(t *testing.T) {
+	entries := func(lastH int) []Entry {
+		es := make([]Entry, 20)
+		for i := range es {
+			es[i] = msg(fmt.Sprintf("m%02d", i), i, 2, 0)
+		}
+		es[19] = msg("m19", 19, lastH, 0)
+		return es
+	}
+	for _, lastH := range []int{6, 1} {
+		m := list(t, 20, 2)
+		m.Layout(19, nil) // y=30, the bottom
+		m.HoldBottom()
+		m.SetEntries(entries(lastH), 20, false)
+		m.Layout(19, nil)
+		if want := max(m.Total()-10, 0); m.YOffset() != want {
+			t.Errorf("last entry %d rows: y=%d, want the bottom %d", lastH, m.YOffset(), want)
+		}
+	}
+	m := list(t, 20, 2)
+	m.Layout(19, nil)
+	m.ScrollUp(5, 19)
+	m.Layout(19, nil)
+	y := m.YOffset()
+	m.HoldBottom()
+	m.SetEntries(entries(6), 20, false)
+	m.Layout(19, nil)
+	if m.YOffset() != y {
+		t.Errorf("scrolled up: y=%d, want it kept at %d", m.YOffset(), y)
+	}
+}

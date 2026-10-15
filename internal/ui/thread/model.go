@@ -547,6 +547,9 @@ func (m *Model) Patch(ts string, f func(*messages.MessageItem)) (prior messages.
 		ok = true
 	}
 	if ok {
+		// A window at the bottom stays there when the row's height
+		// changes.
+		m.list.HoldBottom()
 		m.InvalidateCache()
 	}
 	return prior, ok
@@ -975,6 +978,7 @@ func (m *Model) UpdateReaction(messageTS, emojiName, userID string, remove bool)
 		return
 	}
 
+	m.list.HoldBottom()
 	messages.ApplyReaction(msg, emojiName, userID, m.currentUserID, remove)
 	m.InvalidateCache()
 	if m.nav.Active {

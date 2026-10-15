@@ -1123,3 +1123,19 @@ func reactionFrameHits(m *Model) []entrylist.FrameHit {
 	}
 	return out
 }
+
+// A body change that makes the selected bottom reply taller keeps its
+// end on screen, as in the channel pane.
+func TestPatchKeepsTheBottomAnchored(t *testing.T) {
+	m := New()
+	var replies []messages.MessageItem
+	for i := 1; i <= 20; i++ {
+		replies = append(replies, messages.MessageItem{TS: fmt.Sprintf("%d.000000", i), UserName: "u", Text: fmt.Sprintf("r%d", i)})
+	}
+	m.SetThread(messages.MessageItem{TS: "0.500000", Text: "parent"}, replies, "C1", "0.500000")
+	_ = m.View(12, 60)
+	m.Patch("20.000000", messages.Body{Text: "one\ntwo\nthree\nfour\nfive\nlast-line", Edited: true}.Apply)
+	if v := ansi.Strip(m.View(12, 60)); !strings.Contains(v, "last-line") {
+		t.Errorf("the edited bottom reply's end is below the fold:\n%s", v)
+	}
+}
