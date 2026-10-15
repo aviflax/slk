@@ -710,7 +710,9 @@ are out of scope.
    is on the last entry, when the end stays in view. A new message no
    longer drags a cursor the user moved up down to it: only a cursor at
    the end follows the newest row, and the user's own send is always
-   selected.
+   selected. Clipboard writes land in the order they were made
+   (`newestClipboardWrite` in `cmd/slk`), so an older unsent bundle can
+   no longer finish after a newer one and replace it.
 
 ## Out of scope
 

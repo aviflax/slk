@@ -6,6 +6,7 @@ import (
 	"io"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
@@ -91,5 +92,44 @@ func TestWriteMacOSClipboardWithoutPbcopy(t *testing.T) {
 	t.Setenv("PATH", t.TempDir())
 	if err := writeMacOSClipboard("text"); err == nil {
 		t.Fatal("writeMacOSClipboard succeeded with no pbcopy on PATH")
+	}
+}
+
+// Clipboard writes land in the order the UI made them, whichever order
+// their commands run in: a write overtaken by a newer one before it ran
+// is skipped, so an older unsent bundle cannot replace a newer one.
+func TestClipboardWriterKeepsTheNewest(t *testing.T) {
+	for _, goos := range []string{"darwin", "linux"} {
+		var native []string
+		writer := newClipboardWriter(goos, func(string) string { return "" }, func(got string) error {
+			native = append(native, got)
+			return nil
+		})
+		older, newer := writer("one"), writer("one\n\ntwo")
+		gotNewer, gotOlder := newer(), older()
+		if goos == "darwin" {
+			if !slices.Equal(native, []string{"one\n\ntwo"}) {
+				t.Errorf("%s: pbcopy got %q, want only the newer bundle", goos, native)
+			}
+			continue
+		}
+		if gotOlder != nil {
+			t.Errorf("%s: the overtaken write still set the clipboard: %#v", goos, gotOlder)
+		}
+		if want := tea.SetClipboard("one\n\ntwo")(); !reflect.DeepEqual(gotNewer, want) {
+			t.Errorf("%s: newer write = %#v, want %#v", goos, gotNewer, want)
+		}
+	}
+
+	// Writes that run in order all land.
+	var native []string
+	writer := newClipboardWriter("darwin", func(string) string { return "" }, func(got string) error {
+		native = append(native, got)
+		return nil
+	})
+	writer("a")()
+	writer("b")()
+	if !slices.Equal(native, []string{"a", "b"}) {
+		t.Errorf("in-order writes = %q, want both", native)
 	}
 }
