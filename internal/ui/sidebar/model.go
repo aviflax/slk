@@ -1053,6 +1053,9 @@ func pageRows(rows []renderRow, cursor, yOffset, height, delta int) (newCursor, 
 	if maxOffset < 0 {
 		maxOffset = 0
 	}
+	// ScrollDown does not clamp; View does, on the next frame. Page from
+	// the offset the user is looking at, not one past the end.
+	yOffset = min(max(yOffset, 0), maxOffset)
 	newOffset = yOffset + delta
 	if newOffset < 0 {
 		newOffset = 0

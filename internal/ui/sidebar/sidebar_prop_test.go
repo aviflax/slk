@@ -461,7 +461,8 @@ func renderRows() *rapid.Generator[[]renderRow] {
 	})
 }
 
-// pageRows, from any in-range offset:
+// pageRows, from any offset, including one past the end that ScrollDown
+// left for View to clamp:
 //   - keeps the offset in [0, max(0, len-height)] and moves it by delta
 //     where there is room;
 //   - lands the cursor on a navigable row whenever one exists, and never
@@ -475,7 +476,8 @@ func TestPageRows(t *testing.T) {
 		rows := renderRows().Draw(t, "rows")
 		height := rapid.IntRange(1, 40).Draw(t, "height")
 		maxOff := max(0, len(rows)-height)
-		yOffset := rapid.IntRange(0, maxOff).Draw(t, "yOffset")
+		yOffset := rapid.IntRange(0, maxOff+30).Draw(t, "yOffset")
+		shown := min(yOffset, maxOff) // what View draws
 		delta := rapid.IntRange(-50, 50).Filter(func(d int) bool { return d != 0 }).Draw(t, "delta")
 
 		var navRows []int
@@ -493,7 +495,7 @@ func TestPageRows(t *testing.T) {
 
 		c, off, ok := pageRows(rows, cursor, yOffset, height, delta)
 		if len(navRows) == 0 {
-			if ok && off == yOffset {
+			if ok && off == shown {
 				// The cursor is on no row, so only the "can't scroll"
 				// branch could have run; it must leave the cursor alone.
 				if c != cursor {
@@ -508,7 +510,7 @@ func TestPageRows(t *testing.T) {
 		if off < 0 || off > maxOff {
 			t.Fatalf("offset %d outside [0, %d]", off, maxOff)
 		}
-		if want := min(max(yOffset+delta, 0), maxOff); off != want {
+		if want := min(max(shown+delta, 0), maxOff); off != want {
 			t.Fatalf("offset %d, want %d", off, want)
 		}
 		if _, nav := lineOf[c]; !nav {
@@ -517,7 +519,7 @@ func TestPageRows(t *testing.T) {
 		if (delta > 0 && c < cursor) || (delta < 0 && c > cursor) {
 			t.Fatalf("delta %d moved the cursor %d -> %d", delta, cursor, c)
 		}
-		if off == yOffset {
+		if off == shown {
 			want := navRows[0]
 			if delta > 0 {
 				want = navRows[len(navRows)-1]
@@ -527,7 +529,7 @@ func TestPageRows(t *testing.T) {
 			}
 			return
 		}
-		target := lineOf[cursor] + off - yOffset
+		target := lineOf[cursor] + off - shown
 		if target >= 0 && target < len(rows) && rows[target].navIdx >= 0 && c != rows[target].navIdx {
 			t.Fatalf("screen row not kept: cursor line %d -> %d, want line %d", lineOf[cursor], lineOf[c], target)
 		}
