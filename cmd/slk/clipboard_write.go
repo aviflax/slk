@@ -27,10 +27,20 @@ func newClipboardWriter(goos string, getenv func(string) string, nativeWrite fun
 	}
 }
 
+// pbcopyTimeout bounds a pbcopy run, so a hung pbcopy cannot hold the
+// copy command forever.
+const pbcopyTimeout = 2 * time.Second
+
 func writeMacOSClipboard(text string) error {
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), pbcopyTimeout)
 	defer cancel()
+	return pbcopyCommand(ctx, text).Run()
+}
+
+// pbcopyCommand is the pbcopy invocation writeMacOSClipboard runs, built
+// without starting it.
+func pbcopyCommand(ctx context.Context, text string) *exec.Cmd {
 	cmd := exec.CommandContext(ctx, "pbcopy")
 	cmd.Stdin = strings.NewReader(text)
-	return cmd.Run()
+	return cmd
 }

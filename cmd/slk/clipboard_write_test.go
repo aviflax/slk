@@ -1,13 +1,11 @@
 package main
 
 import (
+	"context"
 	"errors"
-	"fmt"
-	"os"
-	"os/exec"
+	"io"
 	"path/filepath"
 	"reflect"
-	"runtime"
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
@@ -67,52 +65,31 @@ func TestClipboardWriter(t *testing.T) {
 	}
 }
 
-func TestWriteMacOSClipboard(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("fake pbcopy uses a POSIX shell")
+// pbcopy gets the text on stdin, byte for byte. The command is
+// inspected, not run, so the test needs no pbcopy and starts no process.
+func TestPbcopyCommand(t *testing.T) {
+	const text = "hello 世界 👋\n'quotes' $literal `text`\n"
+	cmd := pbcopyCommand(context.Background(), text)
+	if want := []string{"pbcopy"}; !reflect.DeepEqual(cmd.Args, want) {
+		t.Errorf("args = %q, want %q", cmd.Args, want)
 	}
-	shell, err := exec.LookPath("sh")
+	if base := filepath.Base(cmd.Path); base != "pbcopy" {
+		t.Errorf("path = %q, want pbcopy", cmd.Path)
+	}
+	stdin, err := io.ReadAll(cmd.Stdin)
 	if err != nil {
-		t.Fatalf("find shell for fake pbcopy: %v", err)
+		t.Fatal(err)
 	}
-	cat, err := exec.LookPath("cat")
-	if err != nil {
-		t.Fatalf("find cat for fake pbcopy: %v", err)
+	if string(stdin) != text {
+		t.Errorf("stdin = %q, want %q", stdin, text)
 	}
-	for _, tt := range []struct {
-		name    string
-		script  string
-		wantErr bool
-	}{
-		{name: "exact stdin", script: fmt.Sprintf("#!%s\n%s > \"$SLK_TEST_CLIPBOARD\"\n", shell, cat)},
-		{name: "nonzero exit", script: fmt.Sprintf("#!%s\nexit 1\n", shell), wantErr: true},
-		{name: "missing executable", wantErr: true},
-	} {
-		t.Run(tt.name, func(t *testing.T) {
-			dir := t.TempDir()
-			output := filepath.Join(dir, "clipboard")
-			t.Setenv("PATH", dir)
-			t.Setenv("SLK_TEST_CLIPBOARD", output)
-			if tt.script != "" {
-				if err := os.WriteFile(filepath.Join(dir, "pbcopy"), []byte(tt.script), 0o700); err != nil {
-					t.Fatal(err)
-				}
-			}
-			const text = "hello 世界 👋\n'quotes' $literal `text`\n"
-			err := writeMacOSClipboard(text)
-			if (err != nil) != tt.wantErr {
-				t.Fatalf("writeMacOSClipboard error = %v, wantErr %v", err, tt.wantErr)
-			}
-			if tt.wantErr {
-				return
-			}
-			got, err := os.ReadFile(output)
-			if err != nil {
-				t.Fatal(err)
-			}
-			if string(got) != text {
-				t.Errorf("pbcopy stdin = %q, want %q", got, text)
-			}
-		})
+}
+
+// Without pbcopy on PATH the write fails at lookup, before any process
+// starts, so the caller falls back to OSC 52.
+func TestWriteMacOSClipboardWithoutPbcopy(t *testing.T) {
+	t.Setenv("PATH", t.TempDir())
+	if err := writeMacOSClipboard("text"); err == nil {
+		t.Fatal("writeMacOSClipboard succeeded with no pbcopy on PATH")
 	}
 }
