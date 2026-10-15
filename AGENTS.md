@@ -11,22 +11,25 @@ a fourth time because the author did not know the first three existed. See
 
 ```
 go build ./...
-go test ./...                 # ~10s
-go test ./... -race           # ~47s; this is what CI runs
+go test ./...                 # ~18s
+go test ./... -race           # ~62s; this is what CI runs
 make fuzz                     # every Fuzz target, 30s each (FUZZTIME=2m)
 go vet ./...
 golangci-lint run             # v2.14.0, config in .golangci.yml
 gofmt -l .                    # must be empty; enforced in CI
 ```
 
-Those two timings are wall clock with `-count=1` and a warm build cache on an
-8-core Linux box, re-measured at the end of Phase 0 (they were `~21s`/`~44s`
-before it, on unrecorded hardware — treat them as a shape, not a target).
-The shape is what matters: under `-race`, four packages are ~95% of the run —
-`internal/ui` 32s, `cmd/slk` 29s, `internal/cache` 19s, `internal/ui/messages`
-16s (they overlap, hence a 47s wall). If you are iterating, run the one package
-you are changing; `internal/ui` alone is now longer under `-race` than the whole
-suite used to be.
+Those two timings are wall clock with `-count=1` and a warm build cache on a
+16-core Apple M4 Max (macOS), measured 2026-10-15; the same machine took ~148s
+under `-race` at 4a6e347e, before the optimistic-updates work and the test-time
+fixes that followed it. (The earlier figures, `~10s`/`~47s`, were from an 8-core
+Linux box; treat any of them as a shape, not a target.) Under `-race` four
+packages dominate: `internal/ui` 52s, `cmd/slk` 28s, `internal/cache` 21s,
+`internal/ui/messages` 17s (they overlap, hence a 62s wall). If you are
+iterating, run the one package you are changing. A test that drains a timer's
+command must not wait on it: App timers go through `tick` (`internal/ui/tick.go`),
+which the package's `TestMain` makes fire at once, and cases that each build
+their own App can run as parallel subtests.
 
 Tests are plain `testing.T`. No testify, no gomock, no golden libraries.
 White-box (`package ui`, not `package ui_test`) by convention. The one
