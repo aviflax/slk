@@ -147,6 +147,9 @@ release:
   draft: false
   prerelease: auto
   mode: replace
+  # Lets a failed release job be re-run: without it the re-run stops at
+  # the first asset the earlier attempt already uploaded (422).
+  replace_existing_artifacts: true
   header: |
     ## slk {{ .Tag }}
 
