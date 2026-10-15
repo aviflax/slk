@@ -371,7 +371,7 @@ func (h *rtmEventHandler) OnMessage(channelID, userID, ts, text, threadTS, subty
 	debuglog.Cache("OnMessage: team=%s channel=%s ts=%s subtype=%q thread_ts=%s decision=dispatched_to_app",
 		h.workspaceID, channelID, ts, subtype, threadTS)
 	if h.program != nil {
-		h.program.Send(ui.NewMessageMsg{ChannelID: channelID, Message: item})
+		h.program.Send(ui.NewMessageMsg{TeamID: h.workspaceID, ChannelID: channelID, Message: item})
 	}
 }
 
@@ -442,7 +442,7 @@ func (h *rtmEventHandler) OnEphemeralMessage(m slackclient.EphemeralMessage) {
 	debuglog.Cache("OnEphemeralMessage: team=%s channel=%s ts=%s thread_ts=%s decision=dispatched_to_app",
 		h.workspaceID, m.ChannelID, m.TS, m.ThreadTS)
 	if h.program != nil {
-		h.program.Send(ui.NewMessageMsg{ChannelID: m.ChannelID, Message: item})
+		h.program.Send(ui.NewMessageMsg{TeamID: h.workspaceID, ChannelID: m.ChannelID, Message: item})
 	}
 }
 

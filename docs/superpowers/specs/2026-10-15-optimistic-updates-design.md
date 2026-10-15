@@ -218,16 +218,20 @@ type pendingInsert struct {
 	channelID string
 	threadTS  string // "" for a top-level send
 	broadcast bool
+	postTeam  string // the workspace it posts to (active at Enter)
 	teamID    string // where the text was typed
 	typed     string // the composer text before mention translation
 }
 func (ins pendingInsert) origin() commandOrigin // for giveTextBack
 
-// A conversation is a channel's top level (threadTS "") or one thread.
-// A message's is conversationOf: a thread parent (ThreadTS == TS) is
-// top level, a reply or thread_broadcast belongs to its parent's thread.
-type conversationKey struct{ channelID, threadTS string }
-func conversationOf(channelID string, msg messages.MessageItem) conversationKey
+// A conversation is a channel's top level (threadTS "") or one thread,
+// in one workspace: a Slack Connect channel has the same ID in every
+// workspace sharing it. A message's is conversationOf: a thread parent
+// (ThreadTS == TS) is top level, a reply or thread_broadcast belongs to
+// its parent's thread. NewMessageMsg.TeamID is the workspace whose
+// WebSocket delivered it ("" means the active one).
+type conversationKey struct{ teamID, channelID, threadTS string }
+func conversationOf(teamID, channelID string, msg messages.MessageItem) conversationKey
 
 type pendingOps struct { /* inserts, oldest first; held echoes per conversation; sentTSes; edits and deletes by (channel, ts); counters */ }
 func (p *pendingOps) BeginInsert(ins pendingInsert)
@@ -298,7 +302,9 @@ The flow for a send or reply:
   recorded (`dropped_held_self_send`). Once no send is pending in the
   conversation, it returns the rest in TS order, and the result's arm
   shows each through `showNewMessage` (`releaseHeld`,
-  `released_held_echo`), so reply counts, read state and threads-dirty
+  `released_held_echo`; a message held in a workspace the user has
+  since left is dropped, `dropped_held_other_team`, and that
+  workspace's next fetch brings it), so reply counts, read state and threads-dirty
   happen as for any message. A released reply that a channel refetch
   already counted is not counted again: `IncrementReplyCount` skips a
   reply at or before the parent's `LatestReply` (Slack's latest_reply

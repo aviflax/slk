@@ -245,6 +245,10 @@ var reduceSend reducerFunc = func(a *App, msg tea.Msg) (tea.Cmd, bool) {
 // thread cursors, threads-list dirty bump). The ephemeral branch
 // returns after the message is displayed, before any read-state work.
 func reduceNewMessage(a *App, m NewMessageMsg) tea.Cmd {
+	if m.TeamID == "" {
+		// Only the active workspace's WebSocket dispatches messages.
+		m.TeamID = a.activeTeamID
+	}
 	debuglog.Cache("NewMessageMsg: channel=%s ts=%s thread_ts=%s active=%s",
 		m.ChannelID, m.Message.TS, m.Message.ThreadTS, a.activeChannelID)
 	if m.Message.IsEdited {
@@ -473,7 +477,7 @@ func reduceSendMessage(a *App, m SendMessageMsg) tea.Cmd {
 	// Recorded whether or not a pane shows the placeholder, so the
 	// user's own messages in the channel are held until the result
 	// either way.
-	ins := pendingInsert{localTS: localTS, channelID: m.ChannelID, teamID: m.TeamID, typed: m.Typed}
+	ins := pendingInsert{localTS: localTS, channelID: m.ChannelID, postTeam: a.activeTeamID, teamID: m.TeamID, typed: m.Typed}
 	a.pendingOps.BeginInsert(ins)
 	for _, s := range a.sinksFor(m.ChannelID).channel {
 		s.InsertLocal(a.localRow(localTS, m.Text, "", ""))
@@ -658,6 +662,15 @@ func (a *App) applyMessageDeleted(channelID, ts string) tea.Cmd {
 func (a *App) releaseHeld(held []NewMessageMsg) tea.Cmd {
 	var cmds []tea.Cmd
 	for _, m := range held {
+		if m.TeamID != a.activeTeamID {
+			// The user switched workspace while it was held: its panes
+			// are gone, and a Slack Connect channel with the same ID in
+			// this workspace must not show it. That workspace's next
+			// fetch of the channel brings it.
+			debuglog.Cache("NewMessageMsg: team=%s channel=%s ts=%s decision=dropped_held_other_team",
+				m.TeamID, m.ChannelID, m.Message.TS)
+			continue
+		}
 		debuglog.Cache("NewMessageMsg: channel=%s ts=%s decision=released_held_echo",
 			m.ChannelID, m.Message.TS)
 		cmds = append(cmds, showNewMessage(a, m))

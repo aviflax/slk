@@ -567,3 +567,32 @@ func TestPendingSend_FailureGivesTypedTextBack(t *testing.T) {
 		wantRows(t, "channel", a.messagepane.Messages(), "10.000001=posted")
 	})
 }
+
+// A Slack Connect channel has one ID in every workspace that shares it.
+// A send pending in one workspace holds only that workspace's echoes:
+// the user's message in the same channel ID in another workspace shows
+// at once.
+func TestPendingSend_HoldsOnlyItsOwnWorkspace(t *testing.T) {
+	a := pendingApp(t)
+	a.activeTeamID = "T1"
+	local := sendTop(t, a, "pending in T1")
+	a.activeTeamID = "T2"
+	a.Update(NewMessageMsg{TeamID: "T2", ChannelID: "C1", Message: messages.MessageItem{TS: "10.000002", UserID: "USELF", Text: "in T2"}})
+	wantRows(t, "T2's message", a.messagepane.Messages(), "10.000002=in T2", local+"=pending in T1")
+	if len(a.pendingOps.held) != 0 {
+		t.Fatalf("held = %v, want nothing held across workspaces", a.pendingOps.held)
+	}
+}
+
+// A message held in one workspace and released after the user switched
+// to another is not shown there, even in a channel with the same ID.
+func TestPendingSend_ReleaseSkipsAnotherWorkspace(t *testing.T) {
+	a := pendingApp(t)
+	a.activeTeamID = "T1"
+	local := sendTop(t, a, "pending in T1")
+	a.Update(NewMessageMsg{TeamID: "T1", ChannelID: "C1", Message: messages.MessageItem{TS: "10.000002", UserID: "USELF", Text: "phone"}})
+	a.activeTeamID = "T2"
+	a.messagepane.SetMessages(nil)
+	a.Update(MessageSendFailedMsg{ChannelID: "C1", LocalTS: local, Reason: "boom"})
+	wantRows(t, "T2's C1", a.messagepane.Messages())
+}

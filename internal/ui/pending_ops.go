@@ -70,6 +70,10 @@ type pendingInsert struct {
 	channelID string
 	threadTS  string // the parent's TS for a reply, "" for a top-level send
 	broadcast bool   // a reply also sent to the channel
+	// postTeam is the workspace the send posts to: the active one at
+	// Enter. A Slack Connect channel has one ID in every workspace
+	// sharing it, so the conversation is keyed on it too.
+	postTeam string
 	// teamID and typed are the workspace the text was typed in and the
 	// text as typed, given back to its composer if the send fails.
 	teamID string
@@ -78,7 +82,7 @@ type pendingInsert struct {
 
 // conversation is the conversation ins posts to.
 func (ins pendingInsert) conversation() conversationKey {
-	return conversationKey{ins.channelID, ins.threadTS}
+	return conversationKey{ins.postTeam, ins.channelID, ins.threadTS}
 }
 
 // origin is where ins was typed, for offerTypedBack.
@@ -108,19 +112,20 @@ func (e pendingEdit) origin() commandOrigin {
 	return commandOrigin{teamID: e.teamID, channelID: e.channelID, threadTS: e.threadTS, typed: e.typed}
 }
 
-// conversationKey names a conversation: a channel's top level
-// (threadTS "") or one thread of it.
-type conversationKey struct{ channelID, threadTS string }
+// conversationKey names a conversation in one workspace: a channel's
+// top level (threadTS "") or one thread of it.
+type conversationKey struct{ teamID, channelID, threadTS string }
 
-// conversationOf is the conversation msg, a message in channelID, was
-// posted to. A thread parent (ThreadTS == TS) is top level; a reply or
-// a thread_broadcast belongs to its parent's thread.
-func conversationOf(channelID string, msg messages.MessageItem) conversationKey {
+// conversationOf is the conversation msg, a message in channelID of
+// workspace teamID, was posted to. A thread parent (ThreadTS == TS) is
+// top level; a reply or a thread_broadcast belongs to its parent's
+// thread.
+func conversationOf(teamID, channelID string, msg messages.MessageItem) conversationKey {
 	threadTS := msg.ThreadTS
 	if threadTS == msg.TS {
 		threadTS = ""
 	}
-	return conversationKey{channelID, threadTS}
+	return conversationKey{teamID, channelID, threadTS}
 }
 
 // editKey names a message by channel and TS.
@@ -233,7 +238,7 @@ func (p *pendingOps) pendingIn(k conversationKey) bool {
 // shows nothing for a held message: EndInsert hands it back once the
 // conversation has no send pending, or drops it if a result showed it.
 func (p *pendingOps) HoldEcho(m NewMessageMsg) bool {
-	k := conversationOf(m.ChannelID, m.Message)
+	k := conversationOf(m.TeamID, m.ChannelID, m.Message)
 	if !p.pendingIn(k) {
 		return false
 	}

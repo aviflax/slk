@@ -323,7 +323,7 @@ var reduceThreads reducerFunc = func(a *App, msg tea.Msg) (tea.Cmd, bool) {
 		localTS := a.pendingOps.NextLocalTS()
 		ins := pendingInsert{
 			localTS: localTS, channelID: m.ChannelID, threadTS: m.ThreadTS, broadcast: m.Broadcast,
-			teamID: m.TeamID, typed: m.Typed,
+			postTeam: a.activeTeamID, teamID: m.TeamID, typed: m.Typed,
 		}
 		a.pendingOps.BeginInsert(ins)
 		sinks := a.replySinksFor(m.ChannelID, m.ThreadTS, m.Broadcast)

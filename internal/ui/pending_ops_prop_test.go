@@ -21,7 +21,7 @@ import (
 func TestHoldAndReleaseShowsEachMessageOnce(t *testing.T) {
 	rapid.Check(t, func(t *rapid.T) {
 		p := newPendingOps()
-		convs := []conversationKey{{"C1", ""}, {"C1", "5.000000"}}
+		convs := []conversationKey{{"", "C1", ""}, {"", "C1", "5.000000"}}
 		type send struct {
 			ins      pendingInsert
 			real     string
@@ -108,7 +108,7 @@ func TestHoldAndReleaseShowsEachMessageOnce(t *testing.T) {
 					t.Fatalf("released %v while a send is pending in %v", release, s.ins.conversation())
 				}
 				for _, m := range release {
-					if conversationOf(m.ChannelID, m.Message) != s.ins.conversation() {
+					if conversationOf(m.TeamID, m.ChannelID, m.Message) != s.ins.conversation() {
 						t.Fatalf("released %+v for conversation %v", m, s.ins.conversation())
 					}
 					show(m.Message.TS, "echo")

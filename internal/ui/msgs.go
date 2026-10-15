@@ -132,6 +132,9 @@ type (
 		Err   error
 	}
 	NewMessageMsg struct {
+		// TeamID is the workspace whose WebSocket delivered the
+		// message; "" means the active one.
+		TeamID    string
 		ChannelID string
 		Message   messages.MessageItem
 	}
