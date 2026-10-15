@@ -584,3 +584,43 @@ func TestReplaceEntriesKeepsTheTopEntryRow(t *testing.T) {
 		t.Errorf("frame moved\nbefore %q\nafter  %q", before, got)
 	}
 }
+
+// With WithBottomOverlay, a cursor snapped into view from below ends
+// above the row the owner's "more below" overlay covers, so its last
+// row is drawn. Without it the cursor's last row is the window's last.
+func TestBottomOverlaySnapsTheCursorAboveIt(t *testing.T) {
+	for _, overlay := range []bool{false, true} {
+		var opts []Option
+		if overlay {
+			opts = append(opts, WithBottomOverlay())
+		}
+		m := list(t, 20, 2, opts...)
+		m.Layout(19, nil)
+		m.ScrollUp(10, 19)
+		m.Layout(19, nil)
+		got := strip(m.Compose(m.Layout(15, nil), "", "more", false))
+		n := len(got)
+		if overlay {
+			if got[n-1] != "more" || got[n-2] != "m15-1" {
+				t.Errorf("overlay: last rows %q, want m15-1 above the overlay", got[n-2:])
+			}
+			continue
+		}
+		if got[n-1] != "more" || got[n-2] != "m15-0" {
+			t.Errorf("no overlay: last rows %q, want m15-0 then the overlay over m15-1", got[n-2:])
+		}
+	}
+}
+
+// At the end of the list there is nothing below, so no overlay is drawn
+// and the cursor may sit on the last row.
+func TestBottomOverlayLeavesTheEndAlone(t *testing.T) {
+	m := list(t, 20, 2, WithBottomOverlay())
+	m.Layout(19, nil)
+	m.ScrollUp(10, 12)
+	m.Layout(12, nil)
+	got := strip(m.Compose(m.Layout(19, nil), "", "more", false))
+	if got[len(got)-1] != "m19-1" {
+		t.Errorf("last row %q, want m19-1", got[len(got)-1])
+	}
+}

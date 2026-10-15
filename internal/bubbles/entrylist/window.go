@@ -46,8 +46,12 @@ func (m *Model) Layout(cursor int, lines func(i int) []string) *Frame {
 		m.MarkSnapped(cursor)
 	}
 	if !m.hasSnapped || m.snapped != cursor || m.keepCursor && m.pushedOut() {
-		if m.selEnd > m.yOffset+m.height {
-			m.setY(m.selEnd - m.height)
+		if m.selEnd > m.yOffset+m.contentRows(m.yOffset, m.height) {
+			y := m.selEnd - m.height
+			if m.contentRows(y, m.height) < m.height {
+				y++ // clear of the bottom overlay
+			}
+			m.setY(y)
 		}
 		if m.selStart < m.yOffset {
 			m.setY(m.selStart)
@@ -142,7 +146,7 @@ func (m *Model) pushedOut() bool {
 	if m.laidHeight > 0 {
 		h = m.laidHeight
 	}
-	return m.selEnd > m.selStart && (m.selStart < m.yOffset || m.selEnd > m.yOffset+h)
+	return m.selEnd > m.selStart && (m.selStart < m.yOffset || m.selEnd > m.yOffset+m.contentRows(m.yOffset, h))
 }
 
 // followCursor moves an off-screen cursor to the nearest visible

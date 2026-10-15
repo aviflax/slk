@@ -145,6 +145,13 @@ func WithDirtyOnDrag() Option { return func(m *Model) { m.dirtyOnDrag = true } }
 // Without it the offset is clamped once per frame, in Layout.
 func WithEagerClamp() Option { return func(m *Model) { m.eager = true } }
 
+// WithBottomOverlay says the owner covers the window's last row with an
+// overlay (Compose's bottom) whenever there is content below it (the
+// channel pane's "-- more below --"). A cursor snapped into view from
+// below then ends above that row, and a cursor on it does not count as
+// shown. Without it the window's last row is content.
+func WithBottomOverlay() Option { return func(m *Model) { m.overlay = true } }
+
 // WithReanchor sets how the bottom is measured across a height change.
 func WithReanchor(p ReanchorPolicy) Option { return func(m *Model) { m.reanchor = p } }
 
@@ -152,6 +159,7 @@ func WithReanchor(p ReanchorPolicy) Option { return func(m *Model) { m.reanchor 
 type Model struct {
 	styles                                           Styles
 	follow, pinBottom, snapDecor, dirtyOnDrag, eager bool
+	overlay                                          bool // WithBottomOverlay
 	reanchor                                         ReanchorPolicy
 
 	entries []Entry
@@ -516,5 +524,15 @@ func (m *Model) recomputeOffsets() {
 // noteScrolled records whether the cursor's entry, as the last frame
 // placed it, is wholly in the window after a scroll.
 func (m *Model) noteScrolled() {
-	m.cursorShown = m.selEnd > m.selStart && m.selStart >= m.yOffset && m.selEnd <= m.yOffset+m.height
+	m.cursorShown = m.selEnd > m.selStart && m.selStart >= m.yOffset && m.selEnd <= m.yOffset+m.contentRows(m.yOffset, m.height)
+}
+
+// contentRows is how many of the h rows of a window at offset y show
+// content: all of them, less the row a bottom overlay covers when there
+// is content below (WithBottomOverlay).
+func (m *Model) contentRows(y, h int) int {
+	if m.overlay && y+h < m.total && h > 1 {
+		return h - 1
+	}
+	return h
 }

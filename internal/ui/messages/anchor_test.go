@@ -116,3 +116,28 @@ func TestRowsAboveTheWindowDoNotMoveIt(t *testing.T) {
 		}
 	}
 }
+
+// Moving the cursor down past the window scrolls to it with its text
+// above the "-- more below --" hint, never under it.
+func TestMovingDownShowsTheCursorAboveTheMoreBelowHint(t *testing.T) {
+	m := anchorPane(t)
+	m.ScrollUp(24)
+	_ = m.View(anchorH, anchorW)
+	for range 8 {
+		m.MoveDown()
+		f := paneFrame(m)
+		want := selectedText(m)
+		if !frameHas(f, want) {
+			t.Fatalf("selected %s is not drawn:\n%s", want, strings.Join(f, "\n"))
+		}
+	}
+}
+
+// selectedText is the text of the selected message, "" for none.
+func selectedText(m *Model) string {
+	msg, ok := m.SelectedMessage()
+	if !ok {
+		return ""
+	}
+	return msg.Text
+}

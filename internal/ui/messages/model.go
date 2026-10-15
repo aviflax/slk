@@ -452,6 +452,7 @@ func newChannelList() *entrylist.Model {
 		entrylist.WithCursorFollowsScroll(),
 		entrylist.WithPinBottomOnShrink(),
 		entrylist.WithSnapDecorationAnchors(),
+		entrylist.WithBottomOverlay(),
 		entrylist.WithReanchor(entrylist.ReanchorPolicy{BottomUsesNewHeight: true}),
 	)
 }

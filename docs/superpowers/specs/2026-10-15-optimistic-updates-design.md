@@ -696,6 +696,13 @@ are out of scope.
    interleavings and the slowest per-case render loops run as parallel
    subtests, and App timers fire at once in tests (`tick`).
 
+9. **QA fixes.** A user's send, reply, edit and delete take effect in
+   the Update of the key that starts them ("Same Update as the key").
+   A cursor snapped into view from below ends above the channel pane's
+   "-- more below --" hint rather than under it
+   (`entrylist.WithBottomOverlay`, which also counts a cursor on that
+   row as off screen).
+
 ## Out of scope
 
 - Reaction toggle serialisation (the activity path's
