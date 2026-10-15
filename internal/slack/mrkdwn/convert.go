@@ -83,10 +83,12 @@ func newParser() parser.Parser {
 // CommonMark is the indented code block parser alone; with that parser
 // gone the line would be dropped.
 //
-// And it ends a quote at the first line without the quote's ">"
+// It ends a quote at the first line without the quote's ">"
 // markers. CommonMark's lazy continuation would add that line to the
 // quote's last paragraph, but in Slack a quote is only its marked
 // lines, so "> what you said\nmy reply" is a quote and then a reply.
+// It ends a list item the same way, at the first line not indented to
+// the item's content (lazyListLine).
 // goldmark tries a lazy line as a paragraph continuation only when no
 // parser that can interrupt a paragraph opens a block on it, so this
 // parser claims to interrupt paragraphs and opens one exactly on such
@@ -99,7 +101,7 @@ func (indentedParagraphParser) CanAcceptIndentedLine() bool { return true }
 func (indentedParagraphParser) CanInterruptParagraph() bool { return true }
 
 func (p indentedParagraphParser) Open(parent ast.Node, reader text.Reader, pc parser.Context) (ast.Node, parser.State) {
-	if last := pc.LastOpenedBlock().Node; last != nil && ast.IsParagraph(last) && !lazyQuoteLine(last, reader) {
+	if last := pc.LastOpenedBlock().Node; last != nil && ast.IsParagraph(last) && !lazyQuoteLine(last, reader) && !lazyListLine(last, reader) {
 		// An ordinary paragraph continuation: leave it to Continue.
 		return nil, parser.NoChildren
 	}
@@ -122,6 +124,39 @@ func lazyQuoteLine(para ast.Node, reader text.Reader) bool {
 	src := reader.Source()
 	_, seg := reader.PeekLine()
 	return quoteMarkers(src, lineStart(src, seg.Start)) < depth
+}
+
+// lazyListLine reports whether the line reader is on would continue
+// para, a paragraph inside a list item, without the indentation that
+// keeps a line in that item: CommonMark's lazy continuation line. Slack
+// has none, so "1. one\nmy reply" is a list and then a line after it.
+// Each item's Offset is its content column relative to the item that
+// holds it, so their sum is the column the line must reach.
+func lazyListLine(para ast.Node, reader text.Reader) bool {
+	need, inList := 0, false
+	for n := para.Parent(); n != nil; n = n.Parent() {
+		if li, ok := n.(*ast.ListItem); ok {
+			need += li.Offset
+			inList = true
+		}
+	}
+	if !inList {
+		return false
+	}
+	src := reader.Source()
+	_, seg := reader.PeekLine()
+	indent := 0
+	for i := lineStart(src, seg.Start); i < len(src); i++ {
+		switch src[i] {
+		case ' ':
+			indent++
+		case '\t':
+			indent += 4 - indent%4
+		default:
+			return indent < need
+		}
+	}
+	return indent < need
 }
 
 // quoteMarkers counts the ">" markers that open the line starting at
