@@ -6,6 +6,13 @@ All notable changes to this fork are listed here. The format follows
 
 Earlier history, up to v0.26.2, is in [upstream's releases](https://github.com/gammons/slk/releases).
 
+## [Unreleased]
+
+### Fixed
+
+- On Linux, `slk open` with a request slk rejects for length could report
+  "connection reset by peer" instead of slk's reason.
+
 ## [0.27.0] - 2026-10-15
 
 First release of the kirahowe/slk fork. It starts from upstream's main after
