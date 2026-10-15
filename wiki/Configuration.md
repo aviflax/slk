@@ -11,6 +11,9 @@ use_slack_sections = true       # use real Slack sidebar sections (default).
                                 # set false to use [sections.*] globs instead.
 download_dir = "~/Downloads"    # where file attachments (`d` keybinding) are
                                 # saved. "~" is expanded to your home directory.
+check_for_updates = true        # once a day, ask GitHub for a newer slk release
+                                # and show an upgrade hint. Set false to never
+                                # contact GitHub. Skipped for dev builds.
 
 [appearance]
 theme = "dracula"

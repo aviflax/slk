@@ -104,6 +104,10 @@ func toastUntilReplaced(a *App, text string) {
 	a.statusbar.SetToast(text)
 }
 
+// updateHintDuration is how long the update hint stays up: longer than
+// an ordinary toast because it carries a command to read and copy.
+const updateHintDuration = 12 * time.Second
+
 var reduceIO reducerFunc = func(a *App, msg tea.Msg) (tea.Cmd, bool) {
 	switch m := msg.(type) {
 	case tea.PasteMsg:
@@ -167,6 +171,12 @@ var reduceIO reducerFunc = func(a *App, msg tea.Msg) (tea.Cmd, bool) {
 
 	case ToastMsg:
 		return toastWithClear(a, m.Text, 3*time.Second), true
+
+	case UpdateAvailableMsg:
+		if m.Hint == "" {
+			return nil, true
+		}
+		return toastWithClear(a, m.Hint, updateHintDuration), true
 
 	case UploadProgressMsg:
 		toastUntilReplaced(a, fmt.Sprintf("Uploading %d/%d…", m.Done, m.Total))

@@ -162,6 +162,8 @@ scrollbars, date formatting, case folding, or ID formatting: it already exists.
 | Legacy attachment action ids slack-go drops | `slackclient.EphemeralMessage.ActionIDs` (decoded from the raw frame), applied with `cmd/slk/applyActionIDs` |
 | Slack original-avatar URL → sized CDN URL (e.g. 72px) | `avatar.SizedURL(orig, px)`; returns non-Slack-original URLs unchanged |
 | Copy text to the clipboard | `App.clipboardWrite` / `SetClipboardWriter`; `cmd/slk/newClipboardWriter` selects local macOS `pbcopy` or terminal OSC 52 |
+| Compare release versions (`v` prefix, prerelease only counts when current is one) | `isNewerVersion(latest, current)` (`cmd/slk/update_check.go`) |
+| Tell the user a newer release exists: daily cached GitHub check, install-method-specific hint | `checkForUpdate` (background, from `run()`), `cachedUpdateHint` (no network; `--version`), `detectInstallMethod(exe, installEnv)`, `updateHint`; reaches the UI as `ui.UpdateAvailableMsg{Hint}`. Gated by `Config.EffectiveCheckForUpdates()` (`[general].check_for_updates`) |
 
 ### UI chrome
 

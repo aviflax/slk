@@ -867,6 +867,21 @@ func TestEffectiveUseSlackSections_WorkspaceOverride(t *testing.T) {
 	}
 }
 
+func TestEffectiveCheckForUpdates(t *testing.T) {
+	if !Default().EffectiveCheckForUpdates() {
+		t.Error("default should be on")
+	}
+	if !loadConfigString(t, "[general]\n").EffectiveCheckForUpdates() {
+		t.Error("unset should be on")
+	}
+	if loadConfigString(t, "[general]\ncheck_for_updates = false\n").EffectiveCheckForUpdates() {
+		t.Error("explicit false should turn it off")
+	}
+	if !loadConfigString(t, "[general]\ncheck_for_updates = true\n").EffectiveCheckForUpdates() {
+		t.Error("explicit true should be on")
+	}
+}
+
 func TestEffectiveUseSlackSections_UnknownTeamUsesGlobal(t *testing.T) {
 	f := false
 	cfg := Config{General: General{UseSlackSections: &f}}

@@ -535,6 +535,11 @@ type (
 	// for short error notices (e.g. failed status change). Auto-clears after
 	// 3 seconds via a CopiedClearMsg tick scheduled by the App.
 	ToastMsg struct{ Text string }
+
+	// UpdateAvailableMsg carries the finished hint text ("slk 0.26.2 is
+	// available. Run: ...") from cmd/slk's background release check. The
+	// UI only displays it; install-method detection stays in cmd/slk.
+	UpdateAvailableMsg struct{ Hint string }
 )
 
 // autoScrollTickMsg is dispatched by tea.Tick while a drag is held near

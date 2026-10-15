@@ -75,6 +75,10 @@ type General struct {
 	// instead of the config-glob [sections.*] system. Pointer so we
 	// can distinguish "unset" (default true) from explicit false.
 	UseSlackSections *bool `toml:"use_slack_sections"`
+	// CheckForUpdates opts in/out of the once-a-day background check for
+	// a newer slk release. Pointer so "unset" (default true) is
+	// distinguishable from an explicit false.
+	CheckForUpdates *bool `toml:"check_for_updates"`
 	// DownloadDir is where file attachments downloaded via the `d`
 	// keybinding are saved. Defaults to "~/Downloads". A leading "~"
 	// is expanded against the user's home directory at load time;
@@ -433,6 +437,15 @@ func (c Config) EffectiveUseSlackSections(teamID string) bool {
 	}
 	if c.General.UseSlackSections != nil {
 		return *c.General.UseSlackSections
+	}
+	return true
+}
+
+// EffectiveCheckForUpdates returns whether slk checks GitHub for a newer
+// release at startup: [general].check_for_updates, default true.
+func (c Config) EffectiveCheckForUpdates() bool {
+	if c.General.CheckForUpdates != nil {
+		return *c.General.CheckForUpdates
 	}
 	return true
 }

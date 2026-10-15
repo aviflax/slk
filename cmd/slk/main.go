@@ -77,6 +77,9 @@ func main() {
 		switch os.Args[1] {
 		case "--version", "-v", "version":
 			fmt.Printf("slk %s (commit %s, built %s)\n", version, commit, date)
+			if hint := versionUpdateLine(); hint != "" {
+				fmt.Println(hint)
+			}
 			fmt.Println("Unofficial Slack client. Not affiliated with Slack Technologies, LLC.")
 			fmt.Println("Uses Slack's internal browser protocol; may violate Slack's TOS. Use at your own risk.")
 			return
@@ -1523,6 +1526,20 @@ func run() error {
 	railThreads.SetNotify(func(teamID string) {
 		p.Send(ui.ReadStateChangedMsg{WorkspaceID: teamID})
 	})
+
+	// Update hint: background, at most one request per 24h, never
+	// blocks the UI. Dev builds and [general].check_for_updates = false
+	// skip it (--demo never reaches run()).
+	if cfg.EffectiveCheckForUpdates() && updateCheckableVersion(version) {
+		go func() {
+			hint := checkForUpdate(context.Background(), version)
+			if hint == "" {
+				return
+			}
+			time.Sleep(updateToastDelay)
+			p.Send(ui.UpdateAvailableMsg{Hint: hint})
+		}()
+	}
 
 	// Now that `p` exists, re-install the ImageContext with a real
 	// SendMsg callback so the prefetcher can dispatch ImageReadyMsg
