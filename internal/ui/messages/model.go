@@ -1071,14 +1071,6 @@ func (m *Model) IncrementReplyCount(parentTS, replyTS string) {
 	}
 }
 
-// UpdateMessageInPlace finds a message by TS, replaces its text, and
-// marks it as edited. Returns true if the message was found.
-// Invalidates the render cache.
-func (m *Model) UpdateMessageInPlace(ts, newText string) bool {
-	_, ok := m.Patch(ts, func(r *MessageItem) { r.Text = newText; r.IsEdited = true })
-	return ok
-}
-
 // Patch applies f to the first message with TS ts (PatchTS) and returns
 // the message as it was before. ok is false when no message has ts.
 func (m *Model) Patch(ts string, f func(*MessageItem)) (prior MessageItem, ok bool) {

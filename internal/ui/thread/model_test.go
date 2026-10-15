@@ -235,7 +235,7 @@ func TestViewInsertsDateSeparatorAcrossDays(t *testing.T) {
 	}
 }
 
-func TestUpdateMessageInPlace_Found(t *testing.T) {
+func TestPatch_Reply(t *testing.T) {
 	m := New()
 	parent := messages.MessageItem{TS: "P1", Text: "parent"}
 	replies := []messages.MessageItem{
@@ -244,7 +244,7 @@ func TestUpdateMessageInPlace_Found(t *testing.T) {
 	}
 	m.SetThread(parent, replies, "C1", "P1")
 
-	if !m.UpdateMessageInPlace("R1", "new reply") {
+	if _, ok := m.Patch("R1", messages.Body{Text: "new reply", Edited: true}.Apply); !ok {
 		t.Fatal("expected true updating R1")
 	}
 	if m.replies[0].Text != "new reply" {
@@ -258,12 +258,12 @@ func TestUpdateMessageInPlace_Found(t *testing.T) {
 	}
 }
 
-func TestUpdateMessageInPlace_NotFound(t *testing.T) {
+func TestPatch_NotFound(t *testing.T) {
 	m := New()
 	m.SetThread(messages.MessageItem{TS: "P1"}, []messages.MessageItem{
 		{TS: "R1", Text: "a"},
 	}, "C1", "P1")
-	if m.UpdateMessageInPlace("nope", "x") {
+	if _, ok := m.Patch("nope", messages.Body{Text: "x"}.Apply); ok {
 		t.Error("expected false for missing TS")
 	}
 }
@@ -338,11 +338,11 @@ func TestRemoveMessageByTS_RemovesSelected(t *testing.T) {
 	}
 }
 
-func TestUpdateParentInPlace_Match(t *testing.T) {
+func TestPatch_Parent(t *testing.T) {
 	m := New()
 	parent := messages.MessageItem{TS: "P1", Text: "parent original"}
 	m.SetThread(parent, nil, "C1", "P1")
-	if !m.UpdateParentInPlace("P1", "parent edited") {
+	if _, ok := m.Patch("P1", messages.Body{Text: "parent edited", Edited: true}.Apply); !ok {
 		t.Fatal("expected true")
 	}
 	if m.ParentMsg().Text != "parent edited" {
@@ -353,10 +353,10 @@ func TestUpdateParentInPlace_Match(t *testing.T) {
 	}
 }
 
-func TestUpdateParentInPlace_NoMatch(t *testing.T) {
+func TestPatch_ParentNoMatch(t *testing.T) {
 	m := New()
 	m.SetThread(messages.MessageItem{TS: "P1", Text: "parent"}, nil, "C1", "P1")
-	if m.UpdateParentInPlace("OTHER", "x") {
+	if _, ok := m.Patch("OTHER", messages.Body{Text: "x"}.Apply); ok {
 		t.Error("expected false when TS does not match parent")
 	}
 	if m.ParentMsg().Text != "parent" {

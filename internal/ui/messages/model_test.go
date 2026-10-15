@@ -372,15 +372,15 @@ func TestCursorUnchangedWhenScrollKeepsSelectionVisible(t *testing.T) {
 	}
 }
 
-func TestUpdateMessageInPlace_Found(t *testing.T) {
+func TestPatch_Found(t *testing.T) {
 	msgs := []MessageItem{
 		{TS: "1.0", UserName: "alice", Text: "old"},
 		{TS: "2.0", UserName: "bob", Text: "hello"},
 	}
 	m := New(msgs, "general")
-	got := m.UpdateMessageInPlace("2.0", "hello edited")
-	if !got {
-		t.Fatalf("expected UpdateMessageInPlace to return true for existing TS")
+	prior, got := m.Patch("2.0", Body{Text: "hello edited", Edited: true}.Apply)
+	if !got || prior.Text != "hello" {
+		t.Fatalf("Patch = %q, %v; want the row as it was, found", prior.Text, got)
 	}
 	all := m.messages
 	if all[1].Text != "hello edited" {
@@ -394,9 +394,9 @@ func TestUpdateMessageInPlace_Found(t *testing.T) {
 	}
 }
 
-func TestUpdateMessageInPlace_NotFound(t *testing.T) {
+func TestPatch_NotFound(t *testing.T) {
 	m := New([]MessageItem{{TS: "1.0", Text: "a"}}, "general")
-	got := m.UpdateMessageInPlace("does-not-exist", "x")
+	_, got := m.Patch("does-not-exist", Body{Text: "x"}.Apply)
 	if got {
 		t.Error("expected false when TS missing")
 	}

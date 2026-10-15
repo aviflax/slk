@@ -531,24 +531,11 @@ func (m *Model) UserNames() map[string]string { return m.userNames }
 // ChannelNames returns the channel-ID-to-name map used for rendering channel mentions.
 func (m *Model) ChannelNames() map[string]string { return m.channelNames }
 
-// UpdateMessageInPlace finds a reply by TS and replaces its text,
-// marking it edited. Returns true if found.
-func (m *Model) UpdateMessageInPlace(ts, newText string) bool {
-	i := messages.FirstIndexOfTS(m.replies, ts)
-	if i < 0 {
-		return false
-	}
-	m.replies[i].Text = newText
-	m.replies[i].IsEdited = true
-	m.InvalidateCache()
-	return true
-}
-
 // Patch applies f to every row with TS ts this pane shows: the first
 // reply with it (messages.PatchTS) and the parent when it is the one.
 // It returns the matched row as it was before, the reply's when both
 // match. ok is false when neither has ts. An edit or its echo writes
-// both, as UpdateMessageInPlace and UpdateParentInPlace together do.
+// both: a reply never has its parent's TS, so at most one matches.
 func (m *Model) Patch(ts string, f func(*messages.MessageItem)) (prior messages.MessageItem, ok bool) {
 	if ts != "" && m.parent.TS == ts {
 		prior, ok = m.parent, true
@@ -632,18 +619,6 @@ func (m *Model) Restore(r messages.RemovedRow) {
 		m.selected = ch.Selection(m.selected)
 	}
 	m.InvalidateCache()
-}
-
-// UpdateParentInPlace updates the thread parent's text and marks it
-// edited if its TS matches. Returns true if updated.
-func (m *Model) UpdateParentInPlace(ts, newText string) bool {
-	if m.parent.TS != ts {
-		return false
-	}
-	m.parent.Text = newText
-	m.parent.IsEdited = true
-	m.InvalidateCache()
-	return true
 }
 
 // SetFocused sets whether the thread panel has focus. When the value flips
@@ -1130,7 +1105,7 @@ func (m *Model) viewInternal(height, width int, applySelection bool) string {
 	// (which bumps userNamesV), m.channelNames (which bumps channelNamesV),
 	// or len(m.replies) MUST be paired with InvalidateCache() or a bump of
 	// the relevant version counter — otherwise the chrome will go stale.
-	// Today SetThread, AddReply, UpdateMessageInPlace, UpdateParentInPlace,
+	// Today SetThread, AddReply, Patch,
 	// SetUserNames, and SetChannelNames all honor this. If you add a new
 	// visual element to the chrome (e.g. parent reactions, parent edited
 	// marker, attachments rendered above the separator), either add its
