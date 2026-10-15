@@ -3,7 +3,8 @@
 Status: done, 2026-10-15 (phases 1 and 2, phase 3: optimistic edit
 and delete, phase 4: review fixes, phase 5: edit and delete fixes,
 phase 6: ordering, read cursors and timeouts, phase 7: reloads and
-review fixes)
+review fixes, phase 8: anchoring, read floors, timeouts, edited marks
+and test time)
 
 ## Problem
 
@@ -616,11 +617,24 @@ are out of scope.
    (`EchoCarries`); message_not_found for an edit removes the row;
    "(edited)" comes from Slack's `edited` field, not from every
    message_changed (`NewMessageMsg.Changed`); a body change keeps a
-   window at the bottom there (`entrylist.HoldBottom`, both panes); the
+   window at the bottom there (`entrylist.HoldBottom`, both panes,
+   replaced in phase 8); the
    text-only patch methods are gone; the edit property applies
    chat.update when sent and exercises echo-before-result; time zone
    tests run in child processes (`tztest.Each`) instead of writing
    `time.Local`, which raced under `-race`.
+
+8. **Second review fixes.** The list anchors the window itself
+   (`entrylist`): before any change to its entries it records whether
+   the window shows the end of the list, else the first entry on screen
+   and its row, and restores that afterwards, so a message arriving
+   ahead of a pending send no longer pushes the send below the fold, and
+   rows added, removed or resized above a scrolled-up window move
+   nothing on screen. The cursor's snap follows its entry by ID; a
+   cursor wholly on screen that a change at the same width pushes out
+   is scrolled back into view. `HoldBottom`, the panes' `ResetSnap`
+   calls after inserts, settles and restores, and the thread pane's
+   `AnchorRefsOnly` (#254) are gone.
 
 ## Out of scope
 

@@ -32,15 +32,20 @@ type Frame struct {
 
 // Layout positions the window for this frame. It locates the cursor's
 // entry (the selectable entry whose Ref is cursor), snaps the offset to it
-// if the cursor moved since the last snap, clamps, lets the cursor follow
-// the scroll when enabled, then slices the visible rows and translates the
-// visible entries' hits.
+// if the cursor moved to another entry since the last snap, or if a
+// change to the entries pushed it out of a window it was wholly in,
+// clamps, lets the cursor follow the scroll when enabled, then slices the
+// visible rows and translates the visible entries' hits.
 //
 // lines(i) returns the rows to draw for the cursor's entry i; a nil lines
 // draws Entry.Selected, or Lines when that is nil.
 func (m *Model) Layout(cursor int, lines func(i int) []string) *Frame {
 	m.locate(cursor)
-	if !m.hasSnapped || m.snapped != cursor {
+	if m.snapLost {
+		m.snapLost, m.snapID = false, ""
+		m.MarkSnapped(cursor)
+	}
+	if !m.hasSnapped || m.snapped != cursor || m.keepCursor && m.pushedOut() {
 		if m.selEnd > m.yOffset+m.height {
 			m.setY(m.selEnd - m.height)
 		}
@@ -50,9 +55,12 @@ func (m *Model) Layout(cursor int, lines func(i int) []string) *Frame {
 		m.MarkSnapped(cursor)
 	}
 	m.clamp()
+	m.keepCursor = false
 	if m.follow {
 		cursor = m.followCursor(cursor)
 	}
+	m.laidHeight = m.height
+	m.noteScrolled()
 	f := &Frame{Cursor: cursor, MoreBelow: m.yOffset+m.height < m.total}
 	m.hits = m.hits[:0]
 	f.Rows, f.Visible = m.slice(cursor, lines, true)
@@ -64,6 +72,7 @@ func (m *Model) Layout(cursor int, lines func(i int) []string) *Frame {
 // window's hits like Layout, replacing the last frame's. The thread
 // pane's zero-reply state uses it.
 func (m *Model) Static() *Frame {
+	m.laidHeight, m.cursorShown, m.keepCursor = m.height, false, false
 	f := &Frame{Cursor: NoCursor, MoreBelow: m.yOffset+m.height < m.total}
 	m.hits = m.hits[:0]
 	f.Rows, f.Visible = m.slice(NoCursor, nil, true)
@@ -126,6 +135,16 @@ func (m *Model) locate(cursor int) {
 	}
 }
 
+// pushedOut reports that the cursor's entry is no longer wholly inside
+// the window as tall as the last frame's.
+func (m *Model) pushedOut() bool {
+	h := m.height
+	if m.laidHeight > 0 {
+		h = m.laidHeight
+	}
+	return m.selEnd > m.selStart && (m.selStart < m.yOffset || m.selEnd > m.yOffset+h)
+}
+
 // followCursor moves an off-screen cursor to the nearest visible
 // selectable entry: the topmost when it went off the top, the bottommost
 // when it went off the bottom.
@@ -152,7 +171,7 @@ func (m *Model) followCursor(cursor int) int {
 	}
 	if found && next != cursor {
 		cursor = next
-		m.snapped = cursor
+		m.MarkSnapped(cursor)
 		m.locate(cursor)
 	}
 	return cursor

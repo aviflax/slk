@@ -118,7 +118,7 @@ func TestBuildCache_LinesPlainAlignsWithLinesNormal(t *testing.T) {
 		{TS: "1.0", UserName: "alice", UserID: "U1", Text: "hello world", Timestamp: "1:00 PM"},
 		{TS: "2.0", UserName: "bob", UserID: "U2", Text: "x🚀y", Timestamp: "1:01 PM"},
 	}, "general")
-	m.buildCache(60, false)
+	m.buildCache(60)
 	if len(m.cache) == 0 {
 		t.Fatal("buildCache produced no entries")
 	}

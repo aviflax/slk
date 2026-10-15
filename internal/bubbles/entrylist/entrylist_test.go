@@ -2,6 +2,7 @@ package entrylist
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 	"testing"
 
@@ -47,7 +48,7 @@ func list(t *testing.T, n, h int, opts ...Option) *Model {
 		es[i] = msg(fmt.Sprintf("m%02d", i), i, h, 0)
 	}
 	m.SetHeight(10, n-1)
-	m.SetEntries(es, 20, false)
+	m.SetEntries(es, 20)
 	return m
 }
 
@@ -97,7 +98,7 @@ func TestLayoutSnapsToCursorOnlyWhenItMoves(t *testing.T) {
 func TestTrailRowsAreNotSnappedIntoView(t *testing.T) {
 	m := New()
 	m.SetHeight(2, 0)
-	m.SetEntries([]Entry{msg("a", 0, 3, 1), msg("b", 1, 3, 0)}, 20, false)
+	m.SetEntries([]Entry{msg("a", 0, 3, 1), msg("b", 1, 3, 0)}, 20)
 	// a is rows 0..2 but its last row is trail, so the target is [0,2),
 	// which fits the 2-row window. Counting the trail row would make the
 	// target [0,3) and scroll the window to y=1.
@@ -199,7 +200,7 @@ func TestReanchorKeepsTopEntryAcrossWidthChange(t *testing.T) {
 		es[i] = msg(fmt.Sprintf("m%02d", i), i, 3, 0) // rewrapped taller
 	}
 	m.SetHeight(10, 19)
-	m.SetEntries(es, 15, true)
+	m.SetEntries(es, 15)
 	if m.YOffset() != 30 {
 		t.Fatalf("y=%d, want 30 (entry 10 at the top)", m.YOffset())
 	}
@@ -218,39 +219,31 @@ func TestReanchorBottomUsesOldOrNewHeight(t *testing.T) {
 		for i := range es {
 			es[i] = msg(fmt.Sprintf("m%02d", i), i, 2, 0)
 		}
-		m.SetEntries(es, 15, true)
-		atBottom := m.YOffset() >= m.Total() // lazy: bottom sets y=total
+		m.SetEntries(es, 15)
+		atBottom := m.YOffset() == m.Total()-14
 		if atBottom != useNew {
 			t.Errorf("BottomUsesNewHeight=%v: pinned to bottom=%v (y=%d)", useNew, atBottom, m.YOffset())
 		}
 	}
 }
 
-func TestReanchorRefsOnlySkipsLeadingNonRefEntries(t *testing.T) {
-	// y=3 is the last row of a 4-row parent (Ref -1) that rewraps to 2
-	// rows. Anchoring on the parent clamps the row within it to 1, so the
-	// window moves to y=1. With AnchorRefsOnly no entry covers the line,
-	// and the raw offset is kept.
-	for _, refsOnly := range []bool{false, true} {
-		m := New(WithReanchor(ReanchorPolicy{AnchorRefsOnly: refsOnly}))
-		m.SetHeight(3, 0)
-		m.SetEntries([]Entry{msg("p", -1, 4, 0), msg("a", 0, 4, 0), msg("b", 1, 4, 0)}, 20, false)
-		m.SetYOffset(3)
-		m.SetEntries([]Entry{msg("p", -1, 2, 0), msg("a", 0, 4, 0), msg("b", 1, 4, 0)}, 15, true)
-		want := 1
-		if refsOnly {
-			want = 3
-		}
-		if m.YOffset() != want {
-			t.Errorf("AnchorRefsOnly=%v: y=%d, want %d", refsOnly, m.YOffset(), want)
-		}
+func TestReanchorClampsTheRowInsideAShorterEntry(t *testing.T) {
+	// y=3 is the last row of a 4-row parent that rewraps to 2 rows. The
+	// parent stays the top entry, at its last row: y=1.
+	m := New()
+	m.SetHeight(3, 0)
+	m.SetEntries([]Entry{msg("p", -1, 4, 0), msg("a", 0, 4, 0), msg("b", 1, 4, 0)}, 20)
+	m.SetYOffset(3)
+	m.SetEntries([]Entry{msg("p", -1, 2, 0), msg("a", 0, 4, 0), msg("b", 1, 4, 0)}, 15)
+	if m.YOffset() != 1 {
+		t.Errorf("y=%d, want 1", m.YOffset())
 	}
 }
 
 func TestComposePadsAndPlacesIndicators(t *testing.T) {
 	m := New()
 	m.SetHeight(4, 0)
-	m.SetEntries([]Entry{msg("a", 0, 2, 0)}, 20, false)
+	m.SetEntries([]Entry{msg("a", 0, 2, 0)}, 20)
 	got := strip(m.Compose(m.Layout(0, nil), "TOP", "BOTTOM", false))
 	if len(got) != 4 || got[0] != "TOP" || got[3] != "" {
 		t.Fatalf("short content: %q (no more-below, so no bottom row)", got)
@@ -281,7 +274,7 @@ func TestHitsAreContentRelativeAndClipped(t *testing.T) {
 	m.SetHeight(3, 0)
 	a := msg("a", 7, 5, 0) // 5 rows, window 3: y=2 is in range
 	a.Hits = []Hit{{RowStart: 1, RowEnd: 3, ColStart: 2, ColEnd: 5, Kind: HitReaction, Key: "tada"}}
-	m.SetEntries([]Entry{a}, 20, false)
+	m.SetEntries([]Entry{a}, 20)
 	m.SetYOffset(2)
 	m.MarkSnapped(7)
 	m.Layout(7, nil)
@@ -302,12 +295,12 @@ func TestStaticTranslatesHitsAndDropsTheLastFrames(t *testing.T) {
 	m.SetHeight(5, 0)
 	old := msg("old", 3, 4, 0)
 	old.Hits = []Hit{{RowStart: 0, RowEnd: 4, ColStart: 0, ColEnd: 10, Kind: HitImage, Key: "F-OLD"}}
-	m.SetEntries([]Entry{old}, 20, false)
+	m.SetEntries([]Entry{old}, 20)
 	m.Layout(3, nil)
 
 	a := msg("a", -1, 4, 0)
 	a.Hits = []Hit{{RowStart: 2, RowEnd: 4, ColStart: 1, ColEnd: 4, Kind: HitImage, Key: "F-A", Aux: 1}}
-	m.SetEntries([]Entry{a}, 20, false)
+	m.SetEntries([]Entry{a}, 20)
 	m.Static()
 	if h, ok := m.HitTest(HitImage, 2, 2); !ok || h.Key != "F-A" || h.Aux != 1 || h.Ref != -1 {
 		t.Fatalf("hit = %+v, %v; want F-A attachment 1 on ref -1", h, ok)
@@ -320,7 +313,7 @@ func TestStaticTranslatesHitsAndDropsTheLastFrames(t *testing.T) {
 func TestSelectionTextAndPlainlessEntries(t *testing.T) {
 	m := New()
 	m.SetHeight(10, 0)
-	m.SetEntries([]Entry{msg("a", 0, 2, 0), deco("rule", false), msg("b", 1, 2, 0)}, 20, false)
+	m.SetEntries([]Entry{msg("a", 0, 2, 0), deco("rule", false), msg("b", 1, 2, 0)}, 20)
 	m.Layout(1, nil)
 	m.BeginSelection(0, 2) // a-0, col 2
 	m.ExtendSelection(4, 3)
@@ -342,7 +335,7 @@ func TestPressOnDecoration(t *testing.T) {
 		// (empty ID), or snaps to the next selectable entry.
 		m := New(opts...)
 		m.SetHeight(10, 0)
-		m.SetEntries([]Entry{deco("day", true), msg("a", 0, 2, 0)}, 20, false)
+		m.SetEntries([]Entry{deco("day", true), msg("a", 0, 2, 0)}, 20)
 		m.Layout(0, nil)
 		m.BeginSelection(0, 3)
 		if !m.HasSelection() {
@@ -360,7 +353,7 @@ func TestPressOnDecoration(t *testing.T) {
 		// nothing in either setting.
 		m = New(opts...)
 		m.SetHeight(10, 0)
-		m.SetEntries([]Entry{deco("rule", false), msg("a", 0, 2, 0)}, 20, false)
+		m.SetEntries([]Entry{deco("rule", false), msg("a", 0, 2, 0)}, 20)
 		m.Layout(0, nil)
 		m.BeginSelection(0, 3)
 		if m.HasSelection() {
@@ -377,7 +370,7 @@ func TestDirtyOnDrag(t *testing.T) {
 		}
 		m := New(opts...)
 		m.SetHeight(10, 0)
-		m.SetEntries([]Entry{msg("a", 0, 2, 0)}, 20, false)
+		m.SetEntries([]Entry{msg("a", 0, 2, 0)}, 20)
 		m.Layout(0, nil)
 		v0 := m.Version()
 		m.BeginSelection(0, 1)
@@ -437,15 +430,16 @@ func TestKeepLookupsHidesDiscardedEntriesButKeepsExtent(t *testing.T) {
 	if m.HasSelection() {
 		t.Fatal("a press on a discarded entry started a selection")
 	}
-	m.SetEntries(m.Entries(), 20, false)
+	m.SetEntries(m.Entries(), 20)
 	if _, _, ok := m.EntryAt(3); !ok {
 		t.Fatal("SetEntries did not restore lookups")
 	}
 }
 
 // ReplaceEntries swaps several entries in one pass (a partial rebuild):
-// heights may change, offsets and the total follow, other entries and the
-// position are untouched, and the ID index tracks a changed ID.
+// heights may change, offsets and the total follow, other entries are
+// untouched, a window at the bottom stays there, and the ID index
+// tracks a changed ID.
 func TestReplaceEntries(t *testing.T) {
 	m := list(t, 4, 2) // offsets 0 2 4 6, total 8
 	m.Layout(3, nil)
@@ -468,41 +462,125 @@ func TestReplaceEntries(t *testing.T) {
 		t.Fatal("the replaced ID is still indexed")
 	}
 	if m.YOffset() != y {
-		t.Fatalf("a partial rebuild moved the window: %d -> %d", y, m.YOffset())
+		t.Fatalf("a partial rebuild moved a window at the bottom: %d -> %d", y, m.YOffset())
 	}
 }
 
-// HoldBottom keeps a window that showed the end of the list at the end
-// across the next SetEntries, whichever way the entries' heights went;
-// a window scrolled up keeps its offset.
-func TestHoldBottom(t *testing.T) {
-	entries := func(lastH int) []Entry {
-		es := make([]Entry, 20)
-		for i := range es {
-			es[i] = msg(fmt.Sprintf("m%02d", i), i, 2, 0)
-		}
-		es[19] = msg("m19", 19, lastH, 0)
-		return es
-	}
-	for _, lastH := range []int{6, 1} {
-		m := list(t, 20, 2)
-		m.Layout(19, nil) // y=30, the bottom
-		m.HoldBottom()
-		m.SetEntries(entries(lastH), 20, false)
-		m.Layout(19, nil)
-		if want := max(m.Total()-10, 0); m.YOffset() != want {
-			t.Errorf("last entry %d rows: y=%d, want the bottom %d", lastH, m.YOffset(), want)
+// renumber sets each entry's Ref to its index, as an owner's indexes
+// follow its rows.
+func renumber(es []Entry) []Entry {
+	for i := range es {
+		if es[i].Ref >= 0 {
+			es[i].Ref = i
 		}
 	}
+	return es
+}
+
+// frameRows lays out a frame for the cursor and returns its rows,
+// stripped of styling and the scrollbar.
+func frameRows(m *Model, cursor int) []string {
+	return strip(m.Compose(m.Layout(cursor, nil), "", "", false))
+}
+
+// refOf is the Ref of the entry with id, for a cursor that stays on its
+// entry as the owner's indexes shift.
+func refOf(t *testing.T, m *Model, id string) int {
+	t.Helper()
+	i, ok := m.IndexOf(id)
+	if !ok {
+		t.Fatalf("no entry %q", id)
+	}
+	return m.Entries()[i].Ref
+}
+
+// An entry inserted before the selected last entry, and selected (the
+// newest message arriving ahead of a pending send), shows with the
+// entry after it: a window at the bottom stays at the bottom, and the
+// cursor moving to a different entry at the same index scrolls to it.
+func TestEntryInsertedBeforeTheSelectedLastShowsWithIt(t *testing.T) {
+	for _, opts := range [][]Option{nil, {WithEagerClamp()}, {WithCursorFollowsScroll(), WithPinBottomOnShrink()}} {
+		m := list(t, 20, 2, opts...)
+		m.Layout(19, nil) // the bottom: m15..m19
+		es := slices.Clone(m.Entries())
+		es = renumber(slices.Insert(es, 19, msg("new", 0, 3, 0)))
+		m.SetEntries(es, 20)
+		got := frameRows(m, 19) // the cursor is on "new" now
+		want := []string{"m17-0", "m17-1", "m18-0", "m18-1", "new-0", "new-1", "new-2", "m19-0", "m19-1"}
+		if !slices.Equal(got[1:], want) {
+			t.Errorf("frame %q, want it to end %q", got, want)
+		}
+	}
+}
+
+// A window at the bottom stays there whatever changes: rows inserted
+// before the last, the last growing or shrinking, rows removed.
+func TestAnchorKeepsTheBottom(t *testing.T) {
+	changes := map[string]func([]Entry) []Entry{
+		"last taller":   func(es []Entry) []Entry { es[19] = msg("m19", 19, 6, 0); return es },
+		"last shorter":  func(es []Entry) []Entry { es[19] = msg("m19", 19, 1, 0); return es },
+		"insert before": func(es []Entry) []Entry { return renumber(slices.Insert(es, 18, msg("new", 0, 4, 0))) },
+		"remove above":  func(es []Entry) []Entry { return renumber(slices.Delete(es, 2, 3)) },
+		"remove inside": func(es []Entry) []Entry { return renumber(slices.Delete(es, 17, 18)) },
+	}
+	for name, change := range changes {
+		for _, eager := range []bool{false, true} {
+			var opts []Option
+			if eager {
+				opts = append(opts, WithEagerClamp())
+			}
+			m := list(t, 20, 2, opts...)
+			m.Layout(19, nil)
+			m.SetEntries(change(slices.Clone(m.Entries())), 20)
+			got := frameRows(m, refOf(t, m, "m19"))
+			last := m.Entries()[len(m.Entries())-1]
+			if tail := strip(last.Lines); !slices.Equal(got[len(got)-len(tail):], tail) {
+				t.Errorf("%s (eager %v): frame %q does not end with the last entry", name, eager, got)
+			}
+		}
+	}
+}
+
+// A window scrolled up keeps its first visible entry on the same screen
+// row when rows above or below it change, and the frame is unchanged.
+func TestAnchorKeepsTheTopEntryRow(t *testing.T) {
+	changes := map[string]func([]Entry) []Entry{
+		"insert above":  func(es []Entry) []Entry { return renumber(slices.Insert(es, 2, msg("new", 0, 3, 0))) },
+		"remove above":  func(es []Entry) []Entry { return renumber(slices.Delete(es, 2, 3)) },
+		"taller above":  func(es []Entry) []Entry { es[2] = msg("m02", 2, 5, 0); return es },
+		"shorter above": func(es []Entry) []Entry { es[2] = msg("m02", 2, 1, 0); return es },
+		"insert below":  func(es []Entry) []Entry { return renumber(slices.Insert(es, 19, msg("new", 0, 3, 0))) },
+		"taller below":  func(es []Entry) []Entry { es[19] = msg("m19", 19, 5, 0); return es },
+	}
+	for name, change := range changes {
+		for _, follow := range []bool{false, true} {
+			var opts []Option
+			if follow {
+				opts = append(opts, WithCursorFollowsScroll())
+			}
+			m := list(t, 20, 2, opts...)
+			m.Layout(19, nil)
+			m.ScrollUp(15, 19) // y=15: m07's second row on top
+			f := m.Layout(19, nil)
+			cursorID := m.Entries()[f.Cursor].ID
+			before := frameRows(m, f.Cursor)
+			m.SetEntries(change(slices.Clone(m.Entries())), 20)
+			if got := frameRows(m, refOf(t, m, cursorID)); !slices.Equal(got, before) {
+				t.Errorf("%s (follow %v): frame moved\nbefore %q\nafter  %q", name, follow, before, got)
+			}
+		}
+	}
+}
+
+// A partial rebuild that changes a height above the window keeps the
+// window's content where it was.
+func TestReplaceEntriesKeepsTheTopEntryRow(t *testing.T) {
 	m := list(t, 20, 2)
 	m.Layout(19, nil)
-	m.ScrollUp(5, 19)
-	m.Layout(19, nil)
-	y := m.YOffset()
-	m.HoldBottom()
-	m.SetEntries(entries(6), 20, false)
-	m.Layout(19, nil)
-	if m.YOffset() != y {
-		t.Errorf("scrolled up: y=%d, want it kept at %d", m.YOffset(), y)
+	m.ScrollUp(15, 19)
+	before := frameRows(m, 19)
+	m.ReplaceEntries(map[int]Entry{2: msg("m02", 2, 6, 0)})
+	if got := frameRows(m, 19); !slices.Equal(got, before) {
+		t.Errorf("frame moved\nbefore %q\nafter  %q", before, got)
 	}
 }

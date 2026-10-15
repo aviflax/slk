@@ -106,17 +106,13 @@ func DefaultStyles() Styles {
 	}
 }
 
-// ReanchorPolicy says how SetEntries keeps the scroll position when the
-// width changes (every entry rewraps): a viewport at the bottom stays at
-// the bottom, otherwise the entry under the first visible line stays
-// there, at the same row within it.
+// ReanchorPolicy says how "the window shows the end of the list" is
+// measured when the height changed since the last frame (see
+// SetEntries).
 type ReanchorPolicy struct {
 	// BottomUsesNewHeight measures "was at the bottom" with this frame's
 	// height instead of the previous frame's.
 	BottomUsesNewHeight bool
-	// AnchorRefsOnly anchors only on entries with Ref >= 0. A first
-	// visible line above the first such entry keeps the raw offset.
-	AnchorRefsOnly bool
 }
 
 // Option configures a Model.
@@ -149,7 +145,7 @@ func WithDirtyOnDrag() Option { return func(m *Model) { m.dirtyOnDrag = true } }
 // Without it the offset is clamped once per frame, in Layout.
 func WithEagerClamp() Option { return func(m *Model) { m.eager = true } }
 
-// WithReanchor sets the width-change policy.
+// WithReanchor sets how the bottom is measured across a height change.
 func WithReanchor(p ReanchorPolicy) Option { return func(m *Model) { m.reanchor = p } }
 
 // Model is the list. The zero value is not usable; call New.
@@ -165,12 +161,18 @@ type Model struct {
 	ids     map[string]int
 	width   int
 
-	height, prevHeight int
-	yOffset            int
-	holdBottom         bool // see HoldBottom
-	snapped            int
-	hasSnapped         bool
-	selStart, selEnd   int
+	height           int
+	laidHeight       int // the height of the last frame laid out; 0 before one
+	yOffset          int
+	snapped          int
+	snapID           string // the ID of the entry snapped, "" when unknown
+	hasSnapped       bool
+	snapLost         bool // the snapped entry left in SetEntries
+	selStart, selEnd int
+	// cursorShown says the cursor's entry was wholly in the window as of
+	// the last frame or scroll; keepCursor that a change to the entries
+	// since must leave it there (see Layout).
+	cursorShown, keepCursor bool
 
 	sel    selection.Range
 	hasSel bool
@@ -226,7 +228,7 @@ func (m *Model) YOffset() int { return m.yOffset }
 
 // SetYOffset assigns the first visible line (clamped when eager). It does
 // not bump Version, matching viewport.SetYOffset.
-func (m *Model) SetYOffset(n int) { m.holdBottom = false; m.setY(n) }
+func (m *Model) SetYOffset(n int) { m.setY(n); m.noteScrolled() }
 
 // IndexOf returns the index of the entry with id.
 func (m *Model) IndexOf(id string) (int, bool) {
@@ -236,7 +238,7 @@ func (m *Model) IndexOf(id string) (int, bool) {
 
 // ResetSnap makes the next Layout snap the window to the cursor even if
 // the cursor has not moved (used when the content is replaced).
-func (m *Model) ResetSnap() { m.hasSnapped = false }
+func (m *Model) ResetSnap() { m.hasSnapped, m.snapID, m.snapLost = false, "", false }
 
 // HasSnapped reports whether a Layout has snapped since the last
 // ResetSnap.
@@ -248,8 +250,30 @@ func (m *Model) HasSnapped() bool { return m.hasSnapped }
 func (m *Model) CursorSpan() (start, end int) { return m.selStart, m.selEnd }
 
 // MarkSnapped records sel as already snapped, so the next Layout leaves
-// the offset alone unless the cursor moves.
-func (m *Model) MarkSnapped(sel int) { m.snapped, m.hasSnapped = sel, true }
+// the offset alone unless the cursor moves to another entry. While the
+// entries are current (no KeepLookups since SetEntries) the snap
+// follows sel's entry when later changes move it to another index.
+func (m *Model) MarkSnapped(sel int) {
+	if m.hasSnapped && m.snapped == sel && m.snapID != "" {
+		return
+	}
+	m.snapped, m.hasSnapped, m.snapID = sel, true, ""
+	if m.live < 0 {
+		if i := m.indexOfRef(sel); i >= 0 {
+			m.snapID = m.entries[i].ID
+		}
+	}
+}
+
+// indexOfRef is the index of the selectable entry whose Ref is ref, or -1.
+func (m *Model) indexOfRef(ref int) int {
+	for i := range m.entries {
+		if m.entries[i].Selectable && m.entries[i].Ref == ref {
+			return i
+		}
+	}
+	return -1
+}
 
 // SetHeight sets this frame's window height. With WithPinBottomOnShrink, a
 // window that was at the bottom and gets shorter moves down by the
@@ -259,63 +283,107 @@ func (m *Model) SetHeight(h, sel int) {
 		m.yOffset += m.height - h
 		m.MarkSnapped(sel)
 	}
-	m.prevHeight, m.height = m.height, h
-}
-
-// HoldBottom is called before a change to an entry's height (an edited
-// body, a reaction, a reply count): if the window shows the end of the
-// list, the next SetEntries keeps it at the end, so the content moves
-// up rather than pushing the last rows below the fold. A window
-// scrolled up is left where it is, and a scroll before the next
-// SetEntries cancels the hold.
-func (m *Model) HoldBottom() {
-	if m.total > 0 && m.height > 0 && m.yOffset+m.height >= m.total {
-		m.holdBottom = true
-	}
+	m.height = h
 }
 
 // SetEntries replaces the entries, rendered at width. The list takes
 // ownership of es.
 //
-// When keepPosition is true and the width changed, the scroll position is
-// kept per the ReanchorPolicy. Owners pass true only when the previous
-// layout is still a valid description of the screen (the channel pane:
-// its render cache was not discarded; the thread pane: its view cache is
-// valid).
-func (m *Model) SetEntries(es []Entry, width int, keepPosition bool) {
-	reanchor := keepPosition && m.width != width
-	var bottom, anchored bool
-	var ord, within int
-	if reanchor {
-		h := m.prevHeight
-		if m.reanchor.BottomUsesNewHeight {
-			h = m.height
-		}
-		bottom = m.total > 0 && m.yOffset+h >= m.total
-		ord, within, anchored = m.lineAnchor(m.yOffset)
-	}
+// The list keeps the window where the user left it across the change
+// (anchoring); owners never position it themselves. A window that
+// showed the end of the list shows the end of the new one, whichever
+// rows were added, removed or resized, so new content moves the old up
+// rather than landing below the fold. Otherwise the first entry with an
+// ID that was on screen stays on the same screen row (the next one on
+// screen when it is gone), so rows changing above or below it, or every
+// row rewrapping to a new width, move nothing on screen. "At the end"
+// is measured with the last frame's height (ReanchorPolicy), and a pane
+// that got shorter without WithPinBottomOnShrink is not at the end: its
+// top stays put. The cursor's snap follows its entry to a new index.
+// When that entry is gone (removed, or replaced under a new ID) the
+// next Layout takes the cursor it is given as snapped: the owner moved
+// it because the content changed, not to show it. The cursor moving to
+// another entry otherwise scrolls to it in Layout, as
+// does a change at the same width that pushes a cursor that was wholly
+// in the window out of the last frame's extent (a resize does not).
+func (m *Model) SetEntries(es []Entry, width int) {
+	a := m.captureAnchor()
+	a.rewrapped = width != m.width
 	m.entries, m.width, m.live = es, width, -1
 	m.recompute()
+	m.restoreAnchor(a)
+	if m.hasSnapped && m.snapID != "" {
+		if i, ok := m.ids[m.snapID]; ok && m.entries[i].Selectable {
+			m.snapped = m.entries[i].Ref
+		} else {
+			m.snapLost = true
+		}
+	}
+}
+
+// anchor is where the window was before the entries changed.
+type anchor struct {
+	ok, bottom bool
+	rewrapped  bool     // the width changed: the cursor need not stay on screen
+	ids        []string // the entries with an ID on screen, top first
+	rows       []int    // the window row each started on (<0: above the top)
+}
+
+func (m *Model) captureAnchor() anchor {
+	if m.total == 0 || m.height <= 0 {
+		return anchor{}
+	}
+	h := m.height
+	if m.laidHeight > 0 && !m.reanchor.BottomUsesNewHeight {
+		h = m.laidHeight
+	}
+	a := anchor{ok: true}
+	shrunk := m.laidHeight > 0 && m.height < m.laidHeight
+	if m.yOffset+h >= m.total && (m.pinBottom || !shrunk) {
+		a.bottom = true
+		return a
+	}
+	for i := range m.entries {
+		start := m.offsets[i]
+		if start >= m.yOffset+h {
+			break
+		}
+		if start+len(m.entries[i].Lines) <= m.yOffset {
+			continue
+		}
+		if id := m.entries[i].ID; id != "" {
+			a.ids = append(a.ids, id)
+			a.rows = append(a.rows, start-m.yOffset)
+		}
+	}
+	return a
+}
+
+func (m *Model) restoreAnchor(a anchor) {
+	switch {
+	case !a.ok:
+	case a.bottom:
+		m.yOffset = m.maxOffset()
+		return
+	default:
+		for k, id := range a.ids {
+			i, ok := m.ids[id]
+			if !ok {
+				continue
+			}
+			row := a.rows[k]
+			if row < 0 {
+				// Started above the top: the same row of it stays on
+				// top, or its last when it got shorter.
+				row = -min(-row, max(len(m.entries[i].Lines)-1, 0))
+			}
+			m.yOffset = m.offsets[i] - row
+			break
+		}
+		m.keepCursor = m.cursorShown && !a.rewrapped
+	}
 	if m.eager {
 		m.setY(m.yOffset)
-	}
-	if m.holdBottom {
-		m.holdBottom = false
-		m.setY(m.maxOffset())
-		return
-	}
-	if !reanchor {
-		return
-	}
-	switch {
-	case bottom:
-		m.setY(m.total)
-	case anchored:
-		if i, ok := m.nthAnchor(ord); ok {
-			h := len(m.entries[i].Lines)
-			within = max(min(within, h-1), 0)
-			m.setY(m.offsets[i] + within)
-		}
 	}
 }
 
@@ -337,8 +405,9 @@ func (m *Model) lookupLen() int {
 
 // ReplaceEntries swaps the entries at the given indexes, keeping every
 // other entry (a partial rebuild). Offsets are recomputed once, after all
-// of them; the position is not re-anchored.
+// of them, and the window is anchored as by SetEntries.
 func (m *Model) ReplaceEntries(updates map[int]Entry) {
+	a := m.captureAnchor()
 	for i, e := range updates {
 		if old := m.entries[i].ID; old != e.ID {
 			if old != "" && m.ids[old] == i {
@@ -351,6 +420,7 @@ func (m *Model) ReplaceEntries(updates map[int]Entry) {
 		m.entries[i] = e
 	}
 	m.recomputeOffsets()
+	m.restoreAnchor(a)
 }
 
 // ScrollUp moves the window up n lines and marks sel snapped. Eager: a
@@ -359,7 +429,6 @@ func (m *Model) ScrollUp(n, sel int) {
 	if n <= 0 {
 		return
 	}
-	m.holdBottom = false
 	if m.eager {
 		if m.yOffset > 0 && m.total > 0 {
 			m.setY(m.yOffset - n)
@@ -367,6 +436,7 @@ func (m *Model) ScrollUp(n, sel int) {
 	} else {
 		m.yOffset = max(m.yOffset-n, 0)
 	}
+	m.noteScrolled()
 	m.MarkSnapped(sel)
 	m.version++
 }
@@ -378,7 +448,6 @@ func (m *Model) ScrollDown(n, sel int) {
 	if n <= 0 {
 		return
 	}
-	m.holdBottom = false
 	if m.eager {
 		if m.yOffset < m.maxOffset() && m.total > 0 {
 			m.setY(m.yOffset + n)
@@ -386,6 +455,7 @@ func (m *Model) ScrollDown(n, sel int) {
 	} else {
 		m.yOffset += n
 	}
+	m.noteScrolled()
 	m.MarkSnapped(sel)
 	m.version++
 }
@@ -443,37 +513,8 @@ func (m *Model) recomputeOffsets() {
 	m.total = off
 }
 
-// lineAnchor maps an absolute line to the anchor candidate covering it:
-// its ordinal among candidates and the line's offset from its start.
-func (m *Model) lineAnchor(line int) (ord, within int, ok bool) {
-	best, n := -1, 0
-	for i := range m.entries {
-		if m.reanchor.AnchorRefsOnly && m.entries[i].Ref < 0 {
-			continue
-		}
-		if m.offsets[i] > line {
-			break
-		}
-		best, ord = i, n
-		n++
-	}
-	if best < 0 {
-		return 0, 0, false
-	}
-	return ord, line - m.offsets[best], true
-}
-
-// nthAnchor returns the index of the ord-th anchor candidate.
-func (m *Model) nthAnchor(ord int) (int, bool) {
-	n := 0
-	for i := range m.entries {
-		if m.reanchor.AnchorRefsOnly && m.entries[i].Ref < 0 {
-			continue
-		}
-		if n == ord {
-			return i, true
-		}
-		n++
-	}
-	return 0, false
+// noteScrolled records whether the cursor's entry, as the last frame
+// placed it, is wholly in the window after a scroll.
+func (m *Model) noteScrolled() {
+	m.cursorShown = m.selEnd > m.selStart && m.selStart >= m.yOffset && m.selEnd <= m.yOffset+m.height
 }

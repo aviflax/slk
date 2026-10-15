@@ -2,6 +2,7 @@ package entrylist
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 	"testing"
 
@@ -114,10 +115,7 @@ func TestListStateMachine(t *testing.T) {
 	rapid.Check(t, func(t *rapid.T) {
 		var opts []Option
 		eager := rapid.Bool().Draw(t, "eager")
-		reanchor := ReanchorPolicy{
-			BottomUsesNewHeight: rapid.Bool().Draw(t, "bottomNew"),
-			AnchorRefsOnly:      rapid.Bool().Draw(t, "refsOnly"),
-		}
+		reanchor := ReanchorPolicy{BottomUsesNewHeight: rapid.Bool().Draw(t, "bottomNew")}
 		opts = append(opts, WithReanchor(reanchor))
 		if eager {
 			opts = append(opts, WithEagerClamp())
@@ -125,7 +123,8 @@ func TestListStateMachine(t *testing.T) {
 		if rapid.Bool().Draw(t, "follow") {
 			opts = append(opts, WithCursorFollowsScroll())
 		}
-		if rapid.Bool().Draw(t, "pin") {
+		pin := rapid.Bool().Draw(t, "pin")
+		if pin {
 			opts = append(opts, WithPinBottomOnShrink())
 		}
 		if rapid.Bool().Draw(t, "snapDecor") {
@@ -137,7 +136,7 @@ func TestListStateMachine(t *testing.T) {
 		m := New(opts...)
 		g := &listGen{width: rapid.IntRange(4, 20).Draw(t, "width")}
 		m.SetHeight(rapid.IntRange(1, 12).Draw(t, "h0"), 0)
-		m.SetEntries(g.entries(t), g.width, false)
+		m.SetEntries(g.entries(t), g.width)
 		live := len(m.Entries())
 		var version int64
 		cursor := 0
@@ -235,11 +234,9 @@ func TestListStateMachine(t *testing.T) {
 				if rapid.Bool().Draw(t, "resize") {
 					w = rapid.IntRange(4, 20).Draw(t, "newWidth")
 				}
-				keep := rapid.Bool().Draw(t, "keep")
 				wasBottom := m.Total() > 0 && m.YOffset()+m.Height() >= m.Total()
-				resized := w != g.width
 				g.width = w
-				m.SetEntries(g.entries(t), w, keep)
+				m.SetEntries(g.entries(t), w)
 				live = len(m.Entries())
 				if eager {
 					if y := m.YOffset(); y < 0 || y > max(0, m.Total()-m.Height()) {
@@ -250,9 +247,10 @@ func TestListStateMachine(t *testing.T) {
 				if w != m.Width() {
 					t.Fatalf("Width %d, want %d", m.Width(), w)
 				}
-				// A window at the bottom stays there across a rewrap (the
-				// offset may overshoot until Layout clamps it).
-				if wasBottom && keep && resized && reanchor.BottomUsesNewHeight {
+				// A window at the bottom stays there across any change, the
+				// channel pane's way (a pane that shrank without pinning
+				// keeps its top instead).
+				if wasBottom && pin && reanchor.BottomUsesNewHeight {
 					if want := max(0, m.Total()-m.Height()); m.YOffset() < want {
 						t.Fatalf("bottom-anchored window left the bottom: y %d, bottom %d", m.YOffset(), want)
 					}
@@ -340,5 +338,126 @@ func TestListStateMachine(t *testing.T) {
 				check()
 			},
 		})
+	})
+}
+
+// Anchoring as a property over random changes to the entries, with
+// every combination of the scroll options. Entries are never taller
+// than the window.
+//
+// A window that shows the end of the list keeps showing it: with the
+// cursor on the last entry (an owner follows the newest message), any
+// insert, removal or height change leaves the last entry wholly on
+// screen.
+//
+// A window scrolled up keeps its first visible entry on the same screen
+// row when only other entries change, with the cursor on that entry,
+// unless the list's start or end forces the window to move (the offset
+// that row needs is outside [0, total-height]).
+func TestAnchorProperty(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		var opts []Option
+		if rapid.Bool().Draw(t, "eager") {
+			opts = append(opts, WithEagerClamp())
+		}
+		if rapid.Bool().Draw(t, "follow") {
+			opts = append(opts, WithCursorFollowsScroll())
+		}
+		if rapid.Bool().Draw(t, "pin") {
+			opts = append(opts, WithPinBottomOnShrink())
+		}
+		opts = append(opts, WithReanchor(ReanchorPolicy{BottomUsesNewHeight: rapid.Bool().Draw(t, "bottomNew")}))
+		h := rapid.IntRange(3, 12).Draw(t, "height")
+		m := New(opts...)
+		m.SetHeight(h, 0)
+		next := 0
+		entry := func() Entry {
+			next++
+			return msg(fmt.Sprintf("e%03d", next), 0, rapid.IntRange(1, h).Draw(t, "rows"), 0)
+		}
+		es := make([]Entry, rapid.IntRange(1, 25).Draw(t, "n"))
+		for i := range es {
+			es[i] = entry()
+		}
+		m.SetEntries(renumber(es), 20)
+		last := func() int { return len(m.Entries()) - 1 }
+		m.Layout(last(), nil)
+
+		// change returns the entries with one random change that leaves
+		// the entry at index keep (-1: none) alone.
+		change := func(keep int) []Entry {
+			es := slices.Clone(m.Entries())
+			pick := func() (int, bool) {
+				if len(es) == 1 && keep == 0 {
+					return 0, false
+				}
+				for {
+					if i := rapid.IntRange(0, len(es)-1).Draw(t, "at"); i != keep {
+						return i, true
+					}
+				}
+			}
+			switch rapid.IntRange(0, 2).Draw(t, "op") {
+			case 0:
+				es = slices.Insert(es, rapid.IntRange(0, len(es)).Draw(t, "insertAt"), entry())
+			case 1:
+				if i, ok := pick(); ok && len(es) > 1 {
+					es = slices.Delete(es, i, i+1)
+				}
+			case 2:
+				if i, ok := pick(); ok {
+					id := es[i].ID
+					es[i] = msg(id, 0, rapid.IntRange(1, h).Draw(t, "rows"), 0)
+				}
+			}
+			return renumber(es)
+		}
+
+		for range rapid.IntRange(1, 30).Draw(t, "steps") {
+			switch rapid.IntRange(0, 3).Draw(t, "step") {
+			case 0: // scroll up, away from the bottom
+				m.ScrollUp(rapid.IntRange(1, 20).Draw(t, "up"), last())
+				m.Layout(last(), nil)
+			case 1: // back to the newest entry
+				m.ResetSnap()
+				m.SetYOffset(m.Total())
+				m.Layout(last(), nil)
+			default:
+				y := m.YOffset()
+				if y+h >= m.Total() {
+					m.SetEntries(change(-1), 20)
+					m.Layout(last(), nil)
+					y := m.YOffset()
+					if e := last(); m.Offsets()[e] < y || m.Total() > y+h {
+						t.Fatalf("bottom-anchored: the last entry [%d,%d) is not inside the window [%d,%d)",
+							m.Offsets()[e], m.Total(), y, y+h)
+					}
+					continue
+				}
+				// The cursor goes onto the first visible entry, which may
+				// scroll it wholly into view; then its row is the anchor.
+				a := 0
+				for a < last() && m.Offsets()[a+1] <= y {
+					a++
+				}
+				m.Layout(m.Entries()[a].Ref, nil)
+				y = m.YOffset()
+				if y+h >= m.Total() {
+					continue
+				}
+				id := m.Entries()[a].ID
+				row := m.Offsets()[a] - y
+				m.SetEntries(change(a), 20)
+				i, _ := m.IndexOf(id)
+				m.Layout(m.Entries()[i].Ref, nil)
+				need := m.Offsets()[i] - row
+				if need < 0 || need > max(0, m.Total()-h) {
+					continue
+				}
+				if got := m.Offsets()[i] - m.YOffset(); got != row {
+					t.Fatalf("anchor %s moved from row %d to %d (y %d, total %d)", id, row, got, m.YOffset(), m.Total())
+				}
+			}
+		}
 	})
 }

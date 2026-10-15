@@ -1091,28 +1091,17 @@ func TestUpsertSelfSent_AppendsWhenNoExisting(t *testing.T) {
 	}
 }
 
-// TestUpsertSelfSent_ReplaceTriggersResnap asserts that replacing an
-// existing message via UpsertSelfSent invalidates the snap-to-selected
-// anchor so View() re-pins yOffset to the now-larger entry. Without
-// this, the optimistic version's expanded body (e.g. multi-line list)
-// extends below the fold and the user has to scroll manually.
-func TestUpsertSelfSent_ReplaceTriggersResnap(t *testing.T) {
-	m := New(nil, "general")
-
-	// First call: append a 1-line WS-echo placeholder.
-	m.AppendMessage(MessageItem{TS: "1.0", UserName: "grant", Text: "Hello World", Timestamp: "12:21 PM"})
-
-	// Render once to establish snap state.
-	_ = m.View(20, 80)
-	if !m.list.HasSnapped() {
-		t.Fatal("setup: expected hasSnapped=true after first View")
-	}
-
-	// Now upsert with the optimistic, taller body. The snap anchor
-	// should be invalidated so the next View re-pins to the bottom.
-	m.UpsertSelfSent(MessageItem{TS: "1.0", UserName: "grant", Text: "Hello\nWorld\nMore\nLines", Timestamp: "12:21 PM"})
-	if m.list.HasSnapped() {
-		t.Errorf("UpsertSelfSent replace should clear hasSnapped; got hasSnapped=true")
+// TestUpsertSelfSent_ReplaceKeepsTheBottom asserts that replacing the
+// bottom message with a taller body (the optimistic version's
+// multi-line list) shows the whole of it: the window stays at the
+// bottom rather than leaving the new lines below the fold.
+func TestUpsertSelfSent_ReplaceKeepsTheBottom(t *testing.T) {
+	m := anchorPane(t)
+	m.AppendMessage(MessageItem{TS: "21.0", UserName: "grant", Text: "Hello World", Timestamp: "12:21 PM"})
+	_ = m.View(anchorH, anchorW)
+	m.UpsertSelfSent(MessageItem{TS: "21.0", UserName: "grant", Text: "Hello\nWorld\nMore\nLast-Line", Timestamp: "12:21 PM"})
+	if f := paneFrame(m); !strings.Contains(f[len(f)-1], "Last-Line") {
+		t.Errorf("the replaced message's last line is not the last row:\n%s", strings.Join(f, "\n"))
 	}
 }
 

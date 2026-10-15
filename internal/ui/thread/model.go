@@ -144,17 +144,15 @@ func New() *Model {
 
 // newThreadList configures the substrate for the thread pane (spec §5):
 // the offset clamps eagerly, as bubbles/viewport did (U6); every drag
-// step bumps Version (U4); a width change anchors only on replies, so a
-// first visible line inside the parent keeps its raw offset (#254) and
-// "at the bottom" is measured with the previous frame's height (U5). The
-// cursor does not follow the scroll (U1), a shrinking pane is not pinned
-// (U2) and a press on a separator anchors nothing (8c): the defaults.
+// step bumps Version (U4). "At the bottom" is measured with the
+// previous frame's height (U5), the cursor does not follow the scroll
+// (U1), a shrinking pane is not pinned (U2) and a press on a separator
+// anchors nothing (8c): the defaults.
 func newThreadList() *entrylist.Model {
 	return entrylist.New(
 		entrylist.WithStyles(messages.ThemeListStyles()),
 		entrylist.WithEagerClamp(),
 		entrylist.WithDirtyOnDrag(),
-		entrylist.WithReanchor(entrylist.ReanchorPolicy{AnchorRefsOnly: true}),
 	)
 }
 
@@ -410,8 +408,7 @@ func (m *Model) InsertLocal(msg messages.MessageItem) { m.AddReply(msg) }
 // first), that reply takes msg and the placeholder is removed, so the
 // reply shows once, with the cursor on it if it was on the
 // placeholder. With no placeholder in this pane, msg is upserted by its
-// TS. Unlike the channel pane it has never reset a snap anchor;
-// InvalidateCache is all it does.
+// TS. The list keeps the window in place (entrylist anchoring).
 func (m *Model) Settle(localTS string, msg messages.MessageItem) {
 	if localTS == "" {
 		m.UpsertSelfSentReply(msg)
@@ -547,9 +544,6 @@ func (m *Model) Patch(ts string, f func(*messages.MessageItem)) (prior messages.
 		ok = true
 	}
 	if ok {
-		// A window at the bottom stays there when the row's height
-		// changes.
-		m.list.HoldBottom()
 		m.InvalidateCache()
 	}
 	return prior, ok
@@ -978,7 +972,6 @@ func (m *Model) UpdateReaction(messageTS, emojiName, userID string, remove bool)
 		return
 	}
 
-	m.list.HoldBottom()
 	messages.ApplyReaction(msg, emojiName, userID, m.currentUserID, remove)
 	m.InvalidateCache()
 	if m.nav.Active {
@@ -1248,15 +1241,10 @@ func (m *Model) viewInternal(height, width int, applySelection bool) string {
 			Background(styles.Background).
 			Foreground(styles.TextMuted).
 			Render("No replies yet")
-		m.list.SetEntries([]entrylist.Entry{parent, {Ref: -1, Lines: strings.Split(empty, "\n")}}, width, false)
+		m.list.SetEntries([]entrylist.Entry{parent, {Ref: -1, Lines: strings.Split(empty, "\n")}}, width)
 		rows := m.list.Compose(m.list.Static(), "", "", false)
 		return fitHeight(chrome+"\n"+strings.Join(rows, "\n"), height)
 	}
-
-	// A width change with the previous layout intact keeps the scroll
-	// position (SetEntries, per the reanchor policy). Captured before the
-	// reply-cache rebuild.
-	keepPosition := m.layoutValid
 
 	// Rebuild the reply cache if the replies or the width changed.
 	//
@@ -1370,7 +1358,7 @@ func (m *Model) viewInternal(height, width int, applySelection bool) string {
 			entries = append(entries, decoration(replySeparator))
 		}
 	}
-	m.list.SetEntries(entries, width, keepPosition)
+	m.list.SetEntries(entries, width)
 
 	// Kitty uploads for every reply (the thread cache is small, so no
 	// visibility scoping), written straight to the terminal output: APC

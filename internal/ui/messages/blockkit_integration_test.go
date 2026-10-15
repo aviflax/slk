@@ -17,7 +17,7 @@ import (
 func renderedFor(t *testing.T, msg MessageItem, width int) string {
 	t.Helper()
 	m := New([]MessageItem{msg}, "general")
-	m.buildCache(width, false)
+	m.buildCache(width)
 	if len(m.cache) == 0 {
 		t.Fatal("buildCache produced no entries")
 	}
@@ -80,7 +80,7 @@ func TestBuildCache_BlocksCarryBodyReactionHitRow(t *testing.T) {
 		Reactions: []ReactionItem{{Emoji: "tada", Count: 1}},
 	}
 	m := New([]MessageItem{msg}, "general")
-	m.buildCache(100, false)
+	m.buildCache(100)
 	for _, e := range m.list.Entries() {
 		if e.Ref != 0 {
 			continue
@@ -338,7 +338,7 @@ func TestBuildCache_EphemeralLabelReactionHitRow(t *testing.T) {
 		Reactions: []ReactionItem{{Emoji: "tada", Count: 1}},
 	}
 	m := New([]MessageItem{msg}, "general")
-	m.buildCache(100, false)
+	m.buildCache(100)
 	for _, e := range m.list.Entries() {
 		if e.Ref != 0 {
 			continue

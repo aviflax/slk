@@ -1060,7 +1060,10 @@ func TestScrollAnchorAtTopOfThreadPreservedAcrossWidthResize(t *testing.T) {
 // whatever reply now falls at that stale line number. This documents the
 // gap rather than asserting the desired behavior; flip it to assert
 // preservation once #254 is fixed.
-func TestScrollAnchorInsideParentPrefixNotPreservedAcrossWidthResize(t *testing.T) {
+func TestScrollAnchorInsideParentPreservedAcrossWidthResize(t *testing.T) {
+	// #254: a window whose top line is inside a long parent keeps the
+	// parent on top across a resize, at the same row of it or its last
+	// row when the parent got shorter, rather than jumping into a reply.
 	parent := messages.MessageItem{TS: "100.0", UserName: "alice", Text: strings.Repeat("word ", 300)}
 	m := New()
 	m.SetThread(parent, markedReplies(40), "C1", "100.0")
@@ -1072,23 +1075,13 @@ func TestScrollAnchorInsideParentPrefixNotPreservedAcrossWidthResize(t *testing.
 		t.Fatalf("test setup: viewport should be inside the parent, not a reply:\n%s", before)
 	}
 
-	raw := m.list.YOffset()
-
 	after := m.View(20, 200) // widen: parent shrinks to far fewer lines
-	if !threadMarkRE.MatchString(after) {
-		t.Fatalf("expected the known limitation (jump into a reply) to still reproduce; if this now fails, #254 was fixed -- replace this test with a real preservation assertion")
+	parentLines := len(m.list.Entries()[0].Lines)
+	if want := min(40, parentLines-1); m.list.YOffset() != want {
+		t.Errorf("YOffset after widening = %d, want %d (the parent's row 40, or its last of %d)", m.list.YOffset(), want, parentLines)
 	}
-
-	// AnchorRefsOnly finds no anchor in the parent prefix, so the raw
-	// pre-resize offset carries through, bounded only by the new extent.
-	// Anchoring on the parent instead would clamp the offset to the
-	// rewrapped parent's last row, far above raw.
-	want := min(raw, max(0, m.list.Total()-m.list.Height()))
-	if parentLines := len(m.list.Entries()[0].Lines); want < parentLines {
-		t.Fatalf("test setup: expected offset %d is still inside the %d-line parent, so the anchor policies cannot differ", want, parentLines)
-	}
-	if got := m.list.YOffset(); got != want {
-		t.Errorf("YOffset after widening = %d, want the raw pre-resize offset %d bounded by the new extent (%d); #254 pin", got, raw, want)
+	if !strings.Contains(after, "word") {
+		t.Errorf("the parent left the top of the window:\n%s", after)
 	}
 }
 

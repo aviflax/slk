@@ -587,11 +587,12 @@ func (m *Model) AppendMessage(msg MessageItem) {
 }
 
 // afterInsert moves the cursor after a row was added at ch.Index. The
-// newest row (IsNewest) is followed: selecting it makes View() re-snap
-// yOffset to it, as appending always did, and reaction navigation,
-// which was on the message selected before, ends so its next Enter
-// cannot act on the new row. A row inserted further up leaves the
-// cursor on the message it was on.
+// newest row (IsNewest) is followed: selecting it makes View() scroll
+// to it, as appending always did, and reaction navigation, which was
+// on the message selected before, ends so its next Enter cannot act on
+// the new row. A row inserted further up leaves the cursor on the
+// message it was on. The list keeps the window in place (entrylist
+// anchoring).
 func (m *Model) afterInsert(ch RowChange) {
 	if IsNewest(m.messages, ch.Index) {
 		m.selected = ch.Index
@@ -599,7 +600,6 @@ func (m *Model) afterInsert(ch RowChange) {
 		return
 	}
 	m.selected = ch.Selection(m.selected)
-	m.list.ResetSnap()
 }
 
 // RemoveLocalSent removes an optimistic placeholder identified by
@@ -617,7 +617,6 @@ func (m *Model) RemoveLocalSent(localTS string) bool {
 	m.messages = rows
 	m.dropCache()
 	m.dirty()
-	m.list.ResetSnap()
 	m.afterLocalRemoved(ch.Index)
 	return true
 }
@@ -652,24 +651,16 @@ func (m *Model) afterLocalRemoved(i int) {
 // Text field, so without this fix multi-line composed messages
 // render horizontally when the WS echo races ahead.
 //
-// Replacement also invalidates the snap-to-selected anchor so View()
-// re-pins yOffset to the bottom: when the optimistic version's text
-// expands the message from a 1-line WS-echo placeholder to multiple
-// lines, the previously-selected last index now extends below the
-// fold and would otherwise stay clipped.
+// A replacement that changes the row's height leaves a window at the
+// bottom there (entrylist anchoring).
 func (m *Model) UpsertSelfSent(msg MessageItem) {
 	rows, ch := Upsert(m.messages, msg)
 	m.messages = rows
 	m.dropCache()
 	m.dirty()
-	if ch.Op == RowReplaced {
-		// Force the next View() to re-snap yOffset to the
-		// updated selected entry's range, even when m.selected
-		// hasn't changed.
-		m.list.ResetSnap()
-		return
+	if ch.Op != RowReplaced {
+		m.afterInsert(ch)
 	}
-	m.afterInsert(ch)
 }
 
 // InsertLocal shows a placeholder for a message the user is sending.
@@ -700,10 +691,6 @@ func (m *Model) Settle(localTS string, msg MessageItem) {
 	m.messages = rows
 	m.dropCache()
 	m.dirty()
-	// The settled entry may differ in height from the placeholder
-	// (server-rendered blocks), so the snap anchor needs a refresh, as
-	// in UpsertSelfSent's replace branch.
-	m.list.ResetSnap()
 	switch ch.Op {
 	case RowRemoved:
 		m.afterSettleRemoved(ch.Index, msg.TS)
@@ -1047,9 +1034,6 @@ func (m *Model) IncrementReplyCount(parentTS, replyTS string) {
 		}
 		set[replyTS] = struct{}{}
 	}
-	// The count may add a "[N replies ->]" line: a window at the
-	// bottom stays there (HoldBottom).
-	m.list.HoldBottom()
 	m.messages[i].ReplyCount++
 	m.dropCache()
 	m.dirty()
@@ -1057,15 +1041,11 @@ func (m *Model) IncrementReplyCount(parentTS, replyTS string) {
 
 // Patch applies f to the first message with TS ts (PatchTS) and returns
 // the message as it was before. ok is false when no message has ts.
-//
-// A window at the bottom stays there when the patch changes the row's
-// height (a multi-line edit of the last message), as for a reaction.
 func (m *Model) Patch(ts string, f func(*MessageItem)) (prior MessageItem, ok bool) {
 	rows, ch := PatchTS(m.messages, ts, func(r *MessageItem) { prior = *r; f(r) })
 	if ch.Op == RowNone {
 		return MessageItem{}, false
 	}
-	m.list.HoldBottom()
 	m.messages = rows
 	m.dropCache()
 	m.dirty()
@@ -1087,8 +1067,7 @@ func (m *Model) RemoveMessageByTS(ts string) bool {
 //
 // Unlike RemoveLocalSent it steps the selection back when the removed
 // row was the selected one (i <= selected), so deleting the selected
-// message lands on the one before it, and it does not reset the snap
-// anchor.
+// message lands on the one before it.
 func (m *Model) Remove(ts string) (RemovedRow, bool) {
 	i := FirstIndexOfTS(m.messages, ts)
 	if i < 0 {
@@ -1139,7 +1118,6 @@ func (m *Model) Restore(r RemovedRow) {
 	}
 	m.dropCache()
 	m.dirty()
-	m.list.ResetSnap()
 }
 
 func (m *Model) UpdateReaction(messageTS, emojiName, userID string, remove bool) {
@@ -1147,10 +1125,6 @@ func (m *Model) UpdateReaction(messageTS, emojiName, userID string, remove bool)
 	if i < 0 {
 		return
 	}
-	// Adding the first reaction to the last visible message grows the
-	// list by a row: a window at the bottom moves the content up
-	// (HoldBottom) rather than pushing the message below the fold.
-	m.list.HoldBottom()
 	ApplyReaction(&m.messages[i], emojiName, userID, m.currentUserID, remove)
 	m.dropCache()
 	m.dirty()
@@ -1633,7 +1607,7 @@ func (m *Model) renderMessageEntry(i int, width int, cs cacheStyles, stats *entr
 // / theme / reaction changes -- never on simple j/k navigation, and never
 // on a single-image arrival (HandleImageReady marks one TS stale and the
 // View()-time guard dispatches to partialRebuild instead).
-func (m *Model) buildCache(width int, keepPosition bool) {
+func (m *Model) buildCache(width int) {
 	m.cache = m.cache[:0]
 	m.cacheWidth = width
 	m.cacheMsgLen = len(m.messages)
@@ -1701,7 +1675,7 @@ func (m *Model) buildCache(width int, keepPosition bool) {
 		m.cache = append(m.cache, p)
 	}
 
-	m.list.SetEntries(entries, width, keepPosition)
+	m.list.SetEntries(entries, width)
 
 	if stats != nil {
 		debuglog.Perf("messages.buildCache.breakdown N=%d body=%s reactions(n=%d)=%s blockKit(n=%d)=%s legacy(n=%d, atts=%d)=%s [text=%s image=%s other=%s] img[cachedCheck(n=%d)=%s kitty(n=%d)=%s renderImage(n=%d)=%s placeholder(n=%d)=%s] attachments(n=%d)=%s borderWrap=%s plainLines=%s",
@@ -2014,9 +1988,8 @@ func (m *Model) viewInternal(height, width int, applySelection bool) string {
 	// message TSes have been marked stale (e.g. by HandleImageReady
 	// landing one image at a time), take the targeted partial-rebuild
 	// path that re-renders only those slots and reuses every other
-	// entry verbatim -- the perf invariant for image bursts. A width
-	// change with the previous cache intact re-anchors the scroll
-	// position (spec §5.2 U5), which SetEntries does.
+	// entry verbatim -- the perf invariant for image bursts. Either way
+	// the list keeps the window where it was (entrylist anchoring).
 	switch {
 	case m.cache == nil || m.cacheWidth != width || m.cacheMsgLen != len(m.messages):
 		// Perf instrumentation: classify which predicate fired so we
@@ -2035,7 +2008,7 @@ func (m *Model) viewInternal(height, width int, applySelection bool) string {
 			}
 		}
 		start := time.Now()
-		m.buildCache(width, m.cache != nil)
+		m.buildCache(width)
 		debuglog.Perf("messages.buildCache N=%d width=%d took=%s reason=%s",
 			len(m.messages), width, time.Since(start), reason)
 	case len(m.staleEntries) > 0:
