@@ -386,6 +386,9 @@ var reduceThreads reducerFunc = func(a *App, msg tea.Msg) (tea.Cmd, bool) {
 		// channel feed, swapping the optimistic thread_broadcast
 		// placeholder added in SendThreadReplyMsg. Mirrors
 		// MessageSentMsg's swap-or-upsert contract.
+		if ok {
+			a.recovered(ins.typed)
+		}
 		a.replySinksFor(m.ChannelID, m.ThreadTS, m.Broadcast).settle(m.LocalTS, m.Message)
 		for _, mm := range a.modelsForChannel(m.ChannelID) {
 			mm.IncrementReplyCount(m.ThreadTS, m.Message.TS)

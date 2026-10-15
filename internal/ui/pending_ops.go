@@ -151,6 +151,8 @@ type messageEdits struct {
 
 // editSettled is what EndEdit decided.
 type editSettled struct {
+	// ended is the edit whose result this was.
+	ended pendingEdit
 	// show is what the message shows now; showKnown is false when
 	// nothing is known to show (see messageEdits.server).
 	show      messages.Body
@@ -356,6 +358,7 @@ func (p *pendingOps) EndEdit(id uint64, ok bool) (s editSettled, found bool) {
 			continue
 		}
 		e := m.inFlight
+		s.ended = e
 		switch {
 		case m.echoed:
 			// m.server is the echo, Slack's own form of e or newer.

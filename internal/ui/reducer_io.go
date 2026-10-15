@@ -380,11 +380,12 @@ func reducePaste(a *App, m tea.PasteMsg) tea.Cmd {
 
 // failureToast shows text, the failure of a send or an edit, adding
 // that the user's text is on the clipboard when giveTextBack put it
-// there. That toast stays up longer: it is the only place the user
-// learns where their text went.
+// there, with how many unsent texts the clipboard holds
+// (unsentTexts.note). That toast stays up longer: it is the only place
+// the user learns where their text went.
 func failureToast(a *App, text string, onClipboard bool) tea.Cmd {
 	if !onClipboard {
 		return toastWithClear(a, text, 3*time.Second)
 	}
-	return toastWithClear(a, text+". Your text is on the clipboard.", 6*time.Second)
+	return toastWithClear(a, text+". "+a.unsent.note(), 6*time.Second)
 }

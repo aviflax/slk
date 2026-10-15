@@ -115,6 +115,9 @@ var reduceSend reducerFunc = func(a *App, msg tea.Msg) (tea.Cmd, bool) {
 			}
 			return a.releaseHeld(release), true
 		}
+		if ok {
+			a.recovered(ins.typed)
+		}
 		// settle gives each channel window its own clone.
 		a.sinksFor(m.ChannelID).settle(m.LocalTS, m.Message)
 		return a.releaseHeld(release), true
@@ -574,6 +577,9 @@ func reduceMessageEdited(a *App, m MessageEditedMsg) tea.Cmd {
 	if s.showKnown {
 		a.showBody(m.ChannelID, m.TS, s.show)
 	}
+	if m.Err == nil {
+		a.recovered(s.ended.typed)
+	}
 	var cmds []tea.Cmd
 	if s.next != nil {
 		cmds = append(cmds, a.sendEdit(*s.next))
@@ -586,7 +592,11 @@ func reduceMessageEdited(a *App, m MessageEditedMsg) tea.Cmd {
 	case s.superseded:
 		cmds = append(cmds, editFailedToast(err, false))
 	case s.failed != nil && (s.gone || a.pendingOps.DeletePending(m.ChannelID, m.TS)):
-		cmds = append(cmds, a.clipboardWrite(s.failed.typed), editFailedToast(err, s.failed.typed != ""))
+		var copyText tea.Cmd
+		if s.failed.typed != "" {
+			copyText = a.keepUnsent(s.failed.typed)
+		}
+		cmds = append(cmds, copyText, editFailedToast(err, s.failed.typed != ""))
 	case s.failed != nil:
 		reopen, ok := a.reopenEdit(*s.failed)
 		var copyText tea.Cmd

@@ -134,17 +134,20 @@ func (a *App) offerTypedBack(o commandOrigin) bool {
 // giveTextBack returns the text of a send, reply or edit that failed to
 // the composer it was typed in (offerTypedBack), and reports
 // inComposer. When it cannot go there (that conversation has a newer
-// draft), it goes to the clipboard instead, so it is never lost:
-// copyCmd copies it and onClipboard is set for the failure toast.
-// Nothing typed (a result fired without a send) gives nothing back.
+// draft), it joins the session's unsent texts (keepUnsent), all of
+// which go to the clipboard, so it is never lost and never replaces an
+// earlier one: copyCmd copies them and onClipboard is set for the
+// failure toast. Nothing typed (a result fired without a send) gives
+// nothing back.
 func (a *App) giveTextBack(o commandOrigin) (copyCmd tea.Cmd, inComposer, onClipboard bool) {
 	if o.typed == "" {
 		return nil, false, false
 	}
 	if a.offerTypedBack(o) {
+		a.recovered(o.typed)
 		return nil, true, false
 	}
-	return a.clipboardWrite(o.typed), false, true
+	return a.keepUnsent(o.typed), false, true
 }
 
 // refuseCommand is a slash command that did not run: it gives the typed

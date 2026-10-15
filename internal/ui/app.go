@@ -357,6 +357,10 @@ type App struct {
 	// (read_floor.go).
 	readFloors readFloors
 
+	// unsent is the session's failed texts on the clipboard, not yet
+	// recovered (unsent.go).
+	unsent unsentTexts
+
 	// selfMarks and selfThreadMarks record the channel and thread marks
 	// slk issued itself so their Slack-broadcast echoes can be told
 	// apart from a mark made in another client. Two sets rather than

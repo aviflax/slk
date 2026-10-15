@@ -2,11 +2,14 @@ package ui
 
 import (
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
 
 	tea "charm.land/bubbletea/v2"
+
+	"github.com/gammons/slk/internal/ui/messages"
 )
 
 // clipboardLog records what the App copies, in place of the terminal.
@@ -106,5 +109,80 @@ func TestFailedBroadcastReplyRestoresToggle(t *testing.T) {
 	if a.threadCompose.Value() != "to everyone" || !a.threadCompose.Broadcast() {
 		t.Errorf("thread composer = %q broadcast=%v, want the text back with broadcast on",
 			a.threadCompose.Value(), a.threadCompose.Broadcast())
+	}
+}
+
+// failSends sends each text from the channel composer, then fails them
+// in order, and returns the toast the last failure shows.
+func failSends(t *testing.T, a *App, texts ...string) string {
+	t.Helper()
+	locals := make([]string, len(texts))
+	for i, text := range texts {
+		_, _, locals[i] = sendFromComposer(t, a, PanelMessages, text)
+	}
+	toast := ""
+	for _, local := range locals {
+		_, cmd := a.Update(MessageSendFailedMsg{ChannelID: "C1", LocalTS: local, Reason: "boom"})
+		toast = shownToast(t, a, cmd)
+	}
+	return toast
+}
+
+// Every failed text that could not go back to a composer stays on the
+// clipboard until it is recovered: a third failure adds to the second
+// rather than replacing it, and the toast counts them.
+func TestUnsentTextsAccumulateOnClipboard(t *testing.T) {
+	a := typedApp(t)
+	copied := clipboardLog(a)
+	toast := failSends(t, a, "one", "two", "three")
+	if got := a.compose.Value(); got != "one" {
+		t.Fatalf("composer = %q, want the first failure back in it", got)
+	}
+	if n := len(*copied); n == 0 || (*copied)[n-1] != "two\n\nthree" {
+		t.Fatalf("clipboard writes = %q, want both unsent texts, oldest first", *copied)
+	}
+	if !strings.Contains(toast, "Send failed: boom") || !strings.Contains(toast, "2 unsent messages are on the clipboard") {
+		t.Errorf("toast = %q, want the failure and the count", toast)
+	}
+}
+
+// A text sent again successfully, word for word, is recovered: it
+// leaves the clipboard list, and the next failure no longer copies it.
+func TestUnsentTextLeavesWhenSentAgain(t *testing.T) {
+	a := typedApp(t)
+	copied := clipboardLog(a)
+	failSends(t, a, "one", "two", "three")
+	a.compose.SetValue("")
+	_, _, local := sendFromComposer(t, a, PanelMessages, "two")
+	a.Update(MessageSentMsg{ChannelID: "C1", LocalTS: local, Message: messages.MessageItem{TS: "20.000000", UserID: "USELF", Text: "two"}})
+	_, _, local = sendFromComposer(t, a, PanelMessages, "four")
+	a.compose.SetValue("busy")
+	_, cmd := a.Update(MessageSendFailedMsg{ChannelID: "C1", LocalTS: local, Reason: "boom"})
+	toast := shownToast(t, a, cmd)
+	if n := len(*copied); (*copied)[n-1] != "three\n\nfour" {
+		t.Fatalf("clipboard = %q, want three and four only", (*copied)[n-1])
+	}
+	if !strings.Contains(toast, "2 unsent messages") {
+		t.Errorf("toast = %q, want the count of two", toast)
+	}
+}
+
+// The list is capped; the oldest go first, and the toast says some
+// were dropped.
+func TestUnsentTextsAreCapped(t *testing.T) {
+	a := typedApp(t)
+	copied := clipboardLog(a)
+	texts := make([]string, unsentLimit+3)
+	for i := range texts {
+		texts[i] = fmt.Sprintf("text %d", i)
+	}
+	// texts[0] goes back to the composer; the rest to the clipboard.
+	toast := failSends(t, a, texts...)
+	got := strings.Split((*copied)[len(*copied)-1], "\n\n")
+	if len(got) != unsentLimit || got[0] != texts[3] || got[len(got)-1] != texts[len(texts)-1] {
+		t.Fatalf("clipboard holds %d texts from %q to %q, want the newest %d", len(got), got[0], got[len(got)-1], unsentLimit)
+	}
+	if !strings.Contains(toast, fmt.Sprintf("%d unsent messages", unsentLimit)) || !strings.Contains(toast, "2 older") {
+		t.Errorf("toast = %q, want the count and that 2 older ones were dropped", toast)
 	}
 }

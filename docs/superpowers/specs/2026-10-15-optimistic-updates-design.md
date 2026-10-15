@@ -308,10 +308,16 @@ every send has ended.
 
 Giving text back (`giveTextBack`): the typed text goes back to the
 composer it came from (`offerTypedBack`; `OfferDraft` never overwrites a
-newer draft). When it cannot, it goes to the clipboard
-(`clipboardWrite`) and the failure toast adds "Your text is on the
-clipboard." (`OnClipboard` on `statusbar.SendFailedMsg` /
-`EditFailedMsg`). A failed broadcast reply given back to the thread
+newer draft). When it cannot, it joins the session's unsent texts
+(`keepUnsent`, `unsent.go`) and the clipboard gets all of them, oldest
+first, separated by a blank line, so a later failure never replaces an
+earlier one. The failure toast adds "Your text is on the clipboard.",
+or "N unsent messages are on the clipboard." (`OnClipboard` on
+`statusbar.SendFailedMsg` / `EditFailedMsg`, `unsentTexts.note`). A
+text leaves the list when it goes back to a composer or is sent or
+edited in again, word for word, successfully. The list keeps the 20
+newest (`unsentLimit`); once any were dropped, the toast says how
+many. A failed broadcast reply given back to the thread
 composer on screen turns its "also send to channel" toggle back on. A
 draft stored for a thread not on screen cannot keep it, because opening
 a thread clears the toggle.

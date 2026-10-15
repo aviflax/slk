@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"reflect"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 
@@ -189,7 +190,7 @@ func TestEditsAndDeletesEndOnSlacksState(t *testing.T) {
 				_, cmd := a.Update(res)
 				collect(ts, cmd)
 				if wantGiveBack {
-					got := a.compose.Value() == giveBack || a.threadCompose.Value() == giveBack || slices.Contains(*copied, giveBack)
+					got := a.compose.Value() == giveBack || a.threadCompose.Value() == giveBack || clipboardHas(*copied, giveBack)
 					if !got {
 						rt.Fatalf("%s: failed edit %q lost: composer %q, thread composer %q, clipboard %q",
 							ts, giveBack, a.compose.Value(), a.threadCompose.Value(), *copied)
@@ -371,4 +372,12 @@ func panesOf(a *App, ts string) []paneBody {
 func realSorted(rows []messages.MessageItem) bool {
 	real := slices.DeleteFunc(slices.Clone(rows), func(r messages.MessageItem) bool { return messages.IsLocalTS(r.TS) })
 	return slices.IsSortedFunc(real, func(x, y messages.MessageItem) int { return messages.CompareTS(x.TS, y.TS) })
+}
+
+// clipboardHas reports whether any clipboard write held text among the
+// unsent texts it joins.
+func clipboardHas(copied []string, text string) bool {
+	return slices.ContainsFunc(copied, func(c string) bool {
+		return slices.Contains(strings.Split(c, "\n\n"), text)
+	})
 }
