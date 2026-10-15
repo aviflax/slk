@@ -84,6 +84,7 @@ func convertAndCacheHistory(client *slackclient.Client, channelID string, histor
 			ThreadTS:    m.ThreadTimestamp,
 			ReplyCount:  m.ReplyCount,
 			Subtype:     m.SubType,
+			EditedAt:    editedAt(m.Edited),
 			RawJSON:     string(rawBytes),
 			CreatedAt:   time.Now().Unix(),
 		})
@@ -116,6 +117,7 @@ func convertAndCacheHistory(client *slackclient.Client, channelID string, histor
 			ThreadTS:          m.ThreadTimestamp,
 			ReplyCount:        m.ReplyCount,
 			LatestReply:       m.LatestReply,
+			IsEdited:          m.Edited != nil,
 			Subtype:           m.SubType,
 			Reactions:         reactions,
 			Attachments:       extractAttachments(m.Files),
@@ -375,6 +377,7 @@ func enrichCachedRow(
 	var blocks []blockkit.Block
 	var legacy []blockkit.LegacyAttachment
 	var latestReply string
+	isEdited := m.EditedAt != ""
 	if m.RawJSON != "" {
 		var raw slack.Message
 		var unmarshalT0 time.Time
@@ -394,6 +397,7 @@ func enrichCachedRow(
 			blocks = extractBlocks(raw.Blocks)
 			legacy = extractLegacyAttachments(raw.Attachments)
 			latestReply = raw.LatestReply
+			isEdited = isEdited || raw.Edited != nil
 		}
 	}
 
@@ -406,6 +410,7 @@ func enrichCachedRow(
 		ThreadTS:          m.ThreadTS,
 		ReplyCount:        m.ReplyCount,
 		LatestReply:       latestReply,
+		IsEdited:          isEdited,
 		Subtype:           m.Subtype,
 		Reactions:         reactions,
 		Attachments:       attachments,
@@ -494,6 +499,7 @@ func fetchChannelMessages(client *slackclient.Client, channelID string, db *cach
 			ThreadTS:    m.ThreadTimestamp,
 			ReplyCount:  m.ReplyCount,
 			Subtype:     m.SubType,
+			EditedAt:    editedAt(m.Edited),
 			RawJSON:     string(rawBytes),
 			CreatedAt:   time.Now().Unix(),
 		})
@@ -526,6 +532,7 @@ func fetchChannelMessages(client *slackclient.Client, channelID string, db *cach
 			ThreadTS:          m.ThreadTimestamp,
 			ReplyCount:        m.ReplyCount,
 			LatestReply:       m.LatestReply,
+			IsEdited:          m.Edited != nil,
 			Subtype:           m.SubType,
 			Reactions:         reactions,
 			Attachments:       extractAttachments(m.Files),
@@ -594,6 +601,7 @@ func fetchThreadReplies(client *slackclient.Client, channelID, threadTS string, 
 			ThreadTS:    m.ThreadTimestamp,
 			ReplyCount:  m.ReplyCount,
 			Subtype:     m.SubType,
+			EditedAt:    editedAt(m.Edited),
 			RawJSON:     string(rawBytes),
 			CreatedAt:   time.Now().Unix(),
 		})
@@ -626,6 +634,7 @@ func fetchThreadReplies(client *slackclient.Client, channelID, threadTS string, 
 			ThreadTS:          m.ThreadTimestamp,
 			ReplyCount:        m.ReplyCount,
 			LatestReply:       m.LatestReply,
+			IsEdited:          m.Edited != nil,
 			Subtype:           m.SubType,
 			Reactions:         reactions,
 			Attachments:       extractAttachments(m.Files),
@@ -646,6 +655,15 @@ func fetchThreadReplies(client *slackclient.Client, channelID, threadTS string, 
 	debuglog.Cache("fetchThreadReplies: channel=%s thread_ts=%s result %s dur_ms=%d (authoritative replace)",
 		channelID, threadTS, summarizeMessages(out), time.Since(start).Milliseconds())
 	return out
+}
+
+// editedAt is the ts of Slack's edited mark on a message, "" when the
+// message was never edited. The cache keeps it in edited_at.
+func editedAt(e *slack.Edited) string {
+	if e == nil {
+		return ""
+	}
+	return e.Timestamp
 }
 
 func formatTimestamp(ts, format string) string {

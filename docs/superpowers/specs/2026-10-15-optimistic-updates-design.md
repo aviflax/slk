@@ -635,6 +635,11 @@ are out of scope.
    is scrolled back into view. `HoldBottom`, the panes' `ResetSnap`
    calls after inserts, settles and restores, and the thread pane's
    `AnchorRefsOnly` (#254) are gone.
+   "(edited)" survives a reload: every path that turns a Slack
+   message into a `MessageItem` (the history, older-history, around
+   and thread fetches, the export, and the cache rows both the fetches
+   and the WebSocket write, which now keep `edited_at`) sets `IsEdited`
+   from Slack's `edited` field.
 
 ## Out of scope
 

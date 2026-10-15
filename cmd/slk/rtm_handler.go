@@ -148,6 +148,7 @@ func (h *rtmEventHandler) OnMessage(channelID, userID, ts, text, threadTS, subty
 			Text:            text,
 			ThreadTimestamp: threadTS,
 			SubType:         subtype,
+			Edited:          edited,
 			Files:           files,
 			Blocks:          blocks,
 			Attachments:     attachments,
@@ -161,6 +162,7 @@ func (h *rtmEventHandler) OnMessage(channelID, userID, ts, text, threadTS, subty
 			Text:        text,
 			ThreadTS:    threadTS,
 			Subtype:     subtype,
+			EditedAt:    editedAt(edited),
 			RawJSON:     string(rawBytes),
 			CreatedAt:   time.Now().Unix(),
 		})

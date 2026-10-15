@@ -201,6 +201,7 @@ func exportMessageItem(m slack.Message, names *userNameStore, db *cache.DB) mess
 		Text:              m.Text,
 		ThreadTS:          m.ThreadTimestamp,
 		ReplyCount:        m.ReplyCount,
+		IsEdited:          m.Edited != nil,
 		Subtype:           m.SubType,
 		Reactions:         reactions,
 		Attachments:       extractAttachments(m.Files),
