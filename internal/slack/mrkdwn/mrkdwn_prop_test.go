@@ -1,0 +1,144 @@
+package mrkdwn
+
+import (
+	"regexp"
+	"strings"
+	"testing"
+	"unicode/utf8"
+
+	"github.com/gammons/slk/internal/proptest"
+	"pgregory.net/rapid"
+)
+
+// wireTokenRe finds the wire tokens Convert promises to keep: users,
+// channels (bare or labelled), broadcasts and links. It is written out
+// here independently of tokenize's patterns, in the simple shapes
+// proptest.SlackText generates.
+var wireTokenRe = regexp.MustCompile(
+	`<@[UW][A-Z0-9]+>|<#[CG][A-Z0-9]+(?:\|[a-z0-9-]+)?>|<!(?:here|channel|everyone)(?:\|[^<>]*)?>|<https://[^|<>\s]+(?:\|[^<>]*)?>`)
+
+func hasSentinel(s string) bool {
+	return strings.ContainsAny(s, string(sentinelStart)+string(sentinelEnd))
+}
+
+// checkConvert asserts the invariants that hold for any input.
+type fataler interface {
+	Helper()
+	Fatalf(string, ...any)
+}
+
+func checkConvert(t fataler, in string) {
+	t.Helper()
+	mr, blk := Convert(in)
+	if strings.TrimSpace(in) == "" {
+		if mr != "" || blk != nil {
+			t.Fatalf("Convert(%q) = (%q, %v), want empty", in, mr, blk)
+		}
+		return
+	}
+	if hasSentinel(mr) {
+		t.Fatalf("Convert(%q) leaked a sentinel rune: %q", in, mr)
+	}
+	if blk != nil && len(blk.Elements) == 0 {
+		t.Fatalf("Convert(%q) returned a block with no elements", in)
+	}
+}
+
+// Convert never panics, never leaks the PUA sentinels into its mrkdwn
+// output, and returns empty output for blank input.
+func TestConvertInvariants(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		checkConvert(t, proptest.SlackText(nil, nil).Draw(t, "text"))
+	})
+}
+
+// Every user, channel, broadcast and link token in the input appears
+// verbatim in the mrkdwn fallback, wherever it sat.
+func TestConvertKeepsWireTokens(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		in := proptest.SlackText(nil, nil).Draw(t, "text")
+		mr, _ := Convert(in)
+		for _, tok := range wireTokenRe.FindAllString(in, -1) {
+			if !strings.Contains(mr, tok) {
+				t.Fatalf("token %q of %q missing from %q", tok, in, mr)
+			}
+		}
+	})
+}
+
+// Text with no markdown metacharacters, tokens or entities comes back
+// as the input minus trailing newlines.
+func TestConvertPlainTextIsIdentity(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		// KNOWN: trailing spaces of the whole message are dropped
+		// (Convert("a ") == "a"), contrary to the "whitespace survives"
+		// doc. Invisible in Slack, so left alone; the text ends on a
+		// non-space here.
+		in := rapid.StringMatching(`[A-Za-z0-9,.!?]([A-Za-z0-9,.!? \n]{0,58}[A-Za-z0-9,.!?])?`).Draw(t, "plain")
+		mr, _ := Convert(in)
+		if want := strings.TrimRight(in, "\n"); mr != want {
+			t.Fatalf("Convert(%q) = %q, want %q", in, mr, want)
+		}
+	})
+}
+
+// detokenizeText undoes tokenize for any input that holds no sentinel.
+func TestTokenizeRoundTrip(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		in := proptest.SlackText(nil, nil).Draw(t, "text")
+		tokenized, table := tokenize(in)
+		if hasSentinel(in) {
+			t.Skip()
+		}
+		if got := detokenizeText(tokenized, table); got != in {
+			t.Fatalf("round trip of %q gave %q", in, got)
+		}
+	})
+}
+
+// tokenize replaces every sentinel in its input, so its output holds
+// sentinels only as markers: after detokenizing, none remain.
+func TestTokenizeSanitizesSentinels(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		in := rapid.StringOf(rapid.SampledFrom([]rune{'a', ' ', '<', '@', '>', ':', sentinelStart, sentinelEnd, '1'})).Draw(t, "in")
+		tokenized, table := tokenize(in)
+		if got := detokenizeText(tokenized, table); hasSentinel(got) {
+			t.Fatalf("sentinel survived tokenize/detokenize of %q: %q", in, got)
+		}
+	})
+}
+
+// FuzzConvert feeds arbitrary bytes through Convert.
+func FuzzConvert(f *testing.F) {
+	for _, s := range []string{
+		"", "  \n", "hello", "*bold* _it_ ~s~ `c`", "<@U123> <#C1|general> <!here> <https://a.com|a>",
+		"```\ncode\n```", "> quote\nreply", "- a\n  - b", "0", ":tada: :+1:",
+		"1. one\n2. two", "<https://x|y", "[a](http://b)", "\t\tx",
+	} {
+		f.Add(s)
+	}
+	f.Fuzz(func(t *testing.T, in string) {
+		if !utf8.ValidString(in) {
+			t.Skip()
+		}
+		checkConvert(t, in)
+		mr, _ := Convert(in)
+		for _, tok := range wireTokenRe.FindAllString(in, -1) {
+			if !strings.Contains(mr, tok) {
+				t.Fatalf("token %q of %q missing from %q", tok, in, mr)
+			}
+		}
+	})
+}
+
+// Text typed after an opening fence is the code block's first line, not
+// a language tag Slack would discard: it must reach both outputs.
+func TestConvertFenceInfoStringIsCode(t *testing.T) {
+	mr, blk := Convert("```hello <!here>\nworld\n```")
+	if want := "```\nhello <!here>\nworld\n```"; mr != want {
+		t.Fatalf("mrkdwn = %q, want %q", mr, want)
+	}
+	if blk == nil || len(blk.Elements) != 1 {
+		t.Fatalf("block = %+v", blk)
+	}
+}

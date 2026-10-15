@@ -478,6 +478,17 @@ func (w *walker) walkCodeBlock(n ast.Node) {
 		b.Write(w.source[seg.Start:seg.Stop])
 	}
 	body := strings.TrimSuffix(b.String(), "\n")
+	// Slack has no info strings: text typed after the opening fence
+	// ("```hello\nworld```") is the code block's first line, and
+	// CommonMark would otherwise drop it as the language.
+	if fc, ok := n.(*ast.FencedCodeBlock); ok && fc.Info != nil {
+		info := string(w.source[fc.Info.Segment.Start:fc.Info.Segment.Stop])
+		if body == "" {
+			body = info
+		} else {
+			body = info + "\n" + body
+		}
+	}
 
 	w.mrkdwn.WriteString("```\n")
 	w.mrkdwn.WriteString(body)
