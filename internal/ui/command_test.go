@@ -28,6 +28,24 @@ func TestExecuteCommand_UnknownShowsToast(t *testing.T) {
 	}
 }
 
+func TestExecuteCommand_HelpOpensHelpOverlay(t *testing.T) {
+	a := NewApp()
+	_ = executeCommand(a, "help")
+	if a.mode != ModeHelp || !a.help.IsVisible() {
+		t.Fatalf("mode = %v, visible = %v; want ModeHelp and a visible overlay", a.mode, a.help.IsVisible())
+	}
+}
+
+func TestExecuteCommand_QuitAliasesOpenQuitConfirm(t *testing.T) {
+	for _, name := range []string{"quit", "qa"} {
+		a := NewApp()
+		_ = executeCommand(a, name)
+		if !a.confirmPrompt.IsVisible() {
+			t.Fatalf(":%s did not raise the quit confirmation", name)
+		}
+	}
+}
+
 func TestExecuteCommand_WSOpensWorkspaceFinder(t *testing.T) {
 	a := NewApp()
 	_ = executeCommand(a, "ws")

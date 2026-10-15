@@ -266,9 +266,7 @@ func handleNormalMode(a *App, msg tea.KeyMsg) tea.Cmd {
 		return a.scrollFocusedPanel(a.halfPageSize())
 
 	case key.Matches(msg, a.keys.Help):
-		a.help.SetEntries(help.FromKeyMap(a.keys))
-		a.help.Open()
-		a.SetMode(ModeHelp)
+		a.openHelp()
 
 	case key.Matches(msg, a.keys.ThemeSwitcher):
 		// Per-workspace scope. Header text shows the current
@@ -433,4 +431,11 @@ func (a *App) jumpToUnread(dir int) tea.Cmd {
 	return func() tea.Msg {
 		return ChannelSelectedMsg{ID: id, Name: name, Type: chType}
 	}
+}
+
+// openHelp opens the keybinding help overlay (the `?` key and :help).
+func (a *App) openHelp() {
+	a.help.SetEntries(help.FromKeyMap(a.keys))
+	a.help.Open()
+	a.SetMode(ModeHelp)
 }

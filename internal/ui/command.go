@@ -46,6 +46,22 @@ var commands = map[string]commandFunc{
 	"only":     cmdOnlyWindow,
 	"on":       cmdOnlyWindow,
 	"activity": cmdActivity,
+	"help":     cmdHelp,
+	"quit":     cmdQuit,
+	"qa":       cmdQuit,
+}
+
+// cmdHelp opens the keybinding help overlay, the same one `?` opens.
+func cmdHelp(a *App, _ commandArgs) tea.Cmd {
+	a.openHelp()
+	return nil
+}
+
+// cmdQuit raises the quit confirmation, the same prompt `Q` opens.
+// :q stays "close window" and never quits (window-management design §Errors).
+func cmdQuit(a *App, _ commandArgs) tea.Cmd {
+	a.openQuitConfirm()
+	return nil
 }
 
 // cmdActivity opens the Activity view (mentions, thread replies,
