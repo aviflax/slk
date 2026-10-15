@@ -639,6 +639,9 @@ func (m *Model) RemoveLocalSent(localTS string) bool {
 			m.dropCache()
 			m.dirty()
 			m.list.ResetSnap()
+			if i < m.selected {
+				m.selected--
+			}
 			if m.selected >= len(m.messages) && len(m.messages) > 0 {
 				m.selected = len(m.messages) - 1
 			}

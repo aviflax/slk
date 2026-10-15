@@ -200,6 +200,24 @@ func TestModelListOperations(t *testing.T) {
 					t.Fatalf("swap moved selection %d -> %d", before, got)
 				}
 			},
+			"RemovePlaceholder": func(t *rapid.T) {
+				var locals []string
+				for _, ts := range s.ts {
+					if strings.HasPrefix(ts, "local:") {
+						locals = append(locals, ts)
+					}
+				}
+				if len(locals) == 0 {
+					return
+				}
+				local := rapid.SampledFrom(locals).Draw(t, "local")
+				if !s.m.RemoveLocalSent(local) {
+					t.Fatalf("RemoveLocalSent(%s) found nothing", local)
+				}
+				if s.remove(s.index(local)) {
+					s.selected = ""
+				}
+			},
 			"UpsertExisting": func(t *rapid.T) {
 				if ts, ok := s.existing(t); ok {
 					s.m.UpsertSelfSent(MessageItem{TS: ts, Text: "ours"})
