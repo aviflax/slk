@@ -278,7 +278,7 @@ func (m Model) renderBox(termWidth int) string {
 
 	return chrome.Frame{
 		Title: titleText,
-		Input: chrome.FilterInput(s, m.query, "Type to filter…"),
+		Input: chrome.FilterInput(s, m.query, "Type to filter..."),
 		Body:  list.Rows(s, m.selected, rows),
 		Empty: "No matching options",
 	}.Render(s, overlayWidth)
