@@ -1,10 +1,16 @@
 package messages
 
+import "slices"
+
 // ApplyReaction applies one reaction event to msg, idempotently: the
 // optimistic local update and the WebSocket echo of the same event must
 // not double-count. A removal by a user not among the listed reactors is
 // ignored, unless Slack truncated the list (Count > len(UserIDs)), in
 // which case it is real. HasReacted tracks currentUserID only.
+//
+// msg.Reactions is replaced, never written in place: the thread pane's
+// parent is a shallow copy of the channel pane's row, so the two share
+// a backing array, and both apply every event.
 func ApplyReaction(msg *MessageItem, emojiName, userID, currentUserID string, remove bool) {
 	if remove {
 		for j, r := range msg.Reactions {
@@ -21,8 +27,9 @@ func ApplyReaction(msg *MessageItem, emojiName, userID, currentUserID string, re
 				r.HasReacted = false
 			}
 			if r.Count <= 0 {
-				msg.Reactions = append(msg.Reactions[:j], msg.Reactions[j+1:]...)
+				msg.Reactions = slices.Delete(slices.Clone(msg.Reactions), j, j+1)
 			} else {
+				msg.Reactions = slices.Clone(msg.Reactions)
 				msg.Reactions[j] = r
 			}
 			return
@@ -41,10 +48,11 @@ func ApplyReaction(msg *MessageItem, emojiName, userID, currentUserID string, re
 		if userID == currentUserID {
 			r.HasReacted = true
 		}
+		msg.Reactions = slices.Clone(msg.Reactions)
 		msg.Reactions[j] = r
 		return
 	}
-	msg.Reactions = append(msg.Reactions, ReactionItem{
+	msg.Reactions = append(slices.Clip(msg.Reactions), ReactionItem{
 		Emoji:      emojiName,
 		Count:      1,
 		HasReacted: userID == currentUserID,
