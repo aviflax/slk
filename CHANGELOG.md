@@ -40,6 +40,10 @@ Earlier history, up to v0.26.2, is in [upstream's releases](https://github.com/g
   when the message is sent.
 - A block quote that wraps onto more than one line keeps its bar and muted
   colour on every line, not just the first.
+- Bold, italics, links and mentions inside a block quote are formatted
+  instead of showing their raw markup.
+- A line typed right after a list, without indenting it, is sent as its own
+  line instead of being joined onto the last list item.
 - Loading older history into an empty channel could crash slk.
 - Older history could show a message twice after one of your own messages was
   sent.
