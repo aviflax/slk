@@ -313,7 +313,9 @@ func (m *Model) SetHeight(h, sel int) {
 // it because the content changed, not to show it. The cursor moving to
 // another entry otherwise scrolls to it in Layout, as
 // does a change at the same width that pushes a cursor that was wholly
-// in the window out of the last frame's extent (a resize does not).
+// in the window out of the last frame's extent (a resize does not). That
+// holds for a window at the end too, unless the cursor is on the last
+// selectable entry: keeping the cursor in view wins over keeping the end.
 func (m *Model) SetEntries(es []Entry, width int) {
 	a := m.captureAnchor()
 	a.rewrapped = width != m.width
@@ -332,7 +334,10 @@ func (m *Model) SetEntries(es []Entry, width int) {
 // anchor is where the window was before the entries changed.
 type anchor struct {
 	ok, bottom bool
-	rewrapped  bool     // the width changed: the cursor need not stay on screen
+	rewrapped  bool // the width changed: the cursor need not stay on screen
+	// cursorLast says the cursor's entry was the last selectable one, so
+	// a window at the end keeps the end rather than the cursor.
+	cursorLast bool
 	ids        []string // the entries with an ID on screen, top first
 	rows       []int    // the window row each started on (<0: above the top)
 }
@@ -348,7 +353,7 @@ func (m *Model) captureAnchor() anchor {
 	a := anchor{ok: true}
 	shrunk := m.laidHeight > 0 && m.height < m.laidHeight
 	if m.yOffset+h >= m.total && (m.pinBottom || !shrunk) {
-		a.bottom = true
+		a.bottom, a.cursorLast = true, m.cursorIsLast()
 		return a
 	}
 	for i := range m.entries {
@@ -367,11 +372,34 @@ func (m *Model) captureAnchor() anchor {
 	return a
 }
 
+// cursorIsLast reports whether the cursor's entry, as the last frame
+// placed it, is the last selectable entry.
+func (m *Model) cursorIsLast() bool {
+	if m.selEnd <= m.selStart {
+		return false
+	}
+	found := false
+	for i := range m.entries {
+		if !m.entries[i].Selectable {
+			continue
+		}
+		if found {
+			return false
+		}
+		found = m.offsets[i] == m.selStart
+	}
+	return found
+}
+
 func (m *Model) restoreAnchor(a anchor) {
 	switch {
 	case !a.ok:
 	case a.bottom:
 		m.yOffset = m.maxOffset()
+		// A change that pushes a cursor wholly on screen out of the
+		// window scrolls back to it in Layout, as below, unless the
+		// cursor is on the last entry: then the end stays in view.
+		m.keepCursor = m.cursorShown && !a.rewrapped && !a.cursorLast
 		return
 	default:
 		for k, id := range a.ids {

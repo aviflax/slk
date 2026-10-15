@@ -701,7 +701,9 @@ are out of scope.
    A cursor snapped into view from below ends above the channel pane's
    "-- more below --" hint rather than under it
    (`entrylist.WithBottomOverlay`, which also counts a cursor on that
-   row as off screen).
+   row as off screen). A window at the end also scrolls back to a
+   cursor wholly on screen that a change pushes out, unless the cursor
+   is on the last entry, when the end stays in view.
 
 ## Out of scope
 

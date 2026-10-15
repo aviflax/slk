@@ -124,3 +124,48 @@ func TestThreadRowsAboveTheWindowDoNotMoveIt(t *testing.T) {
 		}
 	}
 }
+
+func selectedText(m *Model) string {
+	msg, ok := m.SelectedMessage()
+	if !ok {
+		return ""
+	}
+	return msg.Text
+}
+
+// A thread at the bottom whose cursor the user moved up keeps that
+// reply on screen when the last reply grows enough to push it out: the
+// window scrolls back to the cursor rather than keeping the bottom.
+func TestThreadBottomKeepsAMovedCursorOnScreen(t *testing.T) {
+	m := anchorThread(t)
+	for range 3 {
+		m.MoveUp()
+		_ = m.View(anchorH, anchorW)
+	}
+	if got := selectedText(m); got != "r17" {
+		t.Fatalf("setup: selected %q, want r17", got)
+	}
+	m.Patch("20.000000", messages.Body{Text: "g1\ng2\ng3\ng4\ng5\ng6\ng7\ng8"}.Apply)
+	f := threadFrame(m)
+	if got := selectedText(m); got != "r17" || !frameHas(f, "r17") {
+		t.Errorf("selected %q, want r17 selected and on screen after r20 grew:\n%s", got, strings.Join(f, "\n"))
+	}
+}
+
+// A thread scrolled up with the cursor on screen scrolls back to it
+// when a reply above it, on screen, grows and pushes it out.
+func TestThreadScrolledUpKeepsTheCursorOnScreen(t *testing.T) {
+	m := anchorThread(t)
+	m.ScrollUp(30)
+	_ = m.View(anchorH, anchorW)
+	m.SelectByIndex(9) // r10
+	before := threadFrame(m)
+	if !frameHas(before, "r10") || !frameHas(before, "r8") {
+		t.Fatalf("setup: want r8 and r10 on screen:\n%s", strings.Join(before, "\n"))
+	}
+	m.Patch("8.000000", messages.Body{Text: "g1\ng2\ng3\ng4\ng5\ng6\ng7\ng8\ng9\ng10\ng11\ng12\ng13\ng14\ng15\ng16"}.Apply)
+	f := threadFrame(m)
+	if got := selectedText(m); got != "r10" || !frameHas(f, "r10") {
+		t.Errorf("selected %q, want r10 selected and on screen after r8 grew:\n%s", got, strings.Join(f, "\n"))
+	}
+}

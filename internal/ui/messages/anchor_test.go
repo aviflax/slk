@@ -141,3 +141,57 @@ func selectedText(m *Model) string {
 	}
 	return msg.Text
 }
+
+// A pane at the bottom whose cursor the user moved up, onto a message
+// wholly on screen, keeps that message selected and on screen when the
+// last message grows enough to push it out of the window: the cursor
+// stays visible rather than the bottom pinned, so the next e or d acts
+// on the message the user chose.
+func TestBottomKeepsAMovedCursorOnScreen(t *testing.T) {
+	m := anchorPane(t)
+	for range 3 {
+		m.MoveUp()
+		_ = m.View(anchorH, anchorW)
+	}
+	if got := selectedText(m); got != "m17" {
+		t.Fatalf("setup: selected %q, want m17", got)
+	}
+	m.Patch("20.000000", Body{Text: "g1\ng2\ng3\ng4\ng5\ng6\ng7\ng8"}.Apply)
+	f := paneFrame(m)
+	if got := selectedText(m); got != "m17" || !frameHas(f, "m17") {
+		t.Errorf("selected %q, want m17 selected and on screen after m20 grew:\n%s", got, strings.Join(f, "\n"))
+	}
+}
+
+// A pane at the bottom with the cursor on the last message keeps the
+// end in view when that message grows: its newest line shows.
+func TestBottomWithCursorOnLastKeepsTheEnd(t *testing.T) {
+	m := anchorPane(t)
+	text := "g1"
+	for i := 2; i <= 20; i++ {
+		text += fmt.Sprintf("\ng%d", i)
+	}
+	m.Patch("20.000000", Body{Text: text + "\nlast-line"}.Apply)
+	f := paneFrame(m)
+	if !strings.Contains(f[len(f)-1], "last-line") {
+		t.Errorf("the last row is %q, want the last message's last line:\n%s", f[len(f)-1], strings.Join(f, "\n"))
+	}
+}
+
+// A pane scrolled up with the cursor on screen scrolls back to it when
+// a message above it, on screen, grows and pushes it out of the window.
+func TestScrolledUpKeepsTheCursorOnScreen(t *testing.T) {
+	m := anchorPane(t)
+	m.ScrollUp(24)
+	_ = m.View(anchorH, anchorW)
+	m.SelectByTS("10.000000")
+	before := paneFrame(m)
+	if !frameHas(before, "m10") || !frameHas(before, "m8") {
+		t.Fatalf("setup: want m8 and m10 on screen:\n%s", strings.Join(before, "\n"))
+	}
+	m.Patch("8.000000", Body{Text: "g1\ng2\ng3\ng4\ng5\ng6\ng7\ng8\ng9\ng10\ng11\ng12\ng13\ng14"}.Apply)
+	f := paneFrame(m)
+	if got := selectedText(m); got != "m10" || !frameHas(f, "m10") {
+		t.Errorf("selected %q, want m10 selected and on screen after m8 grew:\n%s", got, strings.Join(f, "\n"))
+	}
+}
