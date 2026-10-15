@@ -575,15 +575,11 @@ func (m *Model) AppendMessage(msg MessageItem) {
 	// before the HTTP response returns -- so a TS-keyed dedup map at the
 	// caller can race. Dedup here, at the model boundary, defends
 	// against duplicates regardless of arrival order.
-	if msg.TS != "" {
-		// Scan from the back: dupes, when they happen, are recent.
-		for i := len(m.messages) - 1; i >= 0; i-- {
-			if m.messages[i].TS == msg.TS {
-				return
-			}
-		}
+	rows, ch := AppendIfAbsent(m.messages, msg)
+	if ch.Op == RowNone {
+		return
 	}
-	m.messages = append(m.messages, msg)
+	m.messages = rows
 	m.dropCache()
 	m.dirty()
 
@@ -610,19 +606,21 @@ func (m *Model) SwapLocalSent(localTS string, msg MessageItem) bool {
 	if localTS == "" {
 		return false
 	}
-	for i := len(m.messages) - 1; i >= 0; i-- {
-		if m.messages[i].TS == localTS {
-			m.messages[i] = msg
-			m.dropCache()
-			m.dirty()
-			// Same rationale as UpsertSelfSent's replace branch: the
-			// authoritative entry may differ in height (e.g. server-
-			// rendered blocks) and the snap anchor needs to refresh.
-			m.list.ResetSnap()
-			return true
-		}
+	// A plain replace: a row already carrying msg.TS (an echo that got
+	// in first) is left beside it. Settle would drop the placeholder
+	// instead; that fix lands on its own.
+	rows, ch := ReplaceTS(m.messages, localTS, msg)
+	if ch.Op == RowNone {
+		return false
 	}
-	return false
+	m.messages = rows
+	m.dropCache()
+	m.dirty()
+	// Same rationale as UpsertSelfSent's replace branch: the
+	// authoritative entry may differ in height (e.g. server-
+	// rendered blocks) and the snap anchor needs to refresh.
+	m.list.ResetSnap()
+	return true
 }
 
 // RemoveLocalSent removes an optimistic placeholder identified by
@@ -633,22 +631,25 @@ func (m *Model) RemoveLocalSent(localTS string) bool {
 	if localTS == "" {
 		return false
 	}
-	for i := len(m.messages) - 1; i >= 0; i-- {
-		if m.messages[i].TS == localTS {
-			m.messages = append(m.messages[:i], m.messages[i+1:]...)
-			m.dropCache()
-			m.dirty()
-			m.list.ResetSnap()
-			if i < m.selected {
-				m.selected--
-			}
-			if m.selected >= len(m.messages) && len(m.messages) > 0 {
-				m.selected = len(m.messages) - 1
-			}
-			return true
-		}
+	rows, ch := RemoveTS(m.messages, localTS)
+	if ch.Op == RowNone {
+		return false
 	}
-	return false
+	m.messages = rows
+	m.dropCache()
+	m.dirty()
+	m.list.ResetSnap()
+	// The selection fix-up differs from RemoveMessageByTS's, which
+	// also steps back when the removed row was the selected one
+	// (i <= selected) and resets to 0 when the list empties. Both
+	// are kept as they are until the two are reconciled.
+	if i := ch.Index; i < m.selected {
+		m.selected--
+	}
+	if m.selected >= len(m.messages) && len(m.messages) > 0 {
+		m.selected = len(m.messages) - 1
+	}
+	return true
 }
 
 // UpsertSelfSent is the optimistic-add variant of AppendMessage for
@@ -671,23 +672,17 @@ func (m *Model) RemoveLocalSent(localTS string) bool {
 // lines, the previously-selected last index now extends below the
 // fold and would otherwise stay clipped.
 func (m *Model) UpsertSelfSent(msg MessageItem) {
-	if msg.TS != "" {
-		for i := len(m.messages) - 1; i >= 0; i-- {
-			if m.messages[i].TS == msg.TS {
-				m.messages[i] = msg
-				m.dropCache()
-				m.dirty()
-				// Force the next View() to re-snap yOffset to the
-				// updated selected entry's range, even when m.selected
-				// hasn't changed.
-				m.list.ResetSnap()
-				return
-			}
-		}
-	}
-	m.messages = append(m.messages, msg)
+	rows, ch := Upsert(m.messages, msg)
+	m.messages = rows
 	m.dropCache()
 	m.dirty()
+	if ch.Op == RowReplaced {
+		// Force the next View() to re-snap yOffset to the
+		// updated selected entry's range, even when m.selected
+		// hasn't changed.
+		m.list.ResetSnap()
+		return
+	}
 	m.selected = len(m.messages) - 1
 }
 
@@ -1005,20 +1000,19 @@ func (m *Model) IncrementReplyCount(parentTS, replyTS string) {
 		wasAnchoredAtBottom = m.list.YOffset()+m.list.Height() >= m.list.Total()
 	}
 
-	for i, msg := range m.messages {
-		if msg.TS == parentTS {
-			m.messages[i].ReplyCount++
-			m.dropCache()
-			m.dirty()
-			if wasAnchoredAtBottom && m.cacheWidth > 0 {
-				m.buildCache(m.cacheWidth, false)
-				if delta := m.list.Total() - oldTotalLines; delta > 0 {
-					y := min(m.list.YOffset()+delta, m.list.Total()-m.list.Height())
-					m.list.SetYOffset(max(y, 0))
-					m.list.MarkSnapped(m.selected)
-				}
-			}
-			return
+	i := FirstIndexOfTS(m.messages, parentTS)
+	if i < 0 {
+		return
+	}
+	m.messages[i].ReplyCount++
+	m.dropCache()
+	m.dirty()
+	if wasAnchoredAtBottom && m.cacheWidth > 0 {
+		m.buildCache(m.cacheWidth, false)
+		if delta := m.list.Total() - oldTotalLines; delta > 0 {
+			y := min(m.list.YOffset()+delta, m.list.Total()-m.list.Height())
+			m.list.SetYOffset(max(y, 0))
+			m.list.MarkSnapped(m.selected)
 		}
 	}
 }
@@ -1027,41 +1021,43 @@ func (m *Model) IncrementReplyCount(parentTS, replyTS string) {
 // marks it as edited. Returns true if the message was found.
 // Invalidates the render cache.
 func (m *Model) UpdateMessageInPlace(ts, newText string) bool {
-	for i, msg := range m.messages {
-		if msg.TS == ts {
-			m.messages[i].Text = newText
-			m.messages[i].IsEdited = true
-			m.dropCache()
-			m.dirty()
-			return true
-		}
+	i := FirstIndexOfTS(m.messages, ts)
+	if i < 0 {
+		return false
 	}
-	return false
+	m.messages[i].Text = newText
+	m.messages[i].IsEdited = true
+	m.dropCache()
+	m.dirty()
+	return true
 }
 
 // RemoveMessageByTS removes a message with the given TS, adjusting the
 // selected index so it remains valid. Returns true if the message was
 // found and removed. Invalidates the render cache.
+//
+// Unlike RemoveLocalSent it scans from the front, steps the selection
+// back when the removed row was the selected one, and does not reset
+// the snap anchor. Kept as is until the two are reconciled.
 func (m *Model) RemoveMessageByTS(ts string) bool {
-	for i, msg := range m.messages {
-		if msg.TS == ts {
-			m.messages = append(m.messages[:i], m.messages[i+1:]...)
-			if i <= m.selected && m.selected > 0 {
-				m.selected--
-			}
-			if m.selected >= len(m.messages) {
-				if len(m.messages) == 0 {
-					m.selected = 0
-				} else {
-					m.selected = len(m.messages) - 1
-				}
-			}
-			m.dropCache()
-			m.dirty()
-			return true
+	rows, ch := RemoveAt(m.messages, FirstIndexOfTS(m.messages, ts))
+	if ch.Op == RowNone {
+		return false
+	}
+	m.messages = rows
+	if i := ch.Index; i <= m.selected && m.selected > 0 {
+		m.selected--
+	}
+	if m.selected >= len(m.messages) {
+		if len(m.messages) == 0 {
+			m.selected = 0
+		} else {
+			m.selected = len(m.messages) - 1
 		}
 	}
-	return false
+	m.dropCache()
+	m.dirty()
+	return true
 }
 
 func (m *Model) UpdateReaction(messageTS, emojiName, userID string, remove bool) {
@@ -1078,28 +1074,27 @@ func (m *Model) UpdateReaction(messageTS, emojiName, userID string, remove bool)
 		wasAnchoredAtBottom = m.list.YOffset()+m.list.Height() >= m.list.Total()
 	}
 
-	for i, msg := range m.messages {
-		if msg.TS == messageTS {
-			ApplyReaction(&m.messages[i], emojiName, userID, m.currentUserID, remove)
-			m.dropCache()
-			m.dirty()
-			if m.nav.Active {
-				m.ClampReactionNav()
-			}
-			// Re-anchor the viewport bottom if it was at the bottom before.
-			// We need the new list total, which only buildCache computes;
-			// rebuild now (cheap, and the next View() would do it anyway).
-			if wasAnchoredAtBottom && m.cacheWidth > 0 {
-				m.buildCache(m.cacheWidth, false)
-				if delta := m.list.Total() - oldTotalLines; delta > 0 {
-					y := min(m.list.YOffset()+delta, m.list.Total()-m.list.Height())
-					m.list.SetYOffset(max(y, 0))
-					// Mark snapped so View() doesn't re-snap to the
-					// (unchanged) selection and undo our adjustment.
-					m.list.MarkSnapped(m.selected)
-				}
-			}
-			return
+	i := FirstIndexOfTS(m.messages, messageTS)
+	if i < 0 {
+		return
+	}
+	ApplyReaction(&m.messages[i], emojiName, userID, m.currentUserID, remove)
+	m.dropCache()
+	m.dirty()
+	if m.nav.Active {
+		m.ClampReactionNav()
+	}
+	// Re-anchor the viewport bottom if it was at the bottom before.
+	// We need the new list total, which only buildCache computes;
+	// rebuild now (cheap, and the next View() would do it anyway).
+	if wasAnchoredAtBottom && m.cacheWidth > 0 {
+		m.buildCache(m.cacheWidth, false)
+		if delta := m.list.Total() - oldTotalLines; delta > 0 {
+			y := min(m.list.YOffset()+delta, m.list.Total()-m.list.Height())
+			m.list.SetYOffset(max(y, 0))
+			// Mark snapped so View() doesn't re-snap to the
+			// (unchanged) selection and undo our adjustment.
+			m.list.MarkSnapped(m.selected)
 		}
 	}
 }

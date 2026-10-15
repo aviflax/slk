@@ -323,14 +323,11 @@ func (m *Model) AddReply(msg messages.MessageItem) {
 	// messages.Model.AppendMessage: optimistic add (HTTP response) and
 	// WS echo can arrive in either order, and a caller-side dedup map
 	// can lose the race if the echo lands first.
-	if msg.TS != "" {
-		for i := len(m.replies) - 1; i >= 0; i-- {
-			if m.replies[i].TS == msg.TS {
-				return
-			}
-		}
+	rows, ch := messages.AppendIfAbsent(m.replies, msg)
+	if ch.Op == messages.RowNone {
+		return
 	}
-	m.replies = append(m.replies, msg)
+	m.replies = rows
 	m.InvalidateCache()
 	m.selected = len(m.replies) - 1
 }
@@ -345,14 +342,16 @@ func (m *Model) SwapLocalSentReply(localTS string, msg messages.MessageItem) boo
 	if localTS == "" {
 		return false
 	}
-	for i := len(m.replies) - 1; i >= 0; i-- {
-		if m.replies[i].TS == localTS {
-			m.replies[i] = msg
-			m.InvalidateCache()
-			return true
-		}
+	// A plain replace, as in messages.Model.SwapLocalSent. Unlike the
+	// channel pane it does not reset the snap anchor; InvalidateCache
+	// is all it has ever done.
+	rows, ch := messages.ReplaceTS(m.replies, localTS, msg)
+	if ch.Op == messages.RowNone {
+		return false
 	}
-	return false
+	m.replies = rows
+	m.InvalidateCache()
+	return true
 }
 
 // RemoveLocalSentReply removes an optimistic placeholder reply
@@ -363,26 +362,26 @@ func (m *Model) RemoveLocalSentReply(localTS string) bool {
 	if localTS == "" {
 		return false
 	}
-	for i := len(m.replies) - 1; i >= 0; i-- {
-		if m.replies[i].TS == localTS {
-			m.replies = append(m.replies[:i], m.replies[i+1:]...)
-			m.InvalidateCache()
-			// Keep the cursor on the message it was on (the parent's
-			// sentinel is below every index), and fall back to the
-			// parent when no reply is left.
-			if i < m.selected {
-				m.selected--
-			}
-			if m.selected >= len(m.replies) {
-				m.selected = len(m.replies) - 1
-				if m.selected < 0 {
-					m.selected = parentSelected
-				}
-			}
-			return true
+	rows, ch := messages.RemoveTS(m.replies, localTS)
+	if ch.Op == messages.RowNone {
+		return false
+	}
+	m.replies = rows
+	m.InvalidateCache()
+	// Keep the cursor on the message it was on (the parent's
+	// sentinel is below every index), and fall back to the
+	// parent when no reply is left. RemoveMessageByTS steps back
+	// on i <= selected instead; both are kept until reconciled.
+	if i := ch.Index; i < m.selected {
+		m.selected--
+	}
+	if m.selected >= len(m.replies) {
+		m.selected = len(m.replies) - 1
+		if m.selected < 0 {
+			m.selected = parentSelected
 		}
 	}
-	return false
+	return true
 }
 
 // UpsertSelfSentReply is the optimistic-add variant of AddReply for
@@ -395,18 +394,12 @@ func (m *Model) RemoveLocalSentReply(localTS string) bool {
 // motivating bug (Slack's WS-echo Text may flatten paragraph breaks
 // for rich_text_block messages).
 func (m *Model) UpsertSelfSentReply(msg messages.MessageItem) {
-	if msg.TS != "" {
-		for i := len(m.replies) - 1; i >= 0; i-- {
-			if m.replies[i].TS == msg.TS {
-				m.replies[i] = msg
-				m.InvalidateCache()
-				return
-			}
-		}
-	}
-	m.replies = append(m.replies, msg)
+	rows, ch := messages.Upsert(m.replies, msg)
+	m.replies = rows
 	m.InvalidateCache()
-	m.selected = len(m.replies) - 1
+	if ch.Op == messages.RowAdded {
+		m.selected = len(m.replies) - 1
+	}
 }
 
 // Clear resets all thread state.
@@ -494,38 +487,40 @@ func (m *Model) ChannelNames() map[string]string { return m.channelNames }
 // UpdateMessageInPlace finds a reply by TS and replaces its text,
 // marking it edited. Returns true if found.
 func (m *Model) UpdateMessageInPlace(ts, newText string) bool {
-	for i, r := range m.replies {
-		if r.TS == ts {
-			m.replies[i].Text = newText
-			m.replies[i].IsEdited = true
-			m.InvalidateCache()
-			return true
-		}
+	i := messages.FirstIndexOfTS(m.replies, ts)
+	if i < 0 {
+		return false
 	}
-	return false
+	m.replies[i].Text = newText
+	m.replies[i].IsEdited = true
+	m.InvalidateCache()
+	return true
 }
 
 // RemoveMessageByTS removes a reply by TS, adjusting the selected
 // index so it remains valid. Returns true if found.
+//
+// Scans from the front and steps the selection back on i <= selected,
+// where RemoveLocalSentReply uses i < selected. Kept as is until the
+// two are reconciled.
 func (m *Model) RemoveMessageByTS(ts string) bool {
-	for i, r := range m.replies {
-		if r.TS == ts {
-			m.replies = append(m.replies[:i], m.replies[i+1:]...)
-			if i <= m.selected && m.selected > 0 {
-				m.selected--
-			}
-			if m.selected >= len(m.replies) {
-				if len(m.replies) == 0 {
-					m.selected = parentSelected
-				} else {
-					m.selected = len(m.replies) - 1
-				}
-			}
-			m.InvalidateCache()
-			return true
+	rows, ch := messages.RemoveAt(m.replies, messages.FirstIndexOfTS(m.replies, ts))
+	if ch.Op == messages.RowNone {
+		return false
+	}
+	m.replies = rows
+	if i := ch.Index; i <= m.selected && m.selected > 0 {
+		m.selected--
+	}
+	if m.selected >= len(m.replies) {
+		if len(m.replies) == 0 {
+			m.selected = parentSelected
+		} else {
+			m.selected = len(m.replies) - 1
 		}
 	}
-	return false
+	m.InvalidateCache()
+	return true
 }
 
 // UpdateParentInPlace updates the thread parent's text and marks it
@@ -887,13 +882,8 @@ func (m *Model) UpdateReaction(messageTS, emojiName, userID string, remove bool)
 	var msg *messages.MessageItem
 	if m.parent.TS == messageTS {
 		msg = &m.parent
-	} else {
-		for i := range m.replies {
-			if m.replies[i].TS == messageTS {
-				msg = &m.replies[i]
-				break
-			}
-		}
+	} else if i := messages.FirstIndexOfTS(m.replies, messageTS); i >= 0 {
+		msg = &m.replies[i]
 	}
 	if msg == nil {
 		return
