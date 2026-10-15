@@ -447,3 +447,44 @@ func TestRichTextToMrkdwn_GitHubPendingReviewFixture(t *testing.T) {
 		t.Errorf("missing link wire form in output:\n%s", got)
 	}
 }
+
+// The block shapes slk's composer sends (internal/slack/mrkdwn.Convert)
+// read back as the text that was typed: blank lines carried as section
+// text around a code block or list, a code block's text without a
+// final newline, and a quote's own blank line.
+func TestRichTextToMrkdwn_SentWhitespaceRoundTrips(t *testing.T) {
+	text := func(s string) slack.RichTextSectionElement {
+		return &slack.RichTextSectionTextElement{Type: slack.RTSEText, Text: s}
+	}
+	section := func(s string) slack.RichTextElement {
+		return &slack.RichTextSection{Type: slack.RTESection, Elements: []slack.RichTextSectionElement{text(s)}}
+	}
+	cases := []struct {
+		name string
+		els  []slack.RichTextElement
+		want string
+	}{
+		{"paragraphs", []slack.RichTextElement{section("a\n\n  b")}, "a\n\n  b"},
+		{
+			"code between paragraphs",
+			[]slack.RichTextElement{
+				section("x\n"),
+				&slack.RichTextPreformatted{Type: slack.RTEPreformatted, Elements: []slack.RichTextSectionElement{text("code\n\n  more")}},
+				section("\ny"),
+			},
+			"x\n\n```\ncode\n\n  more\n```\n\ny",
+		},
+		{
+			"quote with a blank line",
+			[]slack.RichTextElement{&slack.RichTextQuote{Type: slack.RTEQuote, Elements: []slack.RichTextSectionElement{text("q1\n\nq2")}}},
+			"> q1\n> \n> q2",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := RichTextToMrkdwn(RichTextBlock{Elements: tc.els}); got != tc.want {
+				t.Errorf("got %q, want %q", got, tc.want)
+			}
+		})
+	}
+}

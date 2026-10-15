@@ -77,8 +77,14 @@ func TestConvert_TwoParagraphs(t *testing.T) {
 	if blk == nil {
 		t.Fatal("block is nil")
 	}
-	if len(blk.Elements) != 2 {
-		t.Fatalf("got %d elements, want 2 (one section per paragraph)", len(blk.Elements))
+	// One section with the blank line as text, as Slack's web client
+	// sends it: Slack draws sibling sections with no break between.
+	if len(blk.Elements) != 1 {
+		t.Fatalf("got %d elements, want 1 section for both paragraphs", len(blk.Elements))
+	}
+	te := blk.Elements[0].(*slack.RichTextSection).Elements[0].(*slack.RichTextSectionTextElement)
+	if te.Text != want {
+		t.Errorf("text = %q, want %q", te.Text, want)
 	}
 }
 
@@ -607,22 +613,27 @@ func TestConvert_FencedCodeBlock(t *testing.T) {
 		t.Fatalf("got %d preformatted children, want 1 text", len(pre.Elements))
 	}
 	te := pre.Elements[0].(*slack.RichTextSectionTextElement)
-	if te.Text != "foo\nbar\n" {
-		t.Errorf("text = %q, want \"foo\\nbar\\n\"", te.Text)
+	// No trailing newline: it would draw as an empty last code line.
+	if te.Text != "foo\nbar" {
+		t.Errorf("text = %q, want \"foo\\nbar\"", te.Text)
 	}
 }
 
-func TestConvert_IndentedCodeBlock(t *testing.T) {
+// Slack's composer has no indented code blocks, so four leading spaces
+// are indentation, kept as typed, not a code block.
+func TestConvert_IndentedLinesStayText(t *testing.T) {
 	in := "    foo\n    bar"
 	mr, blk := Convert(in)
-	wantMr := "```\nfoo\nbar\n```"
-	if mr != wantMr {
-		t.Errorf("mrkdwn = %q, want %q", mr, wantMr)
+	if mr != in {
+		t.Errorf("mrkdwn = %q, want %q", mr, in)
 	}
-	pre := blk.Elements[0].(*slack.RichTextPreformatted)
-	te := pre.Elements[0].(*slack.RichTextSectionTextElement)
-	if te.Text != "foo\nbar\n" {
-		t.Errorf("text = %q", te.Text)
+	sec, ok := blk.Elements[0].(*slack.RichTextSection)
+	if !ok {
+		t.Fatalf("element[0] is %T, want *RichTextSection", blk.Elements[0])
+	}
+	te := sec.Elements[0].(*slack.RichTextSectionTextElement)
+	if te.Text != in {
+		t.Errorf("text = %q, want %q", te.Text, in)
 	}
 }
 
@@ -645,15 +656,20 @@ func TestConvert_HeadingPlainText(t *testing.T) {
 	}
 }
 
-func TestConvert_BlockquotePassthrough(t *testing.T) {
+// A quote is a rich_text_quote. As text in a section its "> " marker
+// drew literally in Slack, and its lines ran together.
+func TestConvert_Blockquote(t *testing.T) {
 	mr, blk := Convert("> a quoted line")
 	want := "> a quoted line"
 	if mr != want {
 		t.Errorf("mrkdwn = %q, want %q", mr, want)
 	}
-	sec := blk.Elements[0].(*slack.RichTextSection)
-	te := sec.Elements[0].(*slack.RichTextSectionTextElement)
-	if te.Text != "> a quoted line" {
+	q, ok := blk.Elements[0].(*slack.RichTextQuote)
+	if !ok {
+		t.Fatalf("element[0] is %T, want *RichTextQuote", blk.Elements[0])
+	}
+	te := q.Elements[0].(*slack.RichTextSectionTextElement)
+	if te.Text != "a quoted line" {
 		t.Errorf("text = %q", te.Text)
 	}
 }

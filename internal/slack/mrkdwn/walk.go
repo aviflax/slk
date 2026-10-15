@@ -1,6 +1,7 @@
 package mrkdwn
 
 import (
+	"bytes"
 	"strconv"
 	"strings"
 
@@ -29,6 +30,11 @@ type walker struct {
 	// appendText. Inline-formatting walk methods toggle the relevant
 	// flag for the duration of their child walk.
 	inheritedStyle slack.RichTextSectionTextStyle
+
+	// sectionLead holds newlines owed to the start of the next
+	// paragraph's section: the blank lines typed between a list, code
+	// block or quote and the paragraph after it.
+	sectionLead string
 }
 
 func newWalker(source []byte, table []token) *walker {
@@ -40,39 +46,65 @@ func newWalker(source []byte, table []token) *walker {
 }
 
 func (w *walker) walkDocument(n ast.Node) {
+	var prev ast.Node
 	for c := n.FirstChild(); c != nil; c = c.NextSibling() {
+		if prev != nil {
+			w.separateBlocks(prev, c)
+		}
 		w.walkBlock(c)
+		prev = c
 	}
 	w.flushSection()
 }
 
-// walkBlock dispatches block-level nodes. Every block-level node
-// flushes any in-progress inline section first.
+// separateBlocks writes the line breaks the user typed between two
+// top-level blocks. The mrkdwn fallback gets all of them. In the block,
+// paragraphs share one rich_text_section with the breaks as text, the
+// shape Slack's web client sends: Slack draws sibling sections with no
+// break between them, so a section per paragraph lost every blank
+// line. A list, code block or quote already starts a new line, so only
+// the blank lines beyond that one go into the neighbouring section.
+func (w *walker) separateBlocks(prev, next ast.Node) {
+	n := w.lineBreaksBetween(prev, next)
+	w.mrkdwn.WriteString(strings.Repeat("\n", n))
+
+	_, prevPara := prev.(*ast.Paragraph)
+	_, nextPara := next.(*ast.Paragraph)
+	switch {
+	case prevPara && nextPara:
+		w.appendTextElement(strings.Repeat("\n", n))
+	case prevPara:
+		if n > 1 {
+			w.appendTextElement(strings.Repeat("\n", n-1))
+		}
+		w.flushSection()
+	case nextPara:
+		w.sectionLead = strings.Repeat("\n", n-1)
+	}
+}
+
+// walkBlock dispatches top-level block nodes. A paragraph extends the
+// open section (separateBlocks has put the breaks before it); every
+// other block closes it and adds its own element.
 func (w *walker) walkBlock(n ast.Node) {
 	switch n := n.(type) {
 	case *ast.Paragraph:
-		w.flushSection()
-		w.curSection = slack.NewRichTextSection()
+		if w.curSection == nil {
+			w.curSection = slack.NewRichTextSection()
+		}
+		w.appendTextElement(w.sectionLead)
+		w.sectionLead = ""
+		w.appendText(w.indentAt(n, lineStart(w.source, n.Lines().At(0).Start)))
 		w.walkInlineChildren(n)
-		w.flushSection()
-		// Paragraph separator in mrkdwn is a blank line.
-		w.mrkdwn.WriteString("\n\n")
-	case *ast.HTMLBlock:
-		w.walkRawHTMLBlock(n)
 	case *ast.List:
 		w.walkList(n, 0)
 	case *ast.FencedCodeBlock:
 		w.walkCodeBlock(n)
-	case *ast.CodeBlock:
-		w.walkCodeBlock(n)
-	case *ast.Heading:
-		w.walkRawBlock(n)
 	case *ast.Blockquote:
-		w.walkRawBlock(n)
+		w.walkQuote(n)
 	default:
-		// Other block types (List, FencedCodeBlock, Heading, Blockquote)
-		// will be handled in later tasks. For now, walk children as
-		// inline so we don't lose plain-text fallback content.
+		// newParser builds no other block types; walk children as
+		// inline so nothing is lost if that ever changes.
 		w.walkInlineChildren(n)
 	}
 }
@@ -102,8 +134,9 @@ func (w *walker) walkInline(n ast.Node) {
 		w.appendText(string(util.UnescapePunctuations(w.source[seg.Start:seg.Stop])))
 		if n.HardLineBreak() || n.SoftLineBreak() {
 			// Slack chat preserves line layout; treat both hard and
-			// soft breaks as literal newlines.
-			w.appendText("\n")
+			// soft breaks as literal newlines, keeping the spaces
+			// around them that the parser trims.
+			w.appendText(w.lineBreak(n))
 		}
 	case *ast.RawHTML:
 		// Inline HTML (e.g. <span class=...>) — copy source bytes via
@@ -374,10 +407,17 @@ func (w *walker) walkList(n *ast.List, indent int) {
 		itemIdx++
 
 		// Walk item children: inline body then any nested lists.
+		// Paragraphs of one item (a loose list) keep the breaks
+		// typed between them.
+		var prevText ast.Node
 		for sub := item.FirstChild(); sub != nil; sub = sub.NextSibling() {
 			switch sub := sub.(type) {
 			case *ast.TextBlock, *ast.Paragraph:
+				if prevText != nil {
+					w.appendText(strings.Repeat("\n", w.lineBreaksBetween(prevText, sub)))
+				}
 				w.walkInlineChildren(sub)
+				prevText = sub
 			case *ast.List:
 				w.mrkdwn.WriteString("\n")
 				w.walkListInto(sub, indent+1, &nested)
@@ -425,34 +465,11 @@ func trimTrailingNewline(b *strings.Builder) {
 	}
 }
 
-// walkRawHTMLBlock preserves block-level HTML as literal text. Goldmark
-// parses HTML by default and emits HTMLBlock for things like <p>foo</p>;
-// without explicit handling these nodes have no Text children and the
-// content silently vanishes. We keep the source bytes intact so user-
-// typed HTML survives as readable text in Slack (Slack mrkdwn doesn't
-// process HTML, so this round-trips as expected).
-func (w *walker) walkRawHTMLBlock(n *ast.HTMLBlock) {
-	w.flushSection()
-	var b strings.Builder
-	for i := 0; i < n.Lines().Len(); i++ {
-		seg := n.Lines().At(i)
-		b.Write(w.source[seg.Start:seg.Stop])
-	}
-	body := strings.TrimRight(b.String(), "\n")
-	if body == "" {
-		return
-	}
-	w.mrkdwn.WriteString(body)
-	w.mrkdwn.WriteString("\n\n")
-
-	sec := slack.NewRichTextSection()
-	sec.Elements = append(sec.Elements, slack.NewRichTextSectionTextElement(detokenizeText(body, w.table), nil))
-	w.block.Elements = append(w.block.Elements, sec)
-}
-
-// walkCodeBlock collects all line content of n (works for both
-// FencedCodeBlock and CodeBlock) and emits ```body``` mrkdwn plus a
-// RichTextPreformatted block.
+// walkCodeBlock emits a fenced code block as ```body``` mrkdwn plus a
+// RichTextPreformatted block. The body is the source lines verbatim,
+// blank lines and indentation included. The block's text carries no
+// final newline: the closing fence ends the line, and a trailing "\n"
+// draws as an empty last line of code.
 func (w *walker) walkCodeBlock(n ast.Node) {
 	w.flushSection()
 	var b strings.Builder
@@ -460,14 +477,16 @@ func (w *walker) walkCodeBlock(n ast.Node) {
 		seg := n.Lines().At(i)
 		b.Write(w.source[seg.Start:seg.Stop])
 	}
-	body := b.String()
-	if !strings.HasSuffix(body, "\n") {
-		body += "\n"
-	}
+	body := strings.TrimSuffix(b.String(), "\n")
 
 	w.mrkdwn.WriteString("```\n")
 	w.mrkdwn.WriteString(body)
-	w.mrkdwn.WriteString("```\n")
+	w.mrkdwn.WriteString("\n```")
+	if body == "" {
+		// An empty text element is not valid rich text; an empty
+		// code block is one empty line.
+		body = "\n"
+	}
 
 	// Code-block contents must be literal: any sentinels embedded by
 	// tokenize (emoji shortcodes, <@user> mentions, etc.) need to
@@ -483,46 +502,71 @@ func (w *walker) walkCodeBlock(n ast.Node) {
 	w.block.Elements = append(w.block.Elements, pre)
 }
 
-// walkRawBlock emits the original source of a heading or blockquote
-// verbatim. Slack mrkdwn has no headings, and `>` is already a valid
-// blockquote marker on the wire, so we don't translate either type.
-func (w *walker) walkRawBlock(n ast.Node) {
+// walkQuote emits a blockquote as a rich_text_quote, with the quote's
+// line breaks and blank lines kept as text the way paragraphs keep
+// them, and as "> "-prefixed lines in the mrkdwn fallback. A list, code
+// block or nested quote inside it is kept as its source text, without
+// the outer "> " markers: rich_text_quote holds inline elements only.
+func (w *walker) walkQuote(n *ast.Blockquote) {
 	w.flushSection()
+	mark := w.mrkdwn.Len()
+	sec := slack.NewRichTextSection()
+	w.curSection = sec
 
-	prefix := ""
-	body := ""
+	var prev ast.Node
+	for c := n.FirstChild(); c != nil; c = c.NextSibling() {
+		if prev != nil {
+			w.appendText(strings.Repeat("\n", w.lineBreaksBetween(prev, c)))
+		}
+		if p, ok := c.(*ast.Paragraph); ok {
+			w.appendText(w.indentAt(p, lineStart(w.source, p.Lines().At(0).Start)))
+			w.walkInlineChildren(p)
+		} else {
+			w.appendText(w.quotedSource(c))
+		}
+		prev = c
+	}
+	w.curSection = nil
 
-	if h, ok := n.(*ast.Heading); ok {
-		// Heading source segments contain the inline content WITHOUT
-		// the leading "# " marker (goldmark consumes it).
+	if len(sec.Elements) > 0 {
+		w.block.Elements = append(w.block.Elements, &slack.RichTextQuote{
+			Type:     slack.RTEQuote,
+			Elements: sec.Elements,
+		})
+	}
+
+	// Prefix every line the quote wrote to the fallback.
+	s := w.mrkdwn.String()
+	lines := strings.Split(s[mark:], "\n")
+	for i, l := range lines {
+		if l == "" {
+			lines[i] = ">"
+		} else {
+			lines[i] = "> " + l
+		}
+	}
+	w.mrkdwn.Reset()
+	w.mrkdwn.WriteString(s[:mark])
+	w.mrkdwn.WriteString(strings.Join(lines, "\n"))
+}
+
+// quotedSource returns the source lines of n, a block inside a quote,
+// with one level of "> " marker removed from each.
+func (w *walker) quotedSource(n ast.Node) string {
+	start, last := w.firstLineStart(n), w.lastLineStart(n)
+	if start < 0 || last < start {
 		var b strings.Builder
-		for i := 0; i < n.Lines().Len(); i++ {
-			seg := n.Lines().At(i)
-			b.Write(w.source[seg.Start:seg.Stop])
-		}
-		body = strings.TrimRight(b.String(), "\n")
-		prefix = strings.Repeat("#", h.Level) + " "
-	} else if _, ok := n.(*ast.Blockquote); ok {
-		// Blockquote segments aren't directly populated; walk
-		// children to gather inline text.
-		var sb strings.Builder
-		for c := n.FirstChild(); c != nil; c = c.NextSibling() {
-			collectRawInline(&sb, c, w.source)
-		}
-		body = sb.String()
-		prefix = "> "
+		collectRawInline(&b, n, w.source)
+		return b.String()
 	}
-
-	w.mrkdwn.WriteString(prefix)
-	w.mrkdwn.WriteString(body)
-	w.mrkdwn.WriteString("\n\n")
-
-	if w.curSection == nil {
-		w.curSection = slack.NewRichTextSection()
+	end := lineEnd(w.source, last)
+	lines := strings.Split(string(w.source[start:end]), "\n")
+	for i, l := range lines {
+		l = strings.TrimLeft(l, " ")
+		l = strings.TrimPrefix(l, ">")
+		lines[i] = strings.TrimPrefix(l, " ")
 	}
-	te := slack.NewRichTextSectionTextElement(detokenizeText(prefix+body, w.table), nil)
-	w.curSection.Elements = append(w.curSection.Elements, te)
-	w.flushSection()
+	return strings.Join(lines, "\n")
 }
 
 // collectRawInline appends the source bytes of all *ast.Text descendants
@@ -535,6 +579,155 @@ func collectRawInline(b *strings.Builder, n ast.Node, source []byte) {
 	for c := n.FirstChild(); c != nil; c = c.NextSibling() {
 		collectRawInline(b, c, source)
 	}
+}
+
+// lineBreak returns the text for the line break after t: the newline
+// plus the whitespace around it that goldmark trims from the inline
+// text, so spaces before the break and the next line's indentation
+// reach Slack. A backslash hard break loses its backslash: that is
+// markup, not text.
+func (w *walker) lineBreak(t *ast.Text) string {
+	stop := t.Segment.Stop
+	eol := lineEnd(w.source, stop)
+	if eol >= len(w.source) {
+		return "\n"
+	}
+	trailing := string(w.source[stop:eol])
+	if t.HardLineBreak() {
+		trailing = strings.TrimSuffix(trailing, "\\")
+	}
+	if strings.Trim(trailing, " \t") != "" {
+		// Not whitespace: some markup goldmark consumed sits
+		// between the text and the line end. Keep only the break.
+		trailing = ""
+	}
+	return trailing + "\n" + w.indentAt(t, eol+1)
+}
+
+// indentAt returns the indentation of the source line starting at
+// start, where n is the inline or paragraph node that continues on it.
+// At the top level that is every leading space and tab. In a quote it
+// is what follows the "> " marker (a lazy line without the marker has
+// none). In a list item it is always empty: there the leading spaces
+// are the item's structure, not text.
+func (w *walker) indentAt(n ast.Node, start int) string {
+	inQuote := false
+	for p := n.Parent(); p != nil; p = p.Parent() {
+		switch p.(type) {
+		case *ast.ListItem:
+			return ""
+		case *ast.Blockquote:
+			inQuote = true
+		}
+	}
+	src := w.source
+	i := start
+	if inQuote {
+		for i < len(src) && src[i] == ' ' {
+			i++
+		}
+		if i >= len(src) || src[i] != '>' {
+			return ""
+		}
+		i++
+		if i < len(src) && src[i] == ' ' {
+			i++
+		}
+	}
+	j := i
+	for j < len(src) && (src[j] == ' ' || src[j] == '\t') {
+		j++
+	}
+	return string(src[i:j])
+}
+
+// lineBreaksBetween counts the line breaks in the source between the
+// last line of prev and the first line of next: 1 for adjacent lines,
+// 2 for one blank line between them, and so on. It falls back to 1
+// when either position is unknown.
+func (w *walker) lineBreaksBetween(prev, next ast.Node) int {
+	a, b := w.lastLineStart(prev), w.firstLineStart(next)
+	if a < 0 || b <= a {
+		return 1
+	}
+	return max(1, strings.Count(string(w.source[a:b]), "\n"))
+}
+
+// firstLineStart returns the source offset of the start of n's first
+// line (the opening fence, for fenced code), or -1 if n has no lines.
+func (w *walker) firstLineStart(n ast.Node) int {
+	if fc, ok := n.(*ast.FencedCodeBlock); ok {
+		switch {
+		case fc.Info != nil:
+			return lineStart(w.source, fc.Info.Segment.Start)
+		case fc.Lines().Len() > 0:
+			return prevLineStart(w.source, lineStart(w.source, fc.Lines().At(0).Start))
+		}
+		return -1
+	}
+	if n.Type() != ast.TypeInline && n.Lines().Len() > 0 {
+		return lineStart(w.source, n.Lines().At(0).Start)
+	}
+	if c := n.FirstChild(); c != nil {
+		return w.firstLineStart(c)
+	}
+	return -1
+}
+
+// lastLineStart returns the source offset of the start of n's last
+// line (the closing fence, for fenced code that has one), or -1 if n
+// has no lines.
+func (w *walker) lastLineStart(n ast.Node) int {
+	if fc, ok := n.(*ast.FencedCodeBlock); ok {
+		var last int
+		switch {
+		case fc.Lines().Len() > 0:
+			last = lineStart(w.source, fc.Lines().At(fc.Lines().Len()-1).Start)
+		case fc.Info != nil:
+			last = lineStart(w.source, fc.Info.Segment.Start)
+		default:
+			return -1
+		}
+		next := lineEnd(w.source, last) + 1
+		if next < len(w.source) {
+			// " >" also skips the markers of a quote the code is in.
+			l := strings.TrimLeft(string(w.source[next:lineEnd(w.source, next)]), " >")
+			if strings.HasPrefix(l, "```") || strings.HasPrefix(l, "~~~") {
+				return next
+			}
+		}
+		return last
+	}
+	if n.Type() != ast.TypeInline && n.Lines().Len() > 0 {
+		return lineStart(w.source, n.Lines().At(n.Lines().Len()-1).Start)
+	}
+	if c := n.LastChild(); c != nil {
+		return w.lastLineStart(c)
+	}
+	return -1
+}
+
+// lineStart returns the offset of the start of the line holding pos.
+func lineStart(src []byte, pos int) int {
+	return bytes.LastIndexByte(src[:pos], '\n') + 1
+}
+
+// lineEnd returns the offset of the '\n' ending the line holding pos,
+// or len(src) on the last line.
+func lineEnd(src []byte, pos int) int {
+	if i := bytes.IndexByte(src[pos:], '\n'); i >= 0 {
+		return pos + i
+	}
+	return len(src)
+}
+
+// prevLineStart returns the start of the line before the one starting
+// at start, or start itself on the first line.
+func prevLineStart(src []byte, start int) int {
+	if start == 0 {
+		return 0
+	}
+	return lineStart(src, start-1)
 }
 
 // appendText writes s to both outputs with the current inherited
@@ -585,6 +778,9 @@ func (w *walker) appendText(s string) {
 func (w *walker) appendTextElement(text string) {
 	if text == "" {
 		return
+	}
+	if w.curSection == nil {
+		w.curSection = slack.NewRichTextSection()
 	}
 	style := w.copyStyle()
 	if n := len(w.curSection.Elements); n > 0 {
