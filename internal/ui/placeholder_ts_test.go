@@ -40,13 +40,17 @@ func TestNavBackAfterSendNeverFetchesPlaceholder(t *testing.T) {
 	}
 }
 
-// Where the user is never names a placeholder: it is named by the
-// nearest sent message before it in the same pane, else by the thread's
+// Where the user is never names a placeholder or an ephemeral (Slack
+// knows neither as a message of the conversation): it is named by the
+// nearest message before it that Slack knows, else by the thread's
 // parent or the channel alone. A placeholder that is not selected
 // changes nothing.
 func TestLocationNeverNamesPlaceholder(t *testing.T) {
 	sent := func(ts string) messages.MessageItem { return messages.MessageItem{TS: ts, Text: ts} }
 	local := func(ts string) messages.MessageItem { return messages.MessageItem{TS: ts, Text: "pending"} }
+	eph := func(ts string) messages.MessageItem {
+		return messages.MessageItem{TS: ts, Text: "only you", Ephemeral: true}
+	}
 	cases := []struct {
 		name     string
 		thread   bool
@@ -60,6 +64,11 @@ func TestLocationNeverNamesPlaceholder(t *testing.T) {
 		{"channel, a sent message selected", false, []messages.MessageItem{sent("1.0"), local("local:1"), sent("3.0")}, "3.0", "3.0"},
 		{"thread, after a sent reply", true, []messages.MessageItem{sent("2.0"), local("local:1")}, "local:1", "2.0"},
 		{"thread, nothing sent before", true, []messages.MessageItem{local("local:1")}, "local:1", "1.000000"},
+		// An ephemeral is not in Slack's history either.
+		{"channel, past an ephemeral", false, []messages.MessageItem{sent("1.0"), eph("2.0"), local("local:1")}, "local:1", "1.0"},
+		{"channel, an ephemeral selected", false, []messages.MessageItem{sent("1.0"), eph("2.0")}, "2.0", "1.0"},
+		{"thread, an ephemeral selected", true, []messages.MessageItem{sent("2.0"), eph("3.0")}, "3.0", "2.0"},
+		{"thread, only an ephemeral", true, []messages.MessageItem{eph("3.0")}, "3.0", "1.000000"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {

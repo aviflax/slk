@@ -464,8 +464,9 @@ history or a link. The guards:
   mark-unread boundary take the nearest message Slack knows
   (`KnownToSlack`: no placeholder, no ephemeral).
 - Navigation: `currentLocation` and `channelPaneLocation` name a
-  placeholder by the sent message before it in the same pane, else the
-  thread parent or the channel alone (`sentLocation`). `setMark` reads
+  placeholder or an ephemeral by the message before it in the same pane
+  that Slack knows (`KnownToSlack`), else the thread parent or the
+  channel alone (`sentLocation`). `setMark` reads
   the raw selection (`selectedLocation`) so it refuses instead.
 - `OldestTS`, the anchor for older history, skips placeholders.
 

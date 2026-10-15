@@ -36,8 +36,9 @@ type Location struct {
 
 // currentLocation names where the user is, for the navigation history
 // and back-jumps: selectedLocation, except that a placeholder (a message
-// still sending, whose TS Slack has never seen) is named by the nearest
-// sent message before it (sentLocation).
+// still sending, whose TS Slack has never seen) or an ephemeral (which
+// Slack never returns from history) is named by the nearest message
+// before it that Slack knows (sentLocation).
 func (a *App) currentLocation() (Location, bool) {
 	loc, ok := a.selectedLocation()
 	return a.sentLocation(loc), ok
@@ -95,34 +96,39 @@ func (a *App) selectedLocation() (Location, bool) {
 }
 
 // channelPaneLocation names the messages pane's selection in the
-// active channel, a placeholder by the sent message before it.
+// active channel, a placeholder or an ephemeral by the message before it
+// that Slack knows.
 func (a *App) channelPaneLocation() (Location, bool) {
 	loc, ok := a.selectedChannelPaneLocation()
 	return a.sentLocation(loc), ok
 }
 
-// sentLocation is loc with a placeholder's MessageTS replaced by the
-// nearest message before it in the same pane that is not one: a
-// navigation must never ask Slack for a TS it never issued. With none,
-// a thread location names the parent and a channel location the
-// channel alone.
+// sentLocation is loc with a MessageTS Slack does not know as a message
+// of the conversation (messages.KnownToSlack: a placeholder still
+// sending, or an ephemeral) replaced by the nearest message before it in
+// the same pane that Slack knows: a navigation must never ask Slack for
+// a TS it never issued or does not return. With none, a thread location
+// names the parent and a channel location the channel alone.
 func (a *App) sentLocation(loc Location) Location {
-	if !messages.IsLocalTS(string(loc.MessageTS)) {
+	if loc.MessageTS == "" {
 		return loc
 	}
-	local := string(loc.MessageTS)
+	ts := string(loc.MessageTS)
 	rows := a.messagepane.Messages()
-	loc.MessageTS = ""
+	parent := ids.MessageTS("")
 	if loc.ThreadTS != "" {
 		rows = a.threadPanel.Replies()
-		loc.MessageTS = ids.MessageTS(loc.ThreadTS)
+		parent = ids.MessageTS(loc.ThreadTS)
 	}
-	i := messages.FirstIndexOfTS(rows, local)
+	i := messages.FirstIndexOfTS(rows, ts)
+	if i >= 0 && messages.KnownToSlack(rows[i]) || i < 0 && !messages.IsLocalTS(ts) {
+		return loc
+	}
 	if i < 0 {
 		i = len(rows)
 	}
-	sent := func(r messages.MessageItem) bool { return !messages.IsLocalTS(r.TS) }
-	if j := messages.LastIndexBefore(rows, i, sent); j >= 0 {
+	loc.MessageTS = parent
+	if j := messages.LastIndexBefore(rows, i, messages.KnownToSlack); j >= 0 {
 		loc.MessageTS = ids.MessageTS(rows[j].TS)
 	}
 	return loc
