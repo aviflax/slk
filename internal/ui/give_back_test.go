@@ -167,6 +167,30 @@ func TestUnsentTextLeavesWhenSentAgain(t *testing.T) {
 	}
 }
 
+// A sent message that contains unsent texts recovers them: the user
+// pasted the clipboard (or part of it) into a message. Sending the
+// whole bundle empties the list, so the next failure copies only its
+// own text.
+func TestUnsentTextLeavesWhenASentMessageContainsIt(t *testing.T) {
+	a := typedApp(t)
+	copied := clipboardLog(a)
+	failSends(t, a, "one", "two", "three")
+	a.compose.SetValue("")
+	bundle := "two\n\nthree"
+	_, _, local := sendFromComposer(t, a, PanelMessages, "fyi: "+bundle)
+	a.Update(MessageSentMsg{ChannelID: "C1", LocalTS: local, Message: messages.MessageItem{TS: "20.000000", UserID: "USELF", Text: bundle}})
+	_, _, local = sendFromComposer(t, a, PanelMessages, "four")
+	a.compose.SetValue("busy")
+	_, cmd := a.Update(MessageSendFailedMsg{ChannelID: "C1", LocalTS: local, Reason: "boom"})
+	toast := shownToast(t, a, cmd)
+	if n := len(*copied); (*copied)[n-1] != "four" {
+		t.Fatalf("clipboard = %q, want four only", (*copied)[n-1])
+	}
+	if !strings.Contains(toast, "Your text is on the clipboard") {
+		t.Errorf("toast = %q, want the single-text note", toast)
+	}
+}
+
 // The list is capped; the oldest go first, and the toast says some
 // were dropped.
 func TestUnsentTextsAreCapped(t *testing.T) {

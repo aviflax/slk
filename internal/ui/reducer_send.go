@@ -116,7 +116,7 @@ var reduceSend reducerFunc = func(a *App, msg tea.Msg) (tea.Cmd, bool) {
 			return a.releaseHeld(release), true
 		}
 		if ok {
-			a.recovered(ins.typed)
+			a.delivered(ins.typed)
 		}
 		// settle gives each channel window its own clone.
 		a.sinksFor(m.ChannelID).settle(m.LocalTS, sentItem(ins, ok, m.Message))
@@ -601,7 +601,7 @@ func reduceMessageEdited(a *App, m MessageEditedMsg) tea.Cmd {
 		a.showBody(m.ChannelID, m.TS, s.show)
 	}
 	if m.Err == nil {
-		a.recovered(s.ended.typed)
+		a.delivered(s.ended.typed)
 	}
 	cmds := []tea.Cmd{gone}
 	if s.next != nil {

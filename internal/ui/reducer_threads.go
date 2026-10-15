@@ -402,7 +402,7 @@ var reduceThreads reducerFunc = func(a *App, msg tea.Msg) (tea.Cmd, bool) {
 		// placeholder added in SendThreadReplyMsg. Mirrors
 		// MessageSentMsg's swap-or-upsert contract.
 		if ok {
-			a.recovered(ins.typed)
+			a.delivered(ins.typed)
 		}
 		a.replySinksFor(m.ChannelID, m.ThreadTS, m.Broadcast).settle(m.LocalTS, sentItem(ins, ok, m.Message))
 		for _, mm := range a.modelsForChannel(m.ChannelID) {

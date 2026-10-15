@@ -334,8 +334,10 @@ first, separated by a blank line, so a later failure never replaces an
 earlier one. The failure toast adds "Your text is on the clipboard.",
 or "N unsent messages are on the clipboard." (`OnClipboard` on
 `statusbar.SendFailedMsg` / `EditFailedMsg`, `unsentTexts.note`). A
-text leaves the list when it goes back to a composer or is sent or
-edited in again, word for word, successfully. The list keeps the 20
+text leaves the list when it goes back to a composer, or when a
+message or edit Slack accepts contains it (`delivered`): typed again,
+or pasted from the clipboard, so sending the whole bundle empties the
+list. The list keeps the 20
 newest (`unsentLimit`); once any were dropped, the toast says how
 many. A failed broadcast reply given back to the thread
 composer on screen turns its "also send to channel" toggle back on. A

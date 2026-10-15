@@ -4,7 +4,9 @@
 // back to its composer (that conversation has a newer draft) goes to
 // the clipboard. The clipboard holds one thing, so each such text is
 // kept in a list for the session and the clipboard always gets all of
-// them: a second failure must not overwrite the first.
+// them: a second failure must not overwrite the first. A text leaves the
+// list when it goes back to a composer or when a message Slack accepts
+// contains it.
 package ui
 
 import (
@@ -37,9 +39,15 @@ func (u *unsentTexts) add(text string) {
 	}
 }
 
-// remove forgets text: it reached a composer or was sent again.
+// remove forgets text: it reached a composer again.
 func (u *unsentTexts) remove(text string) {
 	u.texts = slices.DeleteFunc(u.texts, func(t string) bool { return t == text })
+}
+
+// sent forgets every text that sent contains: Slack has it, typed
+// again or pasted from the clipboard, alone or in the whole bundle.
+func (u *unsentTexts) sent(sent string) {
+	u.texts = slices.DeleteFunc(u.texts, func(t string) bool { return strings.Contains(sent, t) })
 }
 
 // clipboard is what the clipboard holds: every unsent text, oldest
@@ -69,9 +77,18 @@ func (a *App) keepUnsent(text string) tea.Cmd {
 }
 
 // recovered forgets text from the unsent list: it is in a composer
-// again, or Slack has it.
+// again.
 func (a *App) recovered(text string) {
 	if text != "" {
 		a.unsent.remove(text)
+	}
+}
+
+// delivered forgets the unsent texts a message or edit Slack accepted
+// contains: the user typed one again or pasted the clipboard, which
+// holds them all, so sending the clipboard empties the list.
+func (a *App) delivered(text string) {
+	if text != "" {
+		a.unsent.sent(text)
 	}
 }
