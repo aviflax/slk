@@ -24,6 +24,11 @@ func timeFromTS(ts string) (time.Time, bool) {
 // ("Tue Sep 29, " or "Mon Sep 29 2025, " when not the current year).
 // Returns short unchanged when ts is unparseable or short is empty.
 func LongTimestamp(ts, short string) string {
+	return longTimestampAt(ts, short, nowFunc())
+}
+
+// longTimestampAt is LongTimestamp with the clock passed in.
+func longTimestampAt(ts, short string, now time.Time) string {
 	if short == "" {
 		return short
 	}
@@ -32,7 +37,7 @@ func LongTimestamp(ts, short string) string {
 		return short
 	}
 	layout := "Mon Jan 2, "
-	if t.Year() != nowFunc().Year() {
+	if t.Year() != now.Year() {
 		layout = "Mon Jan 2 2006, "
 	}
 	return t.Format(layout) + short

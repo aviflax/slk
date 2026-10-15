@@ -2147,14 +2147,19 @@ func SetNowFunc(fn func() time.Time) {
 // that. The thread pane prefixes the parent's time with it, because
 // the parent is the only row there with no day divider above it.
 func FormatShortDate(dateStr string) string {
+	return formatShortDateAt(dateStr, nowFunc())
+}
+
+// formatShortDateAt is FormatShortDate with the clock passed in.
+func formatShortDateAt(dateStr string, now time.Time) string {
 	d, err := time.Parse("2006-01-02", dateStr)
 	if err != nil {
 		return dateStr
 	}
-	if label := FormatDateSeparator(dateStr); !strings.Contains(label, ",") {
+	if label := formatDateSeparatorAt(dateStr, now); !strings.Contains(label, ",") {
 		return label
 	}
-	if d.Year() == nowFunc().Year() {
+	if d.Year() == now.Year() {
 		return d.Format("Jan 2")
 	}
 	return d.Format("Jan 2, 2006")
@@ -2166,13 +2171,17 @@ func FormatShortDate(dateStr string) string {
 // Exported so the thread pane renders identical labels to the channel
 // pane.
 func FormatDateSeparator(dateStr string) string {
+	return formatDateSeparatorAt(dateStr, nowFunc())
+}
+
+// formatDateSeparatorAt is FormatDateSeparator with the clock passed in.
+func formatDateSeparatorAt(dateStr string, now time.Time) string {
 	d, err := time.Parse("2006-01-02", dateStr)
 	if err != nil {
 		return dateStr
 	}
 	// Compare calendar days, not elapsed time: both endpoints are anchored
 	// to UTC midnight so the delta is always a whole number of days.
-	now := nowFunc()
 	// time.Parse already yields UTC midnight; restating it is defensive, not
 	// load-bearing.
 	dDay := time.Date(d.Year(), d.Month(), d.Day(), 0, 0, 0, 0, time.UTC)
