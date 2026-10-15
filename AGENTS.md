@@ -160,10 +160,10 @@ scrollbars, date formatting, case folding, or ID formatting: it already exists.
 | A message's pressable legacy buttons (selects excluded) | `messages.ButtonActions(msg)`, `messages.HasButtonActions(msg)` |
 | The hint under an interactive message ("b to respond" for an ephemeral with buttons, else "open in Slack") | `messages.InteractiveHint(msg)`; both panes |
 | Open the action dialog for an ephemeral's buttons | `(*App).openActionPrompt(actionPromptRef)` (`internal/ui/action_prompt.go`); queueing and the interruption rule are `enqueueActionPrompt` / `tryOpenActionPrompt` |
-| Replace a pane's list with fetched history without erasing ephemerals already shown | `keepEphemerals(fetched, shown)` (`internal/ui/ephemeral_keep.go`); only for a fetch of the conversation already on screen |
+| Replace a pane's rows wholesale (a history fetch, a cache read on entering a channel or opening a thread) | `(*App).paneRows(sink, channelID, threadTS, fetched, shown)`, or `olderRows` for a prepended page, and `threadParent` for a thread's parent row (`internal/ui/pending_view.go`). They put back what Slack's rows cannot know: pending edits' bodies, messages being deleted left out, the user's messages that may be a pending send's held, the ephemerals in `shown` (pass `shown` only for the conversation already on screen) and each pending send's placeholder. `TestPaneRowsGoThroughPaneRows` rejects any other `SetMessages`/`PrependMessages`/`SetThread` rows but nil |
 | Does a message_changed echo carry text the user sent (Slack escapes &, < and > in the mrkdwn but keeps the rich_text block)? | `messages.EchoCarries(echo, sent Body)` (`internal/ui/messages/body.go`); never compare `Text` directly |
 | Slack permalink parsing | `slackurl.Parse` |
-| Slack ts → `time.Time` (whole seconds, any timezone) | `export.TimeFromTS` |
+| Slack ts → `time.Time` (whole seconds, any timezone) | `export.TimeFromTS`; the other way, `messages.TSAt(t)` |
 | A since/until/overlap date range in a timezone, and "is this ts in it?" | `export.NewWindow`, `export.Window.Contains` |
 | The first instant of a local calendar date, safe in zones that skip midnight (Sao Paulo once did) | `export.dayStart(date, deltaDays, loc)`; `time.Date(y, m, d, 0, 0, 0, 0, loc)` returns the previous evening on such a day |
 | Sleep out a slack-go rate-limit error (ctx-aware) | `slackclient.WaitOutRateLimit` |

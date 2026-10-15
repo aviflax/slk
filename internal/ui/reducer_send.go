@@ -482,9 +482,10 @@ func reduceSendMessage(a *App, m SendMessageMsg) tea.Cmd {
 		localTS: localTS, channelID: m.ChannelID, body: messages.TypedBody(m.Text),
 		postTeam: a.activeTeamID, teamID: m.TeamID, typed: m.Typed,
 	}
+	ins.row, ins.begun = a.localRow(localTS, ins.body, "", ""), a.now()
 	a.pendingOps.BeginInsert(ins)
 	for _, s := range a.sinksFor(m.ChannelID).channel {
-		s.InsertLocal(a.localRow(localTS, ins.body, "", ""))
+		s.InsertLocal(cloneMessageItem(ins.row))
 	}
 	messageSvc := a.messageSvc
 	chID, text := ids.ChannelID(m.ChannelID), m.Text

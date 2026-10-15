@@ -83,6 +83,11 @@ type pendingInsert struct {
 	// text as typed, given back to its composer if the send fails.
 	teamID string
 	typed  string
+	// row is the placeholder (localRow) as its thread or channel shows
+	// it, put back by a reload of a pane (pendingOps.view); begun is
+	// when the send began (holdFetched).
+	row   messages.MessageItem
+	begun time.Time
 }
 
 // conversation is the conversation ins posts to.
@@ -239,13 +244,20 @@ func (p *pendingOps) pendingIn(k conversationKey) bool {
 }
 
 // HoldEcho holds m, a message the current user posted, when a send is
-// pending in its conversation, and reports whether it did. The caller
+// pending in its conversation, and reports whether it did. A reload of
+// a pane holds the user's fetched messages the same way (holdFetched). The caller
 // shows nothing for a held message: EndInsert hands it back once the
 // conversation has no send pending, or drops it if a result showed it.
 func (p *pendingOps) HoldEcho(m NewMessageMsg) bool {
 	k := conversationOf(m.TeamID, m.ChannelID, m.Message)
 	if !p.pendingIn(k) {
 		return false
+	}
+	// A message held already (a fetch held it, or its echo came twice)
+	// is held once, in its newest state.
+	if i := slices.IndexFunc(p.held[k], func(h NewMessageMsg) bool { return h.Message.TS == m.Message.TS }); i >= 0 {
+		p.held[k][i] = m
+		return true
 	}
 	p.held[k] = append(p.held[k], m)
 	return true

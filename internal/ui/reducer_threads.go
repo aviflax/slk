@@ -179,10 +179,12 @@ var reduceThreads reducerFunc = func(a *App, msg tea.Msg) (tea.Cmd, bool) {
 				}
 			}
 		}
-		// Ephemeral replies already on screen are carried over: the
-		// fetch never contains them, and opening a thread clears the
-		// panel first, so any still shown belong to this thread.
-		a.threadPanel.SetThread(parentMsg, keepEphemerals(m.Replies, a.threadPanel.Replies()), channelID, m.ThreadTS)
+		// paneRows puts back the user's pending edits, deletes and
+		// replies, and the ephemeral replies already on screen:
+		// opening a thread clears the panel first, so any still shown
+		// belong to this thread.
+		a.threadPanel.SetThread(a.threadParent(channelID, parentMsg),
+			a.paneRows(a.threadPanel, channelID, m.ThreadTS, m.Replies, a.threadPanel.Replies()), channelID, m.ThreadTS)
 		if linkNav != nil {
 			if string(linkNav.MessageTS) == m.ThreadTS {
 				a.threadPanel.GoToTop()
@@ -326,10 +328,11 @@ var reduceThreads reducerFunc = func(a *App, msg tea.Msg) (tea.Cmd, bool) {
 			body:     messages.TypedBody(m.Text),
 			postTeam: a.activeTeamID, teamID: m.TeamID, typed: m.Typed,
 		}
+		ins.row, ins.begun = a.localRow(localTS, ins.body, m.ThreadTS, ""), a.now()
 		a.pendingOps.BeginInsert(ins)
 		sinks := a.replySinksFor(m.ChannelID, m.ThreadTS, m.Broadcast)
 		if sinks.thread != nil {
-			sinks.thread.InsertLocal(a.localRow(localTS, ins.body, m.ThreadTS, ""))
+			sinks.thread.InsertLocal(cloneMessageItem(ins.row))
 		}
 		// Broadcast ("Also send to #channel"): the reply will also
 		// land in the parent channel feed as a thread_broadcast row.
@@ -339,7 +342,9 @@ var reduceThreads reducerFunc = func(a *App, msg tea.Msg) (tea.Cmd, bool) {
 		// in ThreadReplySentMsg below.
 		// sinks.channel is empty unless m.Broadcast.
 		for _, s := range sinks.channel {
-			s.InsertLocal(a.localRow(localTS, ins.body, m.ThreadTS, "thread_broadcast"))
+			row := cloneMessageItem(ins.row)
+			row.Subtype = "thread_broadcast"
+			s.InsertLocal(row)
 		}
 		threads := a.threads
 		chID := ids.ChannelID(m.ChannelID)

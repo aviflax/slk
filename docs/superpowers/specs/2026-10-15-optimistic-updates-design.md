@@ -454,6 +454,51 @@ Slack confirms, since a closed panel cannot be put back as it was; and
 parent reply counts do not change on a reply's delete, neither
 optimistically nor on the echo, as before.
 
+### Reloads (`pending_view.go`)
+
+A pane's rows are replaced wholesale by a history fetch, a cache read
+on entering a channel or opening a thread, and a fetch around a
+message; older history is prepended. Those rows come from Slack or its
+cache and know nothing of the operations still pending, so every such
+replacement goes through `paneRows` (`olderRows` for a prepended page,
+`threadParent` for a thread's parent row), which puts them back on top
+(`pendingOps.view`):
+
+- a message with an edit in flight or waiting shows its newest edit's
+  body; the fetched body becomes `server` if nothing was known;
+- a message with a delete pending stays out, and the pending delete
+  keeps the fetched row for that pane (`keepDeleted`), so a failed
+  delete restores Slack's state as the fetch had it, in that pane too;
+- a message held already stays hidden, and so does one of the user's
+  own messages in a conversation with a send pending, unless a result
+  recorded it, when it is stamped no earlier than a minute
+  (`sendHoldWindow`, for clock skew) before the oldest send pending
+  there (`holdFetched`). Slack may post a send before answering it, so
+  a fetch can bring the send's own message while its placeholder shows;
+  like an echo it cannot say which send it is. It is held as an echo
+  is, so the result settles the placeholder onto it and drops it, or
+  the release shows it: once either way. Showing it at once would show
+  the message twice until the result. Older messages of the user's
+  cannot be a pending send's and show at once. `HoldEcho` keeps one
+  entry per TS, so a fetched message whose echo follows is held once;
+- the ephemerals the pane showed for the same conversation stay
+  (`keepEphemerals`);
+- each pending send's placeholder (`pendingInsert.row`, the row
+  `localRow` built at Enter) comes after every row Slack knows, in the
+  order sent; a broadcast reply's shows in the channel feed as a
+  `thread_broadcast`.
+
+`TestPaneRowsGoThroughPaneRows` fails on any `SetMessages`,
+`PrependMessages` or `SetThread` in package `ui` whose rows are neither
+nil (a clear) nor from `paneRows`/`olderRows`; `splitWindow` copies a
+pane's rows and is exempt. Both rapid tests reload the panes at random
+points: `TestEditsAndDeletesEndOnSlacksState` also checks after every
+step that a message being deleted is not shown and one with an edit in
+flight shows the newest edit, and `TestHoldAndReleaseShowsEachMessageOnce`
+checks that a reload shows every pending placeholder, no message twice,
+no held message and no pending send's own message beside its
+placeholder.
+
 A placeholder's TS (`messages.IsLocalTS`) is slk's own until the post
 returns. It must never reach Slack, the cache, a mark, the navigation
 history or a link. The guards:

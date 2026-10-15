@@ -6,6 +6,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"time"
 )
 
 // Row operations on a pane's []MessageItem, located by TS. Both content
@@ -180,6 +181,12 @@ type RemovedRow struct {
 	Item     MessageItem
 	Selected bool
 	LeftOn   string
+}
+
+// TSAt is the Slack TS ("<seconds>.<microseconds>") of instant t, to
+// compare with CompareTS.
+func TSAt(t time.Time) string {
+	return fmt.Sprintf("%d.%06d", t.Unix(), t.Nanosecond()/1000)
 }
 
 // CompareTS orders two Slack TSes ("<seconds>.<microseconds>") by time,

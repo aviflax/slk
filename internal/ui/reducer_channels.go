@@ -147,11 +147,13 @@ var reduceChannels reducerFunc = func(a *App, msg tea.Msg) (tea.Cmd, bool) {
 			// error before returning nil. cloneMessageItems gives each
 			// window its own copy — two same-channel windows must not
 			// alias one slice (in-place model writes would cross-leak).
-			// Ephemerals already on screen are carried over: the fetch
-			// never contains them, and they belong to this channel
-			// (a channel switch clears the pane before its fetch lands).
+			// paneRows puts back what the fetch cannot know: the
+			// user's pending edits, deletes and sends, and the
+			// ephemerals already on screen, which belong to this
+			// channel (a channel switch clears the pane before its
+			// fetch lands).
 			if m.Messages != nil {
-				mm.SetMessages(keepEphemerals(cloneMessageItems(m.Messages), mm.Messages()))
+				mm.SetMessages(a.paneRows(mm, m.ChannelID, "", cloneMessageItems(m.Messages), mm.Messages()))
 			}
 		}
 		// Authoritative permalink completion: this is the freshest
@@ -183,7 +185,7 @@ var reduceChannels reducerFunc = func(a *App, msg tea.Msg) (tea.Cmd, bool) {
 					m.ChannelID, m.AnchorTS, mm.OldestTS())
 				continue
 			}
-			mm.PrependMessages(cloneMessageItems(m.Messages))
+			mm.PrependMessages(a.olderRows(mm, m.ChannelID, cloneMessageItems(m.Messages)))
 		}
 		if m.Err != nil {
 			// The spinner is gone; without this the user would take
@@ -215,7 +217,7 @@ var reduceChannels reducerFunc = func(a *App, msg tea.Msg) (tea.Cmd, bool) {
 		if !found {
 			return func() tea.Msg { return ToastMsg{Text: "Message not found in loaded history"} }, true
 		}
-		a.messagepane.SetMessages(m.Messages)
+		a.messagepane.SetMessages(a.paneRows(a.messagepane, m.ChannelID, "", m.Messages, a.messagepane.Messages()))
 		a.messagepane.SelectByTS(m.TargetTS)
 		return nil, true
 
@@ -458,7 +460,7 @@ func reduceChannelSelected(a *App, m ChannelSelectedMsg) (tea.Cmd, bool) {
 		// -- e.g., a channel verified empty within the last 30s).
 		// Mark-as-read if non-empty. No fetch.
 		a.messagepane.SetLoading(false)
-		a.messagepane.SetMessages(cached)
+		a.messagepane.SetMessages(a.paneRows(a.messagepane, m.ID, "", cached, nil))
 		a.statusbar.SetSyncing(false)
 		debuglog.Cache("ChannelSelectedMsg: channel=%s tier=1_fresh", m.ID)
 		tier = "1_fresh"
@@ -490,7 +492,7 @@ func reduceChannelSelected(a *App, m ChannelSelectedMsg) (tea.Cmd, bool) {
 		//     render + fire fetch + show indicator so the user
 		//     knows it's being checked.
 		a.messagepane.SetLoading(false)
-		a.messagepane.SetMessages(cached)
+		a.messagepane.SetMessages(a.paneRows(a.messagepane, m.ID, "", cached, nil))
 		a.statusbar.SetSyncing(true)
 		debuglog.Cache("ChannelSelectedMsg: channel=%s tier=2_verify", m.ID)
 		tier = "2_verify"
@@ -501,7 +503,7 @@ func reduceChannelSelected(a *App, m ChannelSelectedMsg) (tea.Cmd, bool) {
 		// Tier 3: no cache at all (genuine cold-start,
 		// never-visited channel). Spinner + fetch.
 		a.messagepane.SetLoading(true)
-		a.messagepane.SetMessages(nil)
+		a.messagepane.SetMessages(a.paneRows(a.messagepane, m.ID, "", nil, nil))
 		a.statusbar.SetSyncing(false)
 		debuglog.Cache("ChannelSelectedMsg: channel=%s tier=3_spinner", m.ID)
 		tier = "3_spinner"

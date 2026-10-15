@@ -68,10 +68,32 @@ func (s *slackModel) change(ts string, body messages.Body, droppable bool) {
 	s.events = append(s.events, slackEvent{NewMessageMsg{ChannelID: "C1", Changed: true, Message: row}, droppable})
 }
 
+// rows is what a history fetch returns of the messages tss: each one
+// Slack has not deleted, with its stored body, as editApp's fixture
+// shows it.
+func (s *slackModel) rows(tss ...string) []messages.MessageItem {
+	out := []messages.MessageItem{}
+	for _, ts := range tss {
+		if s.deleted[ts] {
+			continue
+		}
+		row := messages.MessageItem{TS: ts, UserID: "USELF"}
+		switch ts {
+		case "5.000000":
+			row.ReplyCount = 1
+		case "6.000000":
+			row.ThreadTS = "5.000000"
+		}
+		s.body[ts].Apply(&row)
+		out = append(out, row)
+	}
+	return out
+}
+
 // However the user's edits and deletes of their messages interleave
 // with their results (success, failure, or a failure after Slack
-// stored the edit), Slack's echoes, other clients' edits and older
-// history loading:
+// stored the edit), Slack's echoes, other clients' edits, older history
+// loading and both panes being reloaded from Slack:
 //
 //   - at most one chat.update per message is in flight, and Slack
 //     receives a message's edits in the order the user made them;
@@ -253,6 +275,12 @@ func TestEditsAndDeletesEndOnSlacksState(t *testing.T) {
 				if len(slack.events) > 0 && slack.events[0].droppable {
 					slack.events = slack.events[1:]
 				}
+			case "refetch":
+				// A history fetch of the channel and of the open thread
+				// lands with Slack's state as it is now, knowing
+				// nothing of the user's edits and deletes in flight.
+				a.Update(MessagesLoadedMsg{ChannelID: "C1", Messages: slack.rows("1.000000", "5.000000")})
+				a.Update(ThreadRepliesLoadedMsg{ThreadTS: "5.000000", Replies: slack.rows("6.000000")})
 			case "prepend":
 				older++
 				a.messagepane.PrependMessages([]messages.MessageItem{
@@ -265,6 +293,24 @@ func TestEditsAndDeletesEndOnSlacksState(t *testing.T) {
 			for _, rows := range [][]messages.MessageItem{a.messagepane.Messages(), a.threadPanel.Replies()} {
 				if !realSorted(rows) {
 					rt.Fatalf("rows out of TS order: %q", rowsOf(rows))
+				}
+			}
+			// Whatever reloaded the panes, a message being deleted
+			// stays out of them, and one with an edit in flight shows
+			// the newest edit typed.
+			for _, ts := range []string{"1.000000", "5.000000", "6.000000"} {
+				for _, pane := range panesOf(a, ts) {
+					_, deleting := deleteRes[ts]
+					switch {
+					case !pane.ok:
+					case deleting:
+						rt.Fatalf("%s shown in %s while its delete is pending", ts, pane.name)
+					case inFlight[ts].EditID != 0:
+						typed := typedOrder[ts]
+						if want := editedBody(typed[len(typed)-1]); !reflect.DeepEqual(pane.body, want) {
+							rt.Fatalf("%s in %s shows %+v while its edit to %q is in flight", ts, pane.name, pane.body, typed[len(typed)-1])
+						}
+					}
 				}
 			}
 			for ts, typed := range typedOrder {
@@ -305,7 +351,7 @@ func TestEditsAndDeletesEndOnSlacksState(t *testing.T) {
 			}
 		}
 
-		actions := []string{"edit", "edit", "result", "result", "event", "event", "drop", "other", "delete", "deleteResult", "prepend"}
+		actions := []string{"edit", "edit", "result", "result", "event", "event", "drop", "other", "delete", "deleteResult", "prepend", "refetch"}
 		for range rapid.IntRange(1, 40).Draw(rt, "steps") {
 			step(rapid.SampledFrom(actions).Draw(rt, "action"))
 			check()

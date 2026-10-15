@@ -275,14 +275,6 @@ func TestPendingDelete_FailureLeavesAMovedCursor(t *testing.T) {
 // of it that settled while the delete was pending, failed or not, and
 // another client's edit, are what comes back.
 func TestPendingDelete_FailureRestoresTheCurrentBody(t *testing.T) {
-	deleteFails := func(a *App) {
-		a.SetMessageService(core.NewMessageService(core.MessageServiceFuncs{
-			Edit: a.messageSvc.Edit,
-			Delete: func(ch ids.ChannelID, ts ids.MessageTS) core.Msg {
-				return MessageDeletedMsg{ChannelID: string(ch), TS: string(ts), Err: errors.New("boom")}
-			},
-		}))
-	}
 	t.Run("edit fails, then the delete", func(t *testing.T) {
 		a := editApp(t, errors.New("boom"))
 		deleteFails(a)
@@ -314,6 +306,16 @@ func TestPendingDelete_FailureRestoresTheCurrentBody(t *testing.T) {
 		ch, _ := drawn(a)
 		wantDrawn(t, "channel", ch, "slack blocks", "▌one")
 	})
+}
+
+// deleteFails keeps a's edit service and makes every delete fail.
+func deleteFails(a *App) {
+	a.SetMessageService(core.NewMessageService(core.MessageServiceFuncs{
+		Edit: a.messageSvc.Edit,
+		Delete: func(ch ids.ChannelID, ts ids.MessageTS) core.Msg {
+			return MessageDeletedMsg{ChannelID: string(ch), TS: string(ts), Err: errors.New("boom")}
+		},
+	}))
 }
 
 // A delete Slack answers with message_not_found leaves the message

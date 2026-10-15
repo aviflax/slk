@@ -2118,7 +2118,7 @@ func (a *App) openThreadPanel(parent messages.MessageItem, channelID, threadTS s
 	a.threadVisible = true
 	a.statusbar.SetInThread(true)
 	a.focusedPanel = PanelThread
-	a.threadPanel.SetThread(parent, nil, channelID, threadTS)
+	a.threadPanel.SetThread(a.threadParent(channelID, parent), a.paneRows(a.threadPanel, channelID, threadTS, nil, nil), channelID, threadTS)
 	a.threadCompose.SetChannel(a.threadComposeChannelName(channelID))
 	a.threadCompose.SetActiveChannel(channelID)
 	a.threadCompose.SetDraftContext(a.activeTeamID, channelID, threadTS)
@@ -2394,7 +2394,8 @@ func (a *App) openSelectedThreadCmd(debounce bool) tea.Cmd {
 			cachedReplies = cached[1:] // strip parent
 		}
 	}
-	a.threadPanel.SetThread(parent, cachedReplies, sum.ChannelID, sum.ThreadTS)
+	a.threadPanel.SetThread(a.threadParent(sum.ChannelID, parent),
+		a.paneRows(a.threadPanel, sum.ChannelID, sum.ThreadTS, cachedReplies, nil), sum.ChannelID, sum.ThreadTS)
 	a.threadCompose.SetChannel(a.threadComposeChannelName(sum.ChannelID))
 	a.threadCompose.SetActiveChannel(sum.ChannelID)
 	a.threadCompose.SetDraftContext(a.activeTeamID, sum.ChannelID, sum.ThreadTS)
@@ -3281,7 +3282,7 @@ func (a *App) SetCustomEmoji(customs map[string]string) {
 func (a *App) SetInitialChannel(channelID, channelName string, msgs []messages.MessageItem) {
 	a.activeChannelID = channelID
 	a.messagepane.SetChannel(channelName, "")
-	a.messagepane.SetMessages(msgs)
+	a.messagepane.SetMessages(a.paneRows(a.messagepane, channelID, "", msgs, nil))
 	a.compose.SetChannel(channelName)
 	a.compose.SetActiveChannel(channelID)
 	a.compose.SetDraftContext(a.activeTeamID, channelID, "")
