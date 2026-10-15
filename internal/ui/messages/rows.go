@@ -190,13 +190,19 @@ func TSAt(t time.Time) string {
 }
 
 // CompareTS orders two Slack TSes ("<seconds>.<microseconds>") by time,
-// numerically, so "9.5" sorts before "10.0". A TS that is not of that
-// shape (a placeholder) compares as a string.
+// numerically, so "9.5" sorts before "10.0". A string not of that shape
+// (a placeholder, "") sorts after every TS, and such strings sort among
+// themselves as strings, so the order is total on any strings.
 func CompareTS(a, b string) int {
 	as, af, aok := splitTS(a)
 	bs, bf, bok := splitTS(b)
-	if !aok || !bok {
+	switch {
+	case !aok && !bok:
 		return strings.Compare(a, b)
+	case !aok:
+		return 1
+	case !bok:
+		return -1
 	}
 	if c := cmp.Compare(as, bs); c != 0 {
 		return c
@@ -240,18 +246,30 @@ func Insert(rows []MessageItem, item MessageItem) ([]MessageItem, RowChange) {
 	if item.TS != "" && IndexOfTS(rows, item.TS) >= 0 {
 		return rows, noRowChange
 	}
-	i := len(rows)
-	if ordered(item) {
+	if !ordered(item) {
+		return append(rows, item), RowChange{Op: RowAdded, Index: len(rows)}
+	}
+	// From the back: the rows Slack knows are in order, so the newest
+	// arrival, the common case, stops at the first row it passes.
+	i := -1
+	for j := len(rows) - 1; j >= 0; j-- {
+		if !ordered(rows[j]) {
+			continue
+		}
+		if CompareTS(rows[j].TS, item.TS) <= 0 {
+			break
+		}
+		i = j
+	}
+	if i < 0 {
+		// No row Slack knows is newer: after the last of them, ahead
+		// of any placeholders.
 		i = 0
-		for j, r := range rows {
-			if !ordered(r) {
-				continue
-			}
-			if CompareTS(r.TS, item.TS) > 0 {
-				i = j
+		for j := len(rows) - 1; j >= 0; j-- {
+			if ordered(rows[j]) {
+				i = j + 1
 				break
 			}
-			i = j + 1
 		}
 	}
 	return slices.Insert(rows, i, item), RowChange{Op: RowAdded, Index: i}

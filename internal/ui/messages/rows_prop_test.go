@@ -467,3 +467,33 @@ func TestLastIndexBeforeIsTheNearestKeptRow(t *testing.T) {
 		}
 	})
 }
+
+// CompareTS is a total order on any strings, Slack TSes or not: a TS
+// that is not "<seconds>.<microseconds>" (a placeholder, garbage) sorts
+// after every one that is, and such strings sort among themselves as
+// strings. Comparing them as strings against numeric TSes broke
+// transitivity: "10.0" < "9.0x" < "9.5" < "10.0".
+func TestCompareTSIsATotalOrder(t *testing.T) {
+	ts := rapid.OneOf(
+		proptest.TS(),
+		rapid.SampledFrom([]string{"9.0x", "10", "1.5", "local:1", "local:10", "", "-1.0", "x"}),
+		rapid.String(),
+	)
+	rapid.Check(t, func(t *rapid.T) {
+		a, b, c := ts.Draw(t, "a"), ts.Draw(t, "b"), ts.Draw(t, "c")
+		if CompareTS(a, b) != -CompareTS(b, a) {
+			t.Fatalf("not antisymmetric: %q %q", a, b)
+		}
+		if CompareTS(a, b) <= 0 && CompareTS(b, c) <= 0 && CompareTS(a, c) > 0 {
+			t.Fatalf("not transitive: %q <= %q <= %q but %q > %q", a, b, c, a, c)
+		}
+		_, _, aok := splitTS(a)
+		_, _, bok := splitTS(b)
+		if aok && !bok && CompareTS(a, b) >= 0 {
+			t.Fatalf("Slack TS %q does not sort before malformed %q", a, b)
+		}
+	})
+	if CompareTS("10.0", "9.0x") < 0 && CompareTS("9.0x", "9.5") < 0 && CompareTS("9.5", "10.0") < 0 {
+		t.Error("10.0 < 9.0x < 9.5 < 10.0: a cycle")
+	}
+}

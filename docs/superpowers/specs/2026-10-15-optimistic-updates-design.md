@@ -80,7 +80,7 @@ func RemoveAt(rows []MessageItem, i int) ([]MessageItem, RowChange)
 func PatchTS(rows []MessageItem, ts string, f func(*MessageItem)) ([]MessageItem, RowChange) // from the front
 func Insert(rows []MessageItem, item MessageItem) ([]MessageItem, RowChange) // in TS order; no-op if shown
 func IsNewest(rows []MessageItem, i int) bool // no row Slack knows after i: the pane follows it
-func CompareTS(a, b string) int // numeric time order of Slack TSes
+func CompareTS(a, b string) int // numeric time order of Slack TSes; anything else after, as strings
 func Upsert(rows []MessageItem, item MessageItem) ([]MessageItem, RowChange) // replace, else Insert
 // Settle replaces the placeholder localTS with item, which then moves
 // to where its TS belongs (RowReplaced at its index, or RowMoved from
@@ -123,7 +123,9 @@ duplicate TSes, reports its op, and keeps every other row's order;
 `RemoveTS` then re-inserting at the reported index restores the slice;
 on TS-sorted rows `Insert` undoes `RemoveAt` and is a no-op on a
 present TS, and it keeps the rows sorted after any prepends and
-appends; `CompareTS` is the time order. `TestRowOpsKeepPaneOrder`
+appends; `CompareTS` is the time order, and a total order on any
+strings. `Insert` finds its place from the back, so the newest arrival
+costs one comparison. `TestRowOpsKeepPaneOrder`
 runs random sequences of arrivals, sends, settles (onto new or shown
 TSes), removals and duplicates, and checks the invariant and that
 `Selection` keeps the cursor on its message after every step.
