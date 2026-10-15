@@ -25,7 +25,8 @@
 //  3. After: IsSelfSent drops the echo carrying a recorded TS.
 //
 // A failed send gives the text as typed back to the composer it came
-// from. If Slack posted it anyway (a timeout after Slack accepted the
+// from, or to the clipboard when that composer has a newer draft
+// (giveTextBack). If Slack posted it anyway (a timeout after Slack accepted the
 // post), its held echo is released like any other and the message
 // shows once, from the echo.
 //
