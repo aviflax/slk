@@ -18,7 +18,8 @@ import (
 )
 
 func fetchOlderMessages(client *slackclient.Client, channelID, latestTS string, db *cache.DB, userNames *userNameStore, tsFormat string, router *workspaceRouter) []messages.MessageItem {
-	ctx := context.Background()
+	ctx, cancel := context.WithTimeout(context.Background(), requestTimeout)
+	defer cancel()
 	debuglog.Cache("fetchOlderMessages: channel=%s latest_ts=%s entry", channelID, latestTS)
 	start := time.Now()
 	history, err := client.GetOlderHistory(ctx, channelID, 50, latestTS)
@@ -43,7 +44,8 @@ func fetchOlderMessages(client *slackclient.Client, channelID, latestTS string, 
 // return value alone (the FetchAround closure treats both as
 // failure).
 func fetchMessagesAround(client *slackclient.Client, channelID, targetTS string, db *cache.DB, userNames *userNameStore, tsFormat string, router *workspaceRouter) []messages.MessageItem {
-	ctx := context.Background()
+	ctx, cancel := context.WithTimeout(context.Background(), requestTimeout)
+	defer cancel()
 	debuglog.Cache("fetchMessagesAround: channel=%s target_ts=%s entry", channelID, targetTS)
 	start := time.Now()
 	history, err := client.GetHistoryAround(ctx, channelID, targetTS, 25)
@@ -462,7 +464,8 @@ func loadCachedThreadReplies(
 // failed background refresh doesn't wipe a successfully-rendered
 // cache view. Do NOT change nil to mean "empty channel".
 func fetchChannelMessages(client *slackclient.Client, channelID string, db *cache.DB, userNames *userNameStore, tsFormat string, avatarCache *avatar.Cache, router *workspaceRouter) []messages.MessageItem {
-	ctx := context.Background()
+	ctx, cancel := context.WithTimeout(context.Background(), requestTimeout)
+	defer cancel()
 	debuglog.Cache("fetchChannelMessages: channel=%s entry", channelID)
 	start := time.Now()
 	history, err := client.GetHistory(ctx, channelID, 50, "")
@@ -545,7 +548,8 @@ func fetchChannelMessages(client *slackclient.Client, channelID string, db *cach
 // so the ThreadRepliesLoadedMsg consumer can decide whether to clobber
 // an already-rendered cached view.
 func fetchThreadReplies(client *slackclient.Client, channelID, threadTS string, db *cache.DB, userNames *userNameStore, tsFormat string, avatarCache *avatar.Cache, router *workspaceRouter) []messages.MessageItem {
-	ctx := context.Background()
+	ctx, cancel := context.WithTimeout(context.Background(), requestTimeout)
+	defer cancel()
 	debuglog.Cache("fetchThreadReplies: channel=%s thread_ts=%s entry", channelID, threadTS)
 	start := time.Now()
 	history, err := client.GetReplies(ctx, channelID, threadTS)

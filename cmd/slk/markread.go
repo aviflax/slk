@@ -202,7 +202,11 @@ func markChannelReadAsync(
 	if p != nil {
 		notify = func(m tea.Msg) { p.Send(m) }
 	}
-	go markChannelReadAndNotify(ctx, client, db, notify, channelID, ts)
+	go func() {
+		ctx, cancel := context.WithTimeout(ctx, requestTimeout)
+		defer cancel()
+		markChannelReadAndNotify(ctx, client, db, notify, channelID, ts)
+	}()
 }
 
 func (h *rtmEventHandler) OnChannelMarked(channelID, ts string, unreadCount, mentionCount int) {

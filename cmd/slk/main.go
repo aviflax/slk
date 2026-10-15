@@ -918,7 +918,8 @@ func run() error {
 				if wctx == nil {
 					return nil
 				}
-				ctx := context.Background()
+				ctx, cancel := context.WithTimeout(context.Background(), requestTimeout)
+				defer cancel()
 				if err := wctx.Client.JoinChannel(ctx, chIDStr); err != nil {
 					return ui.ChannelJoinFailedMsg{ID: chIDStr, Name: channelName, Err: err}
 				}
@@ -1354,6 +1355,8 @@ func run() error {
 				if wctx == nil {
 					return nil
 				}
+				ctx, cancel := context.WithTimeout(ctx, requestTimeout)
+				defer cancel()
 				return wctx.Client.AddReaction(ctx, string(channelID), string(messageTS), emojiName)
 			},
 			func(channelID ids.ChannelID, messageTS ids.MessageTS, emojiName string) error {
@@ -1361,6 +1364,8 @@ func run() error {
 				if wctx == nil {
 					return nil
 				}
+				ctx, cancel := context.WithTimeout(ctx, requestTimeout)
+				defer cancel()
 				return wctx.Client.RemoveReaction(ctx, string(channelID), string(messageTS), emojiName)
 			},
 			// LoadFrecent: not workspace-specific, captures only db.

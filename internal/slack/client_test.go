@@ -169,18 +169,18 @@ func (m *mockSlackAPI) SearchMessagesContext(ctx context.Context, query string, 
 	return &slack.SearchMessages{}, nil
 }
 
-func (m *mockSlackAPI) GetConversationsForUser(params *slack.GetConversationsForUserParameters) ([]slack.Channel, string, error) {
+func (m *mockSlackAPI) GetConversationsForUserContext(_ context.Context, params *slack.GetConversationsForUserParameters) ([]slack.Channel, string, error) {
 	return nil, "", nil
 }
 
-func (m *mockSlackAPI) GetConversationHistory(params *slack.GetConversationHistoryParameters) (*slack.GetConversationHistoryResponse, error) {
+func (m *mockSlackAPI) GetConversationHistoryContext(_ context.Context, params *slack.GetConversationHistoryParameters) (*slack.GetConversationHistoryResponse, error) {
 	if m.getConversationHistoryFn != nil {
 		return m.getConversationHistoryFn(params)
 	}
 	return nil, nil
 }
 
-func (m *mockSlackAPI) GetConversationReplies(params *slack.GetConversationRepliesParameters) ([]slack.Message, bool, string, error) {
+func (m *mockSlackAPI) GetConversationRepliesContext(_ context.Context, params *slack.GetConversationRepliesParameters) ([]slack.Message, bool, string, error) {
 	if m.getConversationRepliesFn != nil {
 		return m.getConversationRepliesFn(params)
 	}
@@ -188,10 +188,6 @@ func (m *mockSlackAPI) GetConversationReplies(params *slack.GetConversationRepli
 		{Msg: slack.Msg{Timestamp: "1700000001.000000", Text: "parent msg", User: "U1"}},
 		{Msg: slack.Msg{Timestamp: "1700000002.000000", Text: "reply 1", User: "U2"}},
 	}, false, "", nil
-}
-
-func (m *mockSlackAPI) GetUserInfo(user string) (*slack.User, error) {
-	return nil, fmt.Errorf("user not found")
 }
 
 func (m *mockSlackAPI) GetUserInfoContext(ctx context.Context, user string) (*slack.User, error) {
@@ -209,38 +205,34 @@ func (m *mockSlackAPI) GetEmojiContext(_ context.Context) (map[string]string, er
 	return nil, nil
 }
 
-func (m *mockSlackAPI) PostMessage(channelID string, options ...slack.MsgOption) (string, string, error) {
-	return "", "", nil
-}
-
 func (m *mockSlackAPI) PostMessageContext(ctx context.Context, channelID string, options ...slack.MsgOption) (string, string, error) {
 	return "", "", nil
 }
 
-func (m *mockSlackAPI) UpdateMessage(channelID, timestamp string, options ...slack.MsgOption) (string, string, string, error) {
+func (m *mockSlackAPI) UpdateMessageContext(_ context.Context, channelID, timestamp string, options ...slack.MsgOption) (string, string, string, error) {
 	return "", "", "", nil
 }
 
-func (m *mockSlackAPI) DeleteMessage(channelID, timestamp string) (string, string, error) {
+func (m *mockSlackAPI) DeleteMessageContext(_ context.Context, channelID, timestamp string) (string, string, error) {
 	return "", "", nil
 }
 
-func (m *mockSlackAPI) AddReaction(name string, item slack.ItemRef) error {
+func (m *mockSlackAPI) AddReactionContext(_ context.Context, name string, item slack.ItemRef) error {
 	return nil
 }
 
-func (m *mockSlackAPI) RemoveReaction(name string, item slack.ItemRef) error {
+func (m *mockSlackAPI) RemoveReactionContext(_ context.Context, name string, item slack.ItemRef) error {
 	return nil
 }
 
-func (m *mockSlackAPI) AuthTest() (*slack.AuthTestResponse, error) {
+func (m *mockSlackAPI) AuthTestContext(_ context.Context) (*slack.AuthTestResponse, error) {
 	if m.authTestFn != nil {
 		return m.authTestFn()
 	}
 	return nil, nil
 }
 
-func (m *mockSlackAPI) JoinConversation(channelID string) (*slack.Channel, string, []string, error) {
+func (m *mockSlackAPI) JoinConversationContext(_ context.Context, channelID string) (*slack.Channel, string, []string, error) {
 	return &slack.Channel{GroupConversation: slack.GroupConversation{Conversation: slack.Conversation{ID: channelID}}}, "", nil, nil
 }
 
@@ -2253,7 +2245,7 @@ func TestNewClient_UsesBrowserTransport(t *testing.T) {
 	}
 
 	// Sanity check: a real call goes through and reaches the server.
-	if _, err := c.api.AuthTest(); err != nil {
+	if _, err := c.api.AuthTestContext(context.Background()); err != nil {
 		t.Fatalf("AuthTest: %v", err)
 	}
 	if gotHeaders == nil {

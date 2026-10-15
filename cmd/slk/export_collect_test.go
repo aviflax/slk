@@ -326,7 +326,7 @@ type fakeProfiles struct {
 	calls []string
 }
 
-func (f *fakeProfiles) GetUserProfile(userID string) (*slack.User, error) {
+func (f *fakeProfiles) GetUserProfileContext(_ context.Context, userID string) (*slack.User, error) {
 	f.calls = append(f.calls, userID)
 	if queue := f.errs[userID]; len(queue) > 0 {
 		f.errs[userID] = queue[1:]

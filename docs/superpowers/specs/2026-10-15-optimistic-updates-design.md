@@ -166,7 +166,11 @@ workspace is active, which used to leave a pending send open for good.
 unread, older history, fetch-around, join, upload), so their in-flight
 flags, spinners and upload state clear and a toast says why. `Send` and
 `SendReply` in `cmd/slk` also time out after 30s (`sendTimeout`): a
-send must always end, because echoes are held until it does.
+send must always end, because echoes are held until it does. The
+timeout works because `SlackAPI` declares only slack-go's `*Context`
+methods (`TestSlackAPI_EveryMethodTakesContext`); the plain ones use
+`context.Background()` and dropped every ctx slk passed. Every other
+Web API call the UI waits on is bounded by `requestTimeout`.
 
 The thread pane and the channel panes are kept apart in `rowSinks`
 because the paths write them differently: a broadcast placeholder is a

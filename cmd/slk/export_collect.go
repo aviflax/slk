@@ -30,7 +30,7 @@ type exportSource interface {
 // exportProfileSource is the part of the Slack client that resolves a
 // user ID the cache does not know.
 type exportProfileSource interface {
-	GetUserProfile(userID string) (*slack.User, error)
+	GetUserProfileContext(ctx context.Context, userID string) (*slack.User, error)
 }
 
 // rawConversation is a conversation as Slack returned it, before
@@ -283,7 +283,7 @@ func resolveExportNames(ctx context.Context, convs []export.Conversation, names 
 // ID, and ctx's error when ctx is cancelled during a rate-limit wait.
 func fetchUserName(ctx context.Context, profiles exportProfileSource, id string) (string, error) {
 	for {
-		u, err := profiles.GetUserProfile(id)
+		u, err := profiles.GetUserProfileContext(ctx, id)
 		if err == nil {
 			return profileDisplayName(u), nil
 		}

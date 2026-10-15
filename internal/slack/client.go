@@ -24,9 +24,9 @@ import (
 // SlackAPI defines the subset of the Slack API we use.
 // This interface enables mocking in tests.
 type SlackAPI interface {
-	GetConversationsForUser(params *slack.GetConversationsForUserParameters) ([]slack.Channel, string, error)
-	GetConversationHistory(params *slack.GetConversationHistoryParameters) (*slack.GetConversationHistoryResponse, error)
-	GetConversationReplies(params *slack.GetConversationRepliesParameters) ([]slack.Message, bool, string, error)
+	GetConversationsForUserContext(ctx context.Context, params *slack.GetConversationsForUserParameters) ([]slack.Channel, string, error)
+	GetConversationHistoryContext(ctx context.Context, params *slack.GetConversationHistoryParameters) (*slack.GetConversationHistoryResponse, error)
+	GetConversationRepliesContext(ctx context.Context, params *slack.GetConversationRepliesParameters) ([]slack.Message, bool, string, error)
 	SearchMessagesContext(ctx context.Context, query string, params slack.SearchParameters) (*slack.SearchMessages, error)
 	// Deliberately absent: GetConversations (conversations.list) and
 	// GetUsersContext (users.list). See
@@ -35,19 +35,17 @@ type SlackAPI interface {
 	// GetUserInfo.
 	GetUserGroupsContext(ctx context.Context, options ...slack.GetUserGroupsOption) ([]slack.UserGroup, error)
 	GetUsersInConversationContext(ctx context.Context, params *slack.GetUsersInConversationParameters) ([]string, string, error)
-	GetUserInfo(user string) (*slack.User, error)
 	GetUserInfoContext(ctx context.Context, user string) (*slack.User, error)
 	GetBotInfoContext(ctx context.Context, parameters slack.GetBotInfoParameters) (*slack.Bot, error)
 	GetEmojiContext(ctx context.Context) (map[string]string, error)
-	PostMessage(channelID string, options ...slack.MsgOption) (string, string, error)
 	PostMessageContext(ctx context.Context, channelID string, options ...slack.MsgOption) (string, string, error)
-	UpdateMessage(channelID, timestamp string, options ...slack.MsgOption) (string, string, string, error)
-	DeleteMessage(channelID, timestamp string) (string, string, error)
-	AddReaction(name string, item slack.ItemRef) error
-	RemoveReaction(name string, item slack.ItemRef) error
+	UpdateMessageContext(ctx context.Context, channelID, timestamp string, options ...slack.MsgOption) (string, string, string, error)
+	DeleteMessageContext(ctx context.Context, channelID, timestamp string) (string, string, error)
+	AddReactionContext(ctx context.Context, name string, item slack.ItemRef) error
+	RemoveReactionContext(ctx context.Context, name string, item slack.ItemRef) error
 	GetPermalinkContext(ctx context.Context, params *slack.PermalinkParameters) (string, error)
-	AuthTest() (*slack.AuthTestResponse, error)
-	JoinConversation(channelID string) (*slack.Channel, string, []string, error)
+	AuthTestContext(ctx context.Context) (*slack.AuthTestResponse, error)
+	JoinConversationContext(ctx context.Context, channelID string) (*slack.Channel, string, []string, error)
 	SetUserPresenceContext(ctx context.Context, presence string) error
 	GetUserPresenceContext(ctx context.Context, user string) (*slack.UserPresence, error)
 	SetSnoozeContext(ctx context.Context, minutes int) (*slack.DNDStatus, error)
@@ -306,7 +304,7 @@ func (c *Client) WsDone() <-chan struct{} {
 // slack-go calls also target the workspace host. If a test injected a
 // mock api directly, leave it alone.
 func (c *Client) Connect(ctx context.Context) error {
-	resp, err := c.api.AuthTest()
+	resp, err := c.api.AuthTestContext(ctx)
 	if err != nil {
 		return fmt.Errorf("auth test failed: %w", err)
 	}
@@ -555,7 +553,7 @@ func (c *Client) GetChannels(ctx context.Context) ([]slack.Channel, error) {
 			ExcludeArchived: true,
 		}
 
-		channels, nextCursor, err := c.api.GetConversationsForUser(params)
+		channels, nextCursor, err := c.api.GetConversationsForUserContext(ctx, params)
 		if err != nil {
 			// Handle rate limits gracefully
 			if rlErr, ok := err.(*slack.RateLimitedError); ok {
@@ -646,16 +644,18 @@ func (c *Client) GetUsersInConversation(ctx context.Context, channelID string) (
 // success. Idempotent: joining a channel you're already in is a no-op on
 // Slack's side and returns no error here.
 func (c *Client) JoinChannel(ctx context.Context, channelID string) error {
-	_, _, _, err := c.api.JoinConversation(channelID)
+	_, _, _, err := c.api.JoinConversationContext(ctx, channelID)
 	if err != nil {
 		return fmt.Errorf("joining channel %s: %w", channelID, err)
 	}
 	return nil
 }
 
-// GetUserProfile fetches a single user's profile by ID.
+// GetUserProfile fetches a single user's profile by ID. It takes no ctx:
+// its callers are background name and avatar resolution with none to
+// give. A caller that has one uses GetUserProfileContext.
 func (c *Client) GetUserProfile(userID string) (*slack.User, error) {
-	user, err := c.api.GetUserInfo(userID)
+	user, err := c.api.GetUserInfoContext(context.Background(), userID)
 	if err != nil {
 		return nil, fmt.Errorf("getting user info: %w", err)
 	}
@@ -692,7 +692,7 @@ func (c *Client) GetHistory(ctx context.Context, channelID string, limit int, ol
 		params.Oldest = oldest
 	}
 
-	resp, err := c.api.GetConversationHistory(params)
+	resp, err := c.api.GetConversationHistoryContext(ctx, params)
 	if err != nil {
 		return nil, fmt.Errorf("getting history: %w", err)
 	}
@@ -708,7 +708,7 @@ func (c *Client) GetOlderHistory(ctx context.Context, channelID string, limit in
 		Latest:    latest,
 	}
 
-	resp, err := c.api.GetConversationHistory(params)
+	resp, err := c.api.GetConversationHistoryContext(ctx, params)
 	if err != nil {
 		return nil, fmt.Errorf("getting older history: %w", err)
 	}
@@ -729,7 +729,7 @@ func (c *Client) GetOlderHistory(ctx context.Context, channelID string, limit in
 // by jump-to-message navigation (search results, permalinks) when the
 // target is outside the loaded buffer.
 func (c *Client) GetHistoryAround(ctx context.Context, channelID, ts string, limit int) ([]slack.Message, error) {
-	older, err := c.api.GetConversationHistory(&slack.GetConversationHistoryParameters{
+	older, err := c.api.GetConversationHistoryContext(ctx, &slack.GetConversationHistoryParameters{
 		ChannelID: channelID,
 		Latest:    ts,
 		Inclusive: true,
@@ -741,7 +741,7 @@ func (c *Client) GetHistoryAround(ctx context.Context, channelID, ts string, lim
 	if err := ctx.Err(); err != nil {
 		return nil, fmt.Errorf("getting history around %s: %w", ts, err)
 	}
-	newer, err := c.api.GetConversationHistory(&slack.GetConversationHistoryParameters{
+	newer, err := c.api.GetConversationHistoryContext(ctx, &slack.GetConversationHistoryParameters{
 		ChannelID: channelID,
 		Oldest:    ts,
 		Inclusive: false,
@@ -824,7 +824,7 @@ func (c *Client) GetHistorySince(ctx context.Context, channelID, oldest string, 
 			ChannelID: channelID,
 			Limit:     200,
 		}
-		resp, err := c.api.GetConversationHistory(params)
+		resp, err := c.api.GetConversationHistoryContext(ctx, params)
 		if err != nil {
 			return HistorySinceResult{}, fmt.Errorf("get history (no oldest): %w", err)
 		}
@@ -846,7 +846,7 @@ func (c *Client) GetHistorySince(ctx context.Context, channelID, oldest string, 
 			Limit:     200,
 			Cursor:    cursor,
 		}
-		resp, err := c.api.GetConversationHistory(params)
+		resp, err := c.api.GetConversationHistoryContext(ctx, params)
 		if err != nil {
 			// Rate-limit retry mirrors GetChannels' pattern.
 			if rlErr, ok := err.(*slack.RateLimitedError); ok {
@@ -914,7 +914,7 @@ func (c *Client) SendMessage(ctx context.Context, channelID, text string) (strin
 	if block != nil {
 		opts = append(opts, slack.MsgOptionBlocks(block))
 	}
-	_, ts, err := c.api.PostMessage(channelID, opts...)
+	_, ts, err := c.api.PostMessageContext(ctx, channelID, opts...)
 	if err != nil {
 		return "", "", fmt.Errorf("sending message: %w", err)
 	}
@@ -1145,7 +1145,7 @@ func (c *Client) SendReply(ctx context.Context, channelID, threadTS, text string
 	if broadcast {
 		opts = append(opts, slack.MsgOptionBroadcast())
 	}
-	_, ts, err := c.api.PostMessage(channelID, opts...)
+	_, ts, err := c.api.PostMessageContext(ctx, channelID, opts...)
 	if err != nil {
 		return "", "", fmt.Errorf("sending reply: %w", err)
 	}
@@ -1159,7 +1159,7 @@ func (c *Client) GetReplies(ctx context.Context, channelID, threadTS string) ([]
 	cursor := ""
 
 	for {
-		msgs, hasMore, nextCursor, err := c.api.GetConversationReplies(&slack.GetConversationRepliesParameters{
+		msgs, hasMore, nextCursor, err := c.api.GetConversationRepliesContext(ctx, &slack.GetConversationRepliesParameters{
 			ChannelID: channelID,
 			Timestamp: threadTS,
 			Cursor:    cursor,
@@ -1187,7 +1187,7 @@ func (c *Client) EditMessage(ctx context.Context, channelID, ts, text string) (s
 	if block != nil {
 		opts = append(opts, slack.MsgOptionBlocks(block))
 	}
-	_, _, _, err := c.api.UpdateMessage(channelID, ts, opts...)
+	_, _, _, err := c.api.UpdateMessageContext(ctx, channelID, ts, opts...)
 	if err != nil {
 		return "", fmt.Errorf("editing message: %w", err)
 	}
@@ -1196,7 +1196,7 @@ func (c *Client) EditMessage(ctx context.Context, channelID, ts, text string) (s
 
 // RemoveMessage deletes a message from the channel.
 func (c *Client) RemoveMessage(ctx context.Context, channelID, ts string) error {
-	_, _, err := c.api.DeleteMessage(channelID, ts)
+	_, _, err := c.api.DeleteMessageContext(ctx, channelID, ts)
 	if err != nil {
 		return fmt.Errorf("deleting message: %w", err)
 	}
@@ -1205,12 +1205,12 @@ func (c *Client) RemoveMessage(ctx context.Context, channelID, ts string) error 
 
 // AddReaction adds an emoji reaction to a message.
 func (c *Client) AddReaction(ctx context.Context, channelID, ts, emoji string) error {
-	return c.api.AddReaction(emoji, slack.ItemRef{Channel: channelID, Timestamp: ts})
+	return c.api.AddReactionContext(ctx, emoji, slack.ItemRef{Channel: channelID, Timestamp: ts})
 }
 
 // RemoveReaction removes an emoji reaction from a message.
 func (c *Client) RemoveReaction(ctx context.Context, channelID, ts, emoji string) error {
-	return c.api.RemoveReaction(emoji, slack.ItemRef{Channel: channelID, Timestamp: ts})
+	return c.api.RemoveReactionContext(ctx, emoji, slack.ItemRef{Channel: channelID, Timestamp: ts})
 }
 
 // SetUserPresence sets the authenticated user's presence. Accepts "auto"
