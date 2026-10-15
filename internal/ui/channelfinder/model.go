@@ -477,7 +477,11 @@ func subsequenceScore(name, q string) (int, bool) {
 	qrunes := []rune(q)
 	first, last := -1, -1
 	prevWasSep := true // start of string counts as a word boundary
-	for i, r := range name {
+	// i counts runes, not bytes: the span below is compared with
+	// len(qrunes), so a multibyte name must not look looser than an ASCII one.
+	i := -1
+	for _, r := range name {
+		i++
 		if qi >= len(qrunes) {
 			break
 		}
