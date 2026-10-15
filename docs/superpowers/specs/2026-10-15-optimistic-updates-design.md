@@ -1,6 +1,7 @@
 # Optimistic updates: one shared mechanism
 
-Status: proposed, 2026-10-15
+Status: phases 1 and 2 done, 2026-10-15; phase 3 (optimistic edit and
+delete) not started
 
 ## Problem
 
@@ -63,126 +64,185 @@ as it is; its shape differs and the activity path is already sound.
 
 ### 1. Row operations on `[]MessageItem` (package `messages`)
 
-Pure functions that both panes call, each returning what changed so the
-pane can fix its own selection and caches:
+Pure functions in `internal/ui/messages/rows.go`, each returning a
+`RowChange{Op, Index}` (`RowNone`, `RowAdded`, `RowRemoved`,
+`RowReplaced`) so the pane can fix its own selection and caches:
 
 ```go
-// rows.go
-func IndexOfTS(rows []MessageItem, ts string) int
+func IndexOfTS(rows []MessageItem, ts string) int      // from the back
+func FirstIndexOfTS(rows []MessageItem, ts string) int // from the front
 func ReplaceTS(rows []MessageItem, ts string, item MessageItem) ([]MessageItem, RowChange)
 func RemoveTS(rows []MessageItem, ts string) ([]MessageItem, RowChange)
+func RemoveAt(rows []MessageItem, i int) ([]MessageItem, RowChange)
 func PatchTS(rows []MessageItem, ts string, f func(*MessageItem)) ([]MessageItem, RowChange)
-// Settle replaces the placeholder localTS with item. When a row
-// with item.TS is already present (the echo got there first), the
-// placeholder is removed instead, so the row never appears twice.
+func AppendIfAbsent(rows []MessageItem, item MessageItem) ([]MessageItem, RowChange)
+func Upsert(rows []MessageItem, item MessageItem) ([]MessageItem, RowChange)
+// Settle replaces the placeholder localTS with item (RowReplaced at
+// its index). When another row already has item.TS (the echo got
+// there first), that row takes item and the placeholder is removed
+// (RowRemoved at its old index). No placeholder: RowNone.
 func Settle(rows []MessageItem, localTS string, item MessageItem) ([]MessageItem, RowChange)
 ```
 
-`RowChange` carries the affected index and whether a row was added,
-removed or replaced. Selection adjustment for a removal becomes one
-function both panes use, which settles the `i < selected` vs
-`i <= selected && selected > 0` disagreement in one place. These get
-property tests (`rows_prop_test.go`): `Settle` never yields duplicate
-TSes; `RemoveTS` then re-inserting the removed row at its index
-restores the slice.
+Matching is literal: an empty TS matches a row with an empty TS. The
+send paths (append, settle, roll back, upsert) and the delete path write
+through these; the edit, reaction and reply-count paths only locate their
+row with `FirstIndexOfTS`. `PatchTS` has no caller yet; it is for the
+optimistic edit.
+
+Property tests are in `rows_prop_test.go`: `Settle` never yields
+duplicate TSes, reports its op, and leaves every other row alone;
+`RemoveTS` then re-inserting at the reported index restores the slice.
+
+The selection fix-ups are not unified yet. Each pane's
+`afterLocalRemoved` (used by `RemoveLocal` and by a `Settle` that
+removes) steps back on `i < selected`; `RemoveMessageByTS` steps back on
+`i <= selected && selected > 0`. Phase 3's delete has to pick one.
 
 ### 2. One row-writing interface for both panes
 
 ```go
 // internal/ui/rowsink.go
 type rowSink interface {
-	InsertLocal(item messages.MessageItem)
-	Settle(localTS string, item messages.MessageItem) bool
-	Remove(ts string) (removed messages.MessageItem, index int, ok bool)
-	Restore(item messages.MessageItem, index int)
-	Patch(ts string, f func(*messages.MessageItem)) (prior messages.MessageItem, ok bool)
+	InsertLocal(item messages.MessageItem)            // append unless shown
+	Settle(localTS string, item messages.MessageItem) // messages.Settle, else upsert
+	RemoveLocal(localTS string) bool
 }
 var _ rowSink = (*messages.Model)(nil)
 var _ rowSink = (*thread.Model)(nil)
+
+type rowSinks struct {
+	thread  rowSink   // the thread panel, when it shows the row's thread
+	channel []rowSink // every window showing the row's channel
+}
+func (s rowSinks) settle(localTS string, item messages.MessageItem) // clones per channel window
+func (s rowSinks) removeLocal(localTS string)
+
+func (a *App) sinksFor(channelID string) rowSinks
+func (a *App) replySinksFor(channelID, threadTS string, broadcast bool) rowSinks
+func (a *App) insertSinks(ins pendingInsert) rowSinks // one of the two, for a pending send
+func (a *App) localRow(localTS, text, threadTS, subtype string) messages.MessageItem
+func stampLocalTS(localTS string, broadcast bool, call func() tea.Msg) tea.Cmd
 ```
 
-Each pane implements it as a thin wrapper over the functions in §1 plus
-its own cache and selection fix-up. The `*Reply`-suffixed and `*SelfSent`
-methods are folded into it.
-
-`(*App).sinksFor(channelID, threadTS string) []rowSink` replaces both
-`modelsForChannel` loops in these paths and every inline
-thread-visibility check. A top-level row targets the channel panes; a
-reply targets the thread pane when it shows that thread, and the
-channel panes as well when it is a broadcast; a thread parent targets
-both.
+The thread pane and the channel panes are kept apart in `rowSinks`
+because the paths write them differently: a broadcast placeholder is a
+`thread_broadcast` row only in the channel feed, and only channel
+windows get their own clone of the settled message. `sinksFor` is every
+window on the channel; `replySinksFor` adds the thread panel when it is
+visible on that thread (matched on the panel's own channel, not
+`activeChannelID`), and the channel windows only for a broadcast.
 
 ### 3. A ledger of pending operations (package `ui`)
 
-`selfSendDedup` becomes `pendingOps`, which records each optimistic
-operation until it settles:
+`internal/ui/pending_ops.go`, App field `a.pendingOps`:
 
 ```go
-type pendingOp struct {
-	id        string // "local:N" for inserts; the real TS for edits/deletes
-	kind      opKind // opInsert, opEdit, opDelete
+type pendingInsert struct {
+	localTS   string
 	channelID string
-	threadTS  string
-	prior     messages.MessageItem // for edit/delete rollback
-	index     int                  // for delete rollback
-	typed     string               // the user's text, offered back on failure
+	threadTS  string // "" for a top-level send
+	broadcast bool
+	teamID    string // where the text was typed
+	typed     string // the composer text before mention translation
+	adopted   bool   // the echo has settled the placeholder
 }
+func (ins pendingInsert) origin() commandOrigin // for offerTypedBack
+
+type pendingOps struct { /* inserts []*pendingInsert, oldest first; sentTSes; counter */ }
+func (p *pendingOps) BeginInsert(ins pendingInsert)
+func (p *pendingOps) AdoptEcho(channelID string, msg messages.MessageItem) (pendingInsert, bool)
+func (p *pendingOps) EndInsert(localTS string) (pendingInsert, bool)
+func (p *pendingOps) RecordSent(ts string)
+func (p *pendingOps) IsSelfSent(ts string) bool
+func (p *pendingOps) NextLocalTS() string
+
+func isLocalTS(ts string) bool
+func (a *App) sendingGuard(ts string) (tea.Cmd, bool)
+func (a *App) sendingSelectionGuard() (tea.Cmd, bool)
 ```
 
-The App-level flow is three functions:
+The flow for a send or reply:
 
-- `beginOp(op, apply)` records the op, applies it to `sinksFor(...)`
-  and returns the `tea.Cmd` wrapper that stamps the op ID on the result
-  (replacing the two hand-written type switches).
-- `settleOp(id, item)` on success: `Settle` for inserts, `Patch` with
-  the authoritative text for edits, nothing for deletes. It records
-  the real TS so a late echo is recognised.
-- `failOp(id, err)`: removes the placeholder, restores the prior row
-  or re-inserts the deleted one, offers `typed` back to the composer it
-  came from (`OfferDraft`, as slash commands already do), and shows the
-  failure toast.
+- **Begin** (`reduceSendMessage`, `SendThreadReplyMsg`): mint the id,
+  `BeginInsert` (always, even when no pane shows the placeholder),
+  `InsertLocal` into the sinks, and wrap the service call in
+  `stampLocalTS`. `SendMessageMsg` / `SendThreadReplyMsg` carry `TeamID`
+  and `Typed`, set by the composer's Enter paths.
+- **Echo** (`reduceNewMessage`, after the edit-echo branch and the
+  `IsSelfSent` drop): a non-ephemeral message from the current user with
+  no file attachments, in the same channel and thread as a pending,
+  unadopted insert, is adopted by the oldest such insert. It settles
+  that insert's placeholder in `insertSinks(ins)`, is recorded with
+  `RecordSent`, and returns without the normal echo side effects.
+  Anything else (slk's own uploads, other clients, other threads)
+  renders normally. Debug log decision: `adopted_pending_send`.
+- **Success**: `EndInsert`, `RecordSent`, settle in the sinks (an
+  adopted row is upserted with Slack's response), reply count and
+  threads-dirty for replies. A success with an empty TS removes the
+  placeholder unless the echo already adopted it.
+- **Failure**: `EndInsert`. If adopted, the post went through: keep the
+  row, no toast. Otherwise remove the placeholder, offer `typed` back
+  through `offerTypedBack(ins.origin())` (`OfferDraft` never overwrites
+  a newer draft), and show the failure toast.
 
-**Echo adoption replaces the 3s window.** When a self-authored echo
-arrives for a channel/thread with a pending insert, it settles the
-oldest pending insert there instead of being dropped; the later HTTP
-result then finds the real TS present and `Settle` removes nothing
-twice. Echoes that match no pending op (uploads, other clients) render
-normally. This removes bugs 1 to 3 and the edit silencing. The flicker the
-window was added to prevent (echo text normalised differently from the
-optimistic text) is the same swap the HTTP result already performs, so
-it does not get worse. An echo with files is never adopted by a text
-insert.
+An echo matched by mistake is possible: with a compose send pending in a
+channel, the echo of a forward the user sends there at the same moment
+is adopted by the send. The rows still end right (the send's own result
+appends it, the forward's result dedups), but a failure of that send in
+the window would not give its text back.
+
+Every action that targets the selected message refuses a placeholder
+with "Still sending…": `handleNormalMode` runs `sendingSelectionGuard`
+for every `isMessageOpKey` key plus edit and delete, and `setMark` and
+`openThreadForSelectedMessage` (Enter and click) call `sendingGuard`.
 
 ### 4. Paths moved onto it
 
 | Path | Begin | Success | Failure |
 |---|---|---|---|
-| Channel send | `InsertLocal` | `Settle` | remove, offer text back |
-| Thread reply (+broadcast) | `InsertLocal` on the thread, and the channel when broadcast | `Settle`, reply count | remove, offer text back |
-| **Edit** (new) | `Patch` text, mark edited | `Patch` with Slack's converted text | restore prior, reopen edit with the typed text |
-| **Delete** (new) | `Remove`, keep row and index | nothing | `Restore` |
+| Channel send (done) | `InsertLocal` | `Settle` | `RemoveLocal`, offer text back |
+| Thread reply, +broadcast (done) | `InsertLocal` on the thread, and the channel when broadcast | `Settle`, reply count | `RemoveLocal`, offer text back |
+| **Edit** (phase 3) | patch text, mark edited | patch with Slack's converted text | restore prior, reopen edit with the typed text |
+| **Delete** (phase 3) | remove, keep row and index | nothing | restore at index |
 
 Reactions keep their own mechanism for now, with the duplicated closure
 merged into one function. Activity read, thread mark-read and presence
 are out of scope.
 
-Every action that targets the selected message refuses a `local:` TS
-with a toast ("Still sending…").
-
 ## Phasing
 
-Per AGENTS.md, a refactor commit must not change behaviour, so:
-
-1. **Move (no behaviour change).** §1 row functions with property
-   tests; both panes' existing methods rewritten over them (keeping
-   today's selection fix-ups exactly, the disagreement recorded in a
-   comment); `rowSink` and `sinksFor`; the placeholder builder and the
-   result wrapper. Existing tests pass unchanged.
-2. **Fixes, one commit each with its test:** `Settle` drops a duplicate
-   (bug 1); echo adoption replaces the window (bugs 2, 3); empty-TS
-   cleanup (4); text offered back on failure (5); guard against acting
-   on a placeholder (6).
-3. **Features:** optimistic edit, then optimistic delete.
+1. **Move (no behaviour change). Done:** 96059ab1, 13b6cef7, a5299540.
+2. **Fixes, one commit each with its test. Done:** `Settle` drops a
+   duplicate (bug 1); echo adoption replaces the window (bugs 2, 3);
+   empty-TS cleanup (4); text offered back on a failed send or reply
+   (5, sends only); guard against acting on a placeholder (6).
+3. **Features, not started:** optimistic edit, then optimistic delete.
+   What they need from the code as it stands:
+   - `rowSink` gains `Patch(ts, f) (prior MessageItem, ok bool)`,
+     `Remove(ts) (removed MessageItem, index int, ok bool)` and
+     `Restore(item, index)`. The panes implement them over `PatchTS`
+     and `RemoveTS`/`slices.Insert`. Edits and deletes today locate rows
+     with `FirstIndexOfTS` while `PatchTS`/`RemoveTS` scan from the back;
+     with `Settle` no longer duplicating, pick one direction. Delete
+     also has to settle which selection fix-up wins (see §1).
+   - The thread panel's parent row is not in its replies: an edit of
+     the open thread's parent also patches the parent
+     (`UpdateParentInPlace` today), and a delete of it closes the panel
+     (`WSMessageDeletedMsg` today).
+   - The sinks for an existing message are every channel window plus
+     the thread panel when it shows that channel (the
+     `WSMessageDeletedMsg` / edit-echo fan-out), not
+     `sinksFor`/`replySinksFor`.
+   - `pendingOps` gains entries for edits and deletes, keyed by the real
+     TS, holding the prior row (and index for delete) and, for an edit,
+     the typed text. `EditMessageMsg` / `MessageEditedMsg` and
+     `DeleteMessageMsg` / `MessageDeletedMsg` begin and settle them; a
+     failed edit restores the prior row and reopens the edit with the
+     typed text (bug 5's edit half, still open: a failed edit exits
+     edit mode and discards the text). The edit and delete echoes
+     (`message_changed`, `WSMessageDeletedMsg`) arrive for the user's
+     own changes and must be idempotent against the optimistic state.
 
 ## Out of scope
 
