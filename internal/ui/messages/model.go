@@ -890,27 +890,25 @@ func (m *Model) PrependMessages(msgs []MessageItem) {
 	}
 	// Boundary guard: a backfill that raced a channel re-select (the
 	// re-select replaced the buffer while the backfill was in flight)
-	// can deliver items the buffer already contains. Keep only items
-	// strictly older than the current head. TS comparison is
-	// lexicographic, matching the rest of the model (e.g. buildCache's
-	// lastReadTS compare): real Slack TSes are fixed-width
-	// "seconds.micros" strings. A "local:" optimistic placeholder at
-	// the head compares greater than any numeric TS, so the guard
-	// degrades to keep-everything there — never a wrong drop.
-	//
-	// The head comparison alone is not enough: the list is not always in
-	// TS order (a swapped-in post TS can be newer than a row after it,
-	// and a placeholder head keeps everything), so a row already in the
-	// buffer is also dropped by TS.
+	// can deliver items the buffer already contains. The rows Slack
+	// knows are in TS order (Insert), so keep only items strictly older
+	// than the first of them; placeholders come after them and never
+	// decide it, and with none the guard keeps everything. An item
+	// already in the buffer is also dropped by TS, which covers a page
+	// that overlaps the head.
 	if len(m.messages) > 0 {
-		head := m.messages[0].TS
+		head := ""
+		if i := slices.IndexFunc(m.messages, ordered); i >= 0 {
+			head = m.messages[i].TS
+		}
 		have := make(map[string]struct{}, len(m.messages))
 		for _, item := range m.messages {
 			have[item.TS] = struct{}{}
 		}
 		kept := make([]MessageItem, 0, len(msgs))
 		for _, item := range msgs {
-			if _, dup := have[item.TS]; item.TS < head && !dup {
+			_, dup := have[item.TS]
+			if !dup && (head == "" || CompareTS(item.TS, head) < 0) {
 				kept = append(kept, item)
 			}
 		}

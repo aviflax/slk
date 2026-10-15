@@ -1842,3 +1842,14 @@ func TestPatchKeepsTheBottomAnchored(t *testing.T) {
 		t.Errorf("the edited bottom message's end is below the fold:\n%s", v)
 	}
 }
+
+// Older history is kept when it is older than the first message by
+// time, whatever the digit count of its TS, and a placeholder before
+// the messages does not decide it.
+func TestPrependMessagesComparesByTime(t *testing.T) {
+	m := New([]MessageItem{{TS: "1000.000000", Text: "head"}}, "general")
+	m.PrependMessages([]MessageItem{{TS: "999.000000", Text: "older"}, {TS: "1001.000000", Text: "newer"}})
+	if got := m.Messages(); len(got) != 2 || got[0].TS != "999.000000" {
+		t.Errorf("rows %v, want 999 prepended and 1001 dropped", tsList(got))
+	}
+}
