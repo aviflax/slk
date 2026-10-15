@@ -123,10 +123,10 @@ var reduceChannels reducerFunc = func(a *App, msg tea.Msg) (tea.Cmd, bool) {
 		// early return: slk sent the mark either way, and a window may
 		// open before the echo lands. See selfMarkDedup.
 		a.selfMarks.record(selfMarkKey{channelID: m.ChannelID, ts: m.MarkedTS})
-		// Slack's cursor: the read state the fetch loaded, then the
-		// fetcher's own mark.
-		a.readFloors.advance(a.channelFloor(m.ChannelID), m.LastReadTS)
-		a.readFloors.advance(a.channelFloor(m.ChannelID), m.MarkedTS)
+		// Slack's cursor: the read state the fetch loaded, and the
+		// fetcher's own mark, in flight until ChannelMarkedReadMsg.
+		a.readFloors.held(a.channelFloor(m.ChannelID), m.LastReadTS)
+		a.readFloors.issued(a.channelFloor(m.ChannelID), m.MarkedTS)
 		// Fan out to every window viewing the channel, focused or
 		// not (Phase 3).
 		models := a.modelsForChannel(m.ChannelID)
@@ -228,8 +228,21 @@ var reduceChannels reducerFunc = func(a *App, msg tea.Msg) (tea.Cmd, bool) {
 		return nil, true
 
 	case ChannelMarkedReadMsg:
-		debuglog.Cache("ChannelMarkedReadMsg: channel=%s active=%s (optimistic clear)",
-			m.ChannelID, a.activeChannelID)
+		debuglog.Cache("ChannelMarkedReadMsg: channel=%s ts=%s active=%s err=%v",
+			m.ChannelID, m.TS, a.activeChannelID, m.Err)
+		// A result from a workspace slk has left counts for nothing:
+		// its floors are gone.
+		ours := m.TeamID == "" || m.TeamID == a.activeTeamID
+		if m.Err != nil {
+			// Slack's cursor did not move; nothing to clear.
+			if ours {
+				a.readFloors.failed(a.channelFloor(m.ChannelID), m.TS)
+			}
+			return nil, true
+		}
+		if ours {
+			a.readFloors.held(a.channelFloor(m.ChannelID), m.TS)
+		}
 		a.notifyReadStateChanged()
 		return nil, true
 
@@ -470,11 +483,11 @@ func reduceChannelSelected(a *App, m ChannelSelectedMsg) (tea.Cmd, bool) {
 		channels := a.channels
 		chID := ids.ChannelID(m.ID)
 		latestTS := ids.MessageTS(cached[len(cached)-1].TS)
-		if a.readFloors.behind(a.channelFloor(m.ID), string(latestTS)) {
-			// Slack's cursor is already there or past it.
-			return nil, false
-		}
-		a.readFloors.advance(a.channelFloor(m.ID), string(latestTS))
+		// The user entered the channel: mark the newest message they
+		// see whatever the floor says. A floor can be stale (a
+		// mark-unread made while slk was not watching), and the
+		// entry is no out-of-order arrival.
+		a.readFloors.issued(a.channelFloor(m.ID), string(latestTS))
 		// Record before issuing: Slack echoes this mark back as
 		// channel_marked, and applying that echo would drag the
 		// divider off the pre-entry cursor. See selfMarkDedup.

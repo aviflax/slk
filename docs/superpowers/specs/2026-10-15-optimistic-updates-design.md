@@ -536,13 +536,22 @@ history or a link. The guards:
   when the text went there.
 - Read cursors: `recordChannelMark` and `recordThreadMark` ignore a
   placeholder, and never stage a mark at or behind the cursor Slack
-  already holds (`readFloors`, `read_floor.go`): a held message
+  holds or is about to (`readFloors`, `read_floor.go`): a held message
   released after newer ones were marked would otherwise move Slack's
-  cursor back. The floor rises with every mark slk issues (flush,
-  channel entry, thread open, the fetcher's `MarkedTS`), the loaded
-  `LastReadTS` and slk's own mark echoes; a mark from another client
-  sets it either way; the user's mark-unread (`markedUnread`) moves it
-  back to the boundary and drops a staged mark of that conversation. The thread mark (`newestMarkableReplyTS`) and the
+  cursor back. A mark slk issues (flush, channel entry, thread open,
+  the fetcher's `MarkedTS`) counts as in flight until Slack answers
+  (`ChannelMarkedReadMsg`, `ThreadMarkedLocalMsg`, both carrying the
+  mark's workspace, ts and error); an accepted one, the loaded
+  `LastReadTS` and slk's own mark echoes raise the floor, a rejected
+  one stops counting. A mark from another client sets it either way;
+  the user's mark-unread (`markedUnread`) moves it back to the
+  boundary and drops a staged mark of that conversation. Floors exist
+  only while slk watches a workspace without a gap: they are forgotten
+  when the workspace stops being active (`leaveWorkspace`, which also
+  drops marks staged in it) and on any change of its connection
+  (`ConnectionStateMsg.TeamID`), since slk then misses marks made
+  elsewhere. Opening a thread and entering a channel mark the newest
+  message the user sees without consulting the floor. The thread mark (`newestMarkableReplyTS`) and the
   mark-unread boundary take the nearest message Slack knows
   (`KnownToSlack`: no placeholder, no ephemeral).
 - Navigation: `currentLocation` and `channelPaneLocation` name a
@@ -646,6 +655,11 @@ are out of scope.
    request (`pageCtx`, 30s) rather than taking one deadline for every
    page, and the thread fetch no longer wraps it in `requestTimeout`,
    so a long thread on a slow link finishes instead of timing out.
+   Read floors can no longer go stale (see "Read cursors" above): they
+   are forgotten on a workspace switch and a reconnect, rise only when
+   Slack accepts a mark, are keyed by the workspace a mark was staged
+   in, and do not hold back the marks of opening a thread or entering
+   a channel.
 
 ## Out of scope
 

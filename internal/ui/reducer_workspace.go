@@ -235,6 +235,9 @@ func reduceWorkspaceReady(a *App, m WorkspaceReadyMsg) tea.Cmd {
 		// the current user — production never calls SetCurrentUserID
 		// otherwise, which would leave live self-reactions unstyled.
 		a.SetCurrentUserID(m.UserID)
+		if a.activeTeamID != m.TeamID {
+			a.leaveWorkspace(a.activeTeamID)
+		}
 		a.activeTeamID = m.TeamID
 		// The back-jump slot is not per-workspace: it holds the latest
 		// departure, which is meaningless once the workspace changes.
@@ -390,6 +393,9 @@ func reduceWorkspaceSwitched(a *App, m WorkspaceSwitchedMsg) tea.Cmd {
 	// Route through the setter so messagepane/threadPanel also learn the
 	// current user (see WorkspaceReadyMsg above).
 	a.SetCurrentUserID(m.UserID)
+	if a.activeTeamID != m.TeamID {
+		a.leaveWorkspace(a.activeTeamID)
+	}
 	a.activeTeamID = m.TeamID
 	// The back-jump slot is not per-workspace: clear it on switch (see
 	// WorkspaceReadyMsg).

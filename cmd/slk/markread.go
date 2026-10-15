@@ -154,10 +154,11 @@ func markChannelRead(ctx context.Context, client channelMarker, db *cache.DB, ch
 	return nil
 }
 
-// markChannelReadAndNotify marks the channel read and, only on success,
-// hands ChannelMarkedReadMsg to notify. A rejected mark must not notify:
-// the UI would optimistically clear an unread badge that Slack still
-// considers unread.
+// markChannelReadAndNotify marks the channel read and hands
+// ChannelMarkedReadMsg to notify, with Err set when Slack rejected the
+// mark. A rejected mark must not clear anything: the UI would show a
+// channel read that Slack still considers unread. The UI uses the
+// result to settle its read floor (internal/ui/read_floor.go).
 //
 // notify is a plain func rather than a *tea.Program so this whole
 // decision stays synchronous and testable. Taking the program here
@@ -168,14 +169,14 @@ func markChannelReadAndNotify(
 	client channelMarker,
 	db *cache.DB,
 	notify func(tea.Msg),
-	channelID, ts string,
+	teamID, channelID, ts string,
 ) {
-	if err := markChannelRead(ctx, client, db, channelID, ts); err != nil {
+	err := markChannelRead(ctx, client, db, channelID, ts)
+	if err != nil {
 		log.Printf("Warning: conversations.mark %s/%s failed, leaving channel unread: %v", channelID, ts, err)
-		return
 	}
 	if notify != nil {
-		notify(ui.ChannelMarkedReadMsg{ChannelID: channelID})
+		notify(ui.ChannelMarkedReadMsg{TeamID: teamID, ChannelID: channelID, TS: ts, Err: err})
 	}
 }
 
@@ -193,7 +194,7 @@ func markChannelReadAsync(
 	client channelMarker,
 	db *cache.DB,
 	p *tea.Program,
-	channelID, ts string,
+	teamID, channelID, ts string,
 ) {
 	if client == nil || ts == "" {
 		return
@@ -205,7 +206,7 @@ func markChannelReadAsync(
 	go func() {
 		ctx, cancel := context.WithTimeout(ctx, requestTimeout)
 		defer cancel()
-		markChannelReadAndNotify(ctx, client, db, notify, channelID, ts)
+		markChannelReadAndNotify(ctx, client, db, notify, teamID, channelID, ts)
 	}()
 }
 

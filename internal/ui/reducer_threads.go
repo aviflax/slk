@@ -106,10 +106,19 @@ var reduceThreads reducerFunc = func(a *App, msg tea.Msg) (tea.Cmd, bool) {
 		return nil, true
 
 	case ThreadMarkedLocalMsg:
+		// A result from a workspace slk has left counts for nothing
+		// on the floors: they are gone.
+		ours := m.TeamID == "" || m.TeamID == a.activeTeamID
 		if m.Err != nil {
 			debuglog.Cache("ThreadMarkedLocalMsg: channel=%s thread_ts=%s failed: %v",
 				m.ChannelID, m.ThreadTS, m.Err)
+			if ours {
+				a.readFloors.failed(a.threadFloor(m.ChannelID, m.ThreadTS), m.TS)
+			}
 			return nil, true
+		}
+		if ours {
+			a.readFloors.held(a.threadFloor(m.ChannelID, m.ThreadTS), m.TS)
 		}
 		// No self-mark recording here: both issue sites record before
 		// handing off the cmd, so by the time this arrives the record
@@ -457,8 +466,10 @@ func (a *App) markOpenThreadRead(channelID, threadTS string, replies []messages.
 		latestTS = t
 	}
 	var cmd tea.Cmd
-	if channelID != "" && threadTS != "" && !a.readFloors.behind(a.threadFloor(channelID, threadTS), latestTS) {
-		a.readFloors.advance(a.threadFloor(channelID, threadTS), latestTS)
+	// Opening the thread marks the newest reply the user sees whatever
+	// the floor says: a floor can be stale (a mark-unread made while
+	// slk was not watching), and the open is no out-of-order arrival.
+	if channelID != "" && threadTS != "" {
 		cmd = teaCmd(a.threads.Mark(
 			ids.ChannelID(channelID),
 			ids.ThreadTS(threadTS),
@@ -477,6 +488,7 @@ func (a *App) markOpenThreadRead(channelID, threadTS string, replies []messages.
 			a.selfThreadMarks.record(selfMarkKey{
 				channelID: channelID, threadTS: threadTS, ts: latestTS,
 			})
+			a.readFloors.issued(a.threadFloor(channelID, threadTS), latestTS)
 		}
 	}
 	// Optimistic local recompute so the badge updates immediately

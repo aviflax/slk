@@ -106,7 +106,7 @@ func TestMarkChannelReadAsync_EmptyTSDoesNotMark(t *testing.T) {
 	}
 	marker := &fakeChannelMarker{}
 
-	markChannelReadAsync(context.Background(), marker, db, nil, "C1", "")
+	markChannelReadAsync(context.Background(), marker, db, nil, "T1", "C1", "")
 
 	if len(marker.calls) != 0 {
 		t.Errorf("empty ts issued a mark: %v", marker.calls)
@@ -131,7 +131,7 @@ func TestMarkChannelReadAsync_NilMarkerDoesNotMark(t *testing.T) {
 		t.Fatalf("seed mention count: %v", err)
 	}
 
-	markChannelReadAsync(context.Background(), nil, db, nil, "C1", "1.0050")
+	markChannelReadAsync(context.Background(), nil, db, nil, "T1", "C1", "1.0050")
 
 	state, err := db.GetChannelReadState("C1")
 	if err != nil {

@@ -233,6 +233,10 @@ var reduceIO reducerFunc = func(a *App, msg tea.Msg) (tea.Cmd, bool) {
 
 	case ConnectionStateMsg:
 		a.statusbar.SetConnectionState(statusbar.ConnectionState(m.State))
+		// While the socket was down slk missed the marks made
+		// elsewhere: the workspace's read floors are no longer
+		// Slack's cursors.
+		a.readFloors.forget(m.TeamID)
 		return nil, true
 
 	case imgrender.ImageReadyMsg:

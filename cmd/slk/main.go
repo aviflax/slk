@@ -866,7 +866,7 @@ func run() error {
 				markedTS := ""
 				if len(msgItems) > 0 {
 					markedTS = msgItems[len(msgItems)-1].TS
-					markChannelReadAsync(ctx, wctx.Client, db, p, chIDStr, markedTS)
+					markChannelReadAsync(ctx, wctx.Client, db, p, wctx.TeamID, chIDStr, markedTS)
 				}
 
 				return ui.MessagesLoadedMsg{
@@ -884,7 +884,7 @@ func run() error {
 				if wctx == nil || wctx.Client == nil {
 					return nil
 				}
-				markChannelReadAsync(ctx, wctx.Client, db, p, string(channelID), string(ts))
+				markChannelReadAsync(ctx, wctx.Client, db, p, wctx.TeamID, string(channelID), string(ts))
 				return nil // ChannelMarkedReadMsg is emitted from inside the goroutine
 			},
 			FetchOlder: func(channelID ids.ChannelID, oldestTS ids.MessageTS) core.Msg {
@@ -1193,11 +1193,11 @@ func run() error {
 					if err := markThreadRead(ctx, client, db, teamID, chIDStr, threadTSStr, tsStr); err != nil {
 						log.Printf("Warning: MarkThread(%s, %s): %v", chIDStr, threadTSStr, err)
 						return ui.ThreadMarkedLocalMsg{
-							ChannelID: chIDStr, ThreadTS: threadTSStr, TS: tsStr, Err: err,
+							TeamID: teamID, ChannelID: chIDStr, ThreadTS: threadTSStr, TS: tsStr, Err: err,
 						}
 					}
 					return ui.ThreadMarkedLocalMsg{
-						ChannelID: chIDStr, ThreadTS: threadTSStr, TS: tsStr,
+						TeamID: teamID, ChannelID: chIDStr, ThreadTS: threadTSStr, TS: tsStr,
 					}
 				}
 			},

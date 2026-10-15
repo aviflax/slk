@@ -469,7 +469,7 @@ func (h *rtmEventHandler) OnConnect() {
 	// this session, not whether the socket is up right now.
 	firstConnect := !h.connected
 	h.connected = true
-	h.program.Send(ui.ConnectionStateMsg{State: int(statusbar.StateConnected)})
+	h.program.Send(ui.ConnectionStateMsg{TeamID: h.workspaceID, State: int(statusbar.StateConnected)})
 	if h.wsCtx != nil {
 		go bootstrapPresenceAndDND(context.Background(), h.wsCtx, h.program)
 	}
@@ -594,5 +594,5 @@ func (h *rtmEventHandler) syncOnReconnect(trigger string) bool {
 }
 
 func (h *rtmEventHandler) OnDisconnect() {
-	h.program.Send(ui.ConnectionStateMsg{State: int(statusbar.StateDisconnected)})
+	h.program.Send(ui.ConnectionStateMsg{TeamID: h.workspaceID, State: int(statusbar.StateDisconnected)})
 }

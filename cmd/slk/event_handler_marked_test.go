@@ -272,11 +272,13 @@ func TestMarkChannelRead_FailureLeavesChannelUnread(t *testing.T) {
 	}
 }
 
-func TestMarkChannelReadAndNotify_FailureDoesNotNotify(t *testing.T) {
+func TestMarkChannelReadAndNotify_FailureReportsTheError(t *testing.T) {
 	// The UI must not optimistically clear an unread state that Slack
-	// rejected: a ChannelMarkedReadMsg would blank the sidebar's unread
-	// badge for a channel Slack still considers unread, which is the
-	// cross-client divergence #159 is about.
+	// rejected: a successful ChannelMarkedReadMsg would blank the
+	// sidebar's unread badge for a channel Slack still considers
+	// unread, which is the cross-client divergence #159 is about. The
+	// failure is reported, with its error, so the UI's read floor
+	// stops counting the mark.
 	db := newTestDB(t)
 	_ = db.UpsertChannel(cache.Channel{ID: "C1", WorkspaceID: "T1", Name: "general", Type: "channel"})
 	if err := db.UpdateChannelReadState("C1", "", true); err != nil {
@@ -287,10 +289,13 @@ func TestMarkChannelReadAndNotify_FailureDoesNotNotify(t *testing.T) {
 
 	markChannelReadAndNotify(context.Background(), marker, db, func(m tea.Msg) {
 		sent = append(sent, m)
-	}, "C1", "1700000000.000100")
+	}, "T1", "C1", "1700000000.000100")
 
-	if len(sent) != 0 {
-		t.Errorf("notify called %d time(s) with %v; want no notification after a rejected mark", len(sent), sent)
+	if len(sent) != 1 {
+		t.Fatalf("notify called %d time(s) with %v; want one failure report", len(sent), sent)
+	}
+	if got, ok := sent[0].(ui.ChannelMarkedReadMsg); !ok || got.Err == nil || got.TeamID != "T1" || got.TS != "1700000000.000100" {
+		t.Errorf("notified with %+v, want T1's mark at 1700000000.000100 with its error", sent[0])
 	}
 	s, _ := db.GetChannelReadState("C1")
 	if s.LastReadTS != "" || !s.HasUnread {
@@ -309,7 +314,7 @@ func TestMarkChannelReadAndNotify_SuccessNotifiesOnce(t *testing.T) {
 
 	markChannelReadAndNotify(context.Background(), marker, db, func(m tea.Msg) {
 		sent = append(sent, m)
-	}, "C1", "1700000000.000100")
+	}, "T1", "C1", "1700000000.000100")
 
 	if len(sent) != 1 {
 		t.Fatalf("notify called %d time(s), want exactly 1", len(sent))
@@ -318,8 +323,8 @@ func TestMarkChannelReadAndNotify_SuccessNotifiesOnce(t *testing.T) {
 	if !ok {
 		t.Fatalf("notified with %T, want ui.ChannelMarkedReadMsg", sent[0])
 	}
-	if got != (ui.ChannelMarkedReadMsg{ChannelID: "C1"}) {
-		t.Errorf("notified with %+v, want ChannelID C1", got)
+	if got != (ui.ChannelMarkedReadMsg{TeamID: "T1", ChannelID: "C1", TS: "1700000000.000100"}) {
+		t.Errorf("notified with %+v, want T1's C1 at 1700000000.000100", got)
 	}
 }
 

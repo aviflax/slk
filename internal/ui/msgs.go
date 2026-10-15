@@ -276,7 +276,8 @@ type (
 		Err    error
 	}
 	ConnectionStateMsg struct {
-		State int // 0=connecting, 1=connected, 2=disconnected
+		TeamID string // the workspace whose socket changed state
+		State  int    // 0=connecting, 1=connected, 2=disconnected
 	}
 	ReactionAddedMsg struct {
 		ChannelID string
@@ -301,8 +302,14 @@ type (
 		Remove    bool
 		Err       error
 	}
+	// ChannelMarkedReadMsg reports an slk-issued conversations.mark of
+	// ChannelID at TS in workspace TeamID. Err is non-nil when Slack
+	// rejected it: the read state is then left alone.
 	ChannelMarkedReadMsg struct {
+		TeamID    string
 		ChannelID string
+		TS        string
+		Err       error
 	}
 	DMNameResolvedMsg struct {
 		ChannelID   string
@@ -750,6 +757,7 @@ type ThreadMarkedRemoteMsg struct {
 // subscriptions.thread.mark. Err is nil on success, in which case
 // thread_subscriptions.last_read has already been advanced to TS.
 type ThreadMarkedLocalMsg struct {
+	TeamID    string
 	ChannelID string
 	ThreadTS  string
 	TS        string

@@ -352,8 +352,9 @@ type App struct {
 	pendingChannelMark pendingChannelMarkState
 	pendingThreadMark  pendingThreadMarkState
 
-	// readFloors is the newest read cursor slk knows Slack holds per
-	// channel and thread; no automatic mark goes out at or behind it
+	// readFloors is the newest read cursor slk knows Slack holds, or
+	// has a mark in flight for, per channel and thread of a workspace
+	// slk is watching; no automatic mark goes out at or behind it
 	// (read_floor.go).
 	readFloors readFloors
 
@@ -716,20 +717,34 @@ type App struct {
 }
 
 // pendingChannelMarkState is App.pendingChannelMark's slot: the newest
-// channel read-cursor advance staged but not yet issued. A zero ts
-// means "nothing staged".
+// channel read-cursor advance staged but not yet issued, in the
+// workspace that was active when it was staged. A zero ts means
+// "nothing staged".
 type pendingChannelMarkState struct {
+	teamID    string
 	channelID string
 	ts        string
 }
 
 // pendingThreadMarkState is App.pendingThreadMark's slot: the newest
-// thread read-cursor advance staged but not yet issued. A zero ts
-// means "nothing staged".
+// thread read-cursor advance staged but not yet issued, in the
+// workspace that was active when it was staged. A zero ts means
+// "nothing staged".
 type pendingThreadMarkState struct {
+	teamID    string
 	channelID string
 	threadTS  string
 	ts        string
+}
+
+// floor is the read floor the staged mark is checked against and
+// counts towards: its own workspace's.
+func (p pendingChannelMarkState) floor() readFloorKey {
+	return readFloorKey{teamID: p.teamID, channelID: p.channelID}
+}
+
+func (p pendingThreadMarkState) floor() readFloorKey {
+	return readFloorKey{teamID: p.teamID, channelID: p.channelID, threadTS: p.threadTS}
 }
 
 // selfMarkLimit caps the number of DISTINCT keys ONE selfMarkDedup
@@ -2482,10 +2497,10 @@ func (a *App) scheduleThreadsDirty() tea.Cmd {
 }
 
 // recordChannelMark stages a channel read-cursor advance. Newest-wins:
-// a ts at or behind the staged one, or behind the cursor Slack already
-// holds (readFloors: an earlier flush, an entry mark, another client),
-// is ignored, so out-of-order arrivals (a held message released after
-// newer ones were marked) can never roll the cursor backward.
+// a ts at or behind the staged one, or behind the cursor Slack holds or
+// is about to (readFloors: an earlier flush, an entry mark, another
+// client), is ignored, so out-of-order arrivals (a held message released
+// after newer ones were marked) can never roll the cursor backward.
 func (a *App) recordChannelMark(channelID, ts string) {
 	if channelID == "" || ts == "" || messages.IsLocalTS(ts) {
 		return
@@ -2497,7 +2512,7 @@ func (a *App) recordChannelMark(channelID, ts string) {
 		debuglog.Cache("recordChannelMark: channel=%s ts=%s decision=behind_read_floor", channelID, ts)
 		return
 	}
-	a.pendingChannelMark = pendingChannelMarkState{channelID: channelID, ts: ts}
+	a.pendingChannelMark = pendingChannelMarkState{teamID: a.activeTeamID, channelID: channelID, ts: ts}
 }
 
 // recordThreadMark stages a thread read-cursor advance. Newest-wins for
@@ -2516,7 +2531,7 @@ func (a *App) recordThreadMark(channelID, threadTS, ts string) {
 		debuglog.Cache("recordThreadMark: channel=%s thread_ts=%s ts=%s decision=behind_read_floor", channelID, threadTS, ts)
 		return
 	}
-	a.pendingThreadMark = pendingThreadMarkState{channelID: channelID, threadTS: threadTS, ts: ts}
+	a.pendingThreadMark = pendingThreadMarkState{teamID: a.activeTeamID, channelID: channelID, threadTS: threadTS, ts: ts}
 }
 
 // autoMarkArmed reports whether arrival-driven read-marking may fire.
@@ -2568,11 +2583,14 @@ func (a *App) scheduleMarkFlush() tea.Cmd {
 }
 
 // flushPendingMarks clears both slots and returns the commands that
-// issue their marks, raising each read floor to its mark. A slot at or
-// behind its floor is dropped unissued. Clearing before issuing is deliberate: a mark
-// Slack rejects is not retried here, it is reconciled by the next
-// arrival, the next channel entry, or reconnect sync. Retrying a
-// rejected mark risks hammering a rate-limited endpoint.
+// issue their marks, each recorded as in flight on its read floor (the
+// floor rises when Slack accepts it: ChannelMarkedReadMsg,
+// ThreadMarkedLocalMsg). A slot at or behind its floor, or staged in a
+// workspace that is no longer the active one, is dropped unissued.
+// Clearing before issuing is deliberate: a mark Slack rejects is not
+// retried here, it is reconciled by the next arrival, the next channel
+// entry, or reconnect sync. Retrying a rejected mark risks hammering a
+// rate-limited endpoint.
 //
 // Neither leg of this moves an on-screen "── new ──" divider.
 // ChannelService.MarkRead yields ChannelMarkedReadMsg, whose reducer
@@ -2588,18 +2606,17 @@ func (a *App) scheduleMarkFlush() tea.Cmd {
 // channel entry.
 func (a *App) flushPendingMarks() tea.Cmd {
 	var cmds []tea.Cmd
-	if pc := a.pendingChannelMark; pc.ts != "" && !a.readFloors.behind(a.channelFloor(pc.channelID), pc.ts) {
+	if pc := a.pendingChannelMark; pc.ts != "" && pc.teamID == a.activeTeamID && !a.readFloors.behind(pc.floor(), pc.ts) {
 		a.pendingChannelMark = pendingChannelMarkState{}
-		a.readFloors.advance(a.channelFloor(pc.channelID), pc.ts)
+		a.readFloors.issued(pc.floor(), pc.ts)
 		channels := a.channels
 		chID := ids.ChannelID(pc.channelID)
 		ts := ids.MessageTS(pc.ts)
 		a.selfMarks.record(selfMarkKey{channelID: pc.channelID, ts: pc.ts})
 		cmds = append(cmds, func() tea.Msg { return channels.MarkRead(chID, ts) })
 	}
-	if pt := a.pendingThreadMark; pt.ts != "" && !a.readFloors.behind(a.threadFloor(pt.channelID, pt.threadTS), pt.ts) {
+	if pt := a.pendingThreadMark; pt.ts != "" && pt.teamID == a.activeTeamID && !a.readFloors.behind(pt.floor(), pt.ts) {
 		a.pendingThreadMark = pendingThreadMarkState{}
-		a.readFloors.advance(a.threadFloor(pt.channelID, pt.threadTS), pt.ts)
 		if c := teaCmd(a.threads.Mark(
 			ids.ChannelID(pt.channelID),
 			ids.ThreadTS(pt.threadTS),
@@ -2610,16 +2627,13 @@ func (a *App) flushPendingMarks() tea.Cmd {
 			// has not been issued yet and this record cannot lose the
 			// race against Slack's thread_marked broadcast. A nil cmd
 			// means no mark, hence no echo to suppress.
-			//
-			// Converted, not aliased: the types stay distinct (staged
-			// vs. issued). Go allows the conversion only while their
-			// fields match in name, type and order, so a later
-			// divergence is a compile error here, not silent drift.
-			a.selfThreadMarks.record(selfMarkKey(pt))
+			a.selfThreadMarks.record(selfMarkKey{channelID: pt.channelID, threadTS: pt.threadTS, ts: pt.ts})
+			a.readFloors.issued(pt.floor(), pt.ts)
 			cmds = append(cmds, c)
 		}
 	}
-	// A slot left is one at or behind its floor: drop it.
+	// A slot left is one at or behind its floor, or another
+	// workspace's: drop it.
 	a.pendingChannelMark = pendingChannelMarkState{}
 	a.pendingThreadMark = pendingThreadMarkState{}
 	if len(cmds) == 0 {
@@ -4032,7 +4046,7 @@ func (a *App) applyChannelMarkEcho(channelID, ts string, unreadCount int) {
 	if a.selfMarks.consume(selfMarkKey{channelID: channelID, ts: ts}) {
 		debuglog.Cache("applyChannelMarkEcho: channel=%s ts=%s self_echo=true (cursor held)",
 			channelID, ts)
-		a.readFloors.advance(a.channelFloor(channelID), ts)
+		a.readFloors.held(a.channelFloor(channelID), ts)
 		a.notifyReadStateChanged()
 		return
 	}
@@ -4141,7 +4155,7 @@ func (a *App) applyThreadMarkEcho(channelID, threadTS, lastRead string) {
 	}) {
 		debuglog.Cache("applyThreadMarkEcho: channel=%s thread_ts=%s last_read=%s self_echo=true (landmark held)",
 			channelID, threadTS, lastRead)
-		a.readFloors.advance(a.threadFloor(channelID, threadTS), lastRead)
+		a.readFloors.held(a.threadFloor(channelID, threadTS), lastRead)
 		a.applyThreadMarkListState(channelID, threadTS, lastRead)
 		return
 	}
