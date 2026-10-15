@@ -3,10 +3,10 @@ package slackclient
 import (
 	"context"
 	"net/http"
-	"net/http/httptest"
 	"net/url"
 	"reflect"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/slack-go/slack"
@@ -38,22 +38,19 @@ func TestSlackAPI_EveryMethodTakesContext(t *testing.T) {
 // passes. One that hangs ignores its ctx somewhere on the way to the
 // request.
 func TestClient_MethodsHonourContext(t *testing.T) {
-	release := make(chan struct{})
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		select {
-		case <-r.Context().Done():
-		case <-release:
-		}
-	}))
-	t.Cleanup(srv.Close)
-	t.Cleanup(func() { close(release) })
+	// The server never answers; it returns only when the request's ctx
+	// ends, which is what each call must make happen.
+	hang := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		<-r.Context().Done()
+	})
 
 	newClient := func() *Client {
-		base := srv.URL + "/"
+		const base = "http://slack.test/"
+		hc := handlerClient(hang)
 		return &Client{
-			api:        slack.New("xoxc-test", slack.OptionAPIURL(base), slack.OptionHTTPClient(srv.Client())),
+			api:        slack.New("xoxc-test", slack.OptionAPIURL(base), slack.OptionHTTPClient(hc)),
 			apiBaseURL: base,
-			httpClient: srv.Client(),
+			httpClient: hc,
 			token:      "xoxc-test",
 		}
 	}
@@ -158,21 +155,20 @@ func TestClient_MethodsHonourContext(t *testing.T) {
 		"RunCommand": func(ctx context.Context, c *Client) error { return c.RunCommand(ctx, CommandRequest{}) },
 	}
 
+	// Each call runs in a synctest bubble, so the 50ms deadline is on a
+	// fake clock: it fires once every goroutine in the bubble is blocked,
+	// however loaded the machine is. A call that ignores its ctx leaves
+	// the bubble blocked for good, which synctest reports as a deadlock.
 	for name, call := range calls {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
-			ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
-			defer cancel()
-			done := make(chan error, 1)
-			go func() { done <- call(ctx, newClient()) }()
-			select {
-			case err := <-done:
-				if err == nil {
+			synctest.Test(t, func(t *testing.T) {
+				ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+				defer cancel()
+				if err := call(ctx, newClient()); err == nil {
 					t.Errorf("%s returned nil against a server that never answers", name)
 				}
-			case <-time.After(5 * time.Second):
-				t.Errorf("%s ignored its ctx: still waiting 5s after a 50ms deadline", name)
-			}
+			})
 		})
 	}
 }
