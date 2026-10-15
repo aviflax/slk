@@ -1049,7 +1049,7 @@ func (m *Model) viewInternal(height, width int, applySelection bool) string {
 			Width(width).
 			Background(styles.Background).
 			Foreground(styles.Border).
-			Render(strings.Repeat("-", width))
+			Render(strings.Repeat("─", width))
 		m.chromeCache = header + "\n" + separator
 		m.chromeHeight = lipgloss.Height(m.chromeCache)
 		m.chromeCacheValid = true
