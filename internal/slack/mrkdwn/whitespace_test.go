@@ -148,6 +148,46 @@ var whitespaceCases = []struct {
 		mrkdwn: "> - a\n> - b\n>\n> ```\n>   x\n> ```",
 		block:  `[{"type":"rich_text_quote","elements":[{"type":"text","text":"- a\n- b\n\n` + "```" + `\n  x\n` + "```" + `"}]}]`,
 	},
+	// In Slack a quote is only the lines that start with ">"; the
+	// line after one is not pulled in (CommonMark's lazy continuation).
+	{
+		name:   "quote then reply",
+		in:     "> what you said\nmy reply",
+		mrkdwn: "> what you said\nmy reply",
+		block: `[{"type":"rich_text_quote","elements":[{"type":"text","text":"what you said"}]},` +
+			`{"type":"rich_text_section","elements":[{"type":"text","text":"my reply"}]}]`,
+	},
+	{
+		name:   "multi-line quote then reply",
+		in:     "> one\n> two\nreply\nmore reply",
+		mrkdwn: "> one\n> two\nreply\nmore reply",
+		block: `[{"type":"rich_text_quote","elements":[{"type":"text","text":"one\ntwo"}]},` +
+			`{"type":"rich_text_section","elements":[{"type":"text","text":"reply\nmore reply"}]}]`,
+	},
+	{
+		name:   "two quotes with a line between",
+		in:     "> first\nmiddle\n> second",
+		mrkdwn: "> first\nmiddle\n> second",
+		block: `[{"type":"rich_text_quote","elements":[{"type":"text","text":"first"}]},` +
+			`{"type":"rich_text_section","elements":[{"type":"text","text":"middle"}]},` +
+			`{"type":"rich_text_quote","elements":[{"type":"text","text":"second"}]}]`,
+	},
+	{
+		name:   "quote, blank line, reply",
+		in:     "> q\n\nreply",
+		mrkdwn: "> q\n\nreply",
+		block: `[{"type":"rich_text_quote","elements":[{"type":"text","text":"q"}]},` +
+			`{"type":"rich_text_section","elements":[{"type":"text","text":"\nreply"}]}]`,
+	},
+	{
+		// Only the first ">" is markup, as on the receive side
+		// (blockkit quoteToMrkdwn): the rest stays text.
+		name:   "nested quote markers",
+		in:     "> > inner\n> outer\nplain",
+		mrkdwn: "> > inner\n> outer\nplain",
+		block: `[{"type":"rich_text_quote","elements":[{"type":"text","text":"\u003e inner\nouter"}]},` +
+			`{"type":"rich_text_section","elements":[{"type":"text","text":"plain"}]}]`,
+	},
 	{
 		name:   "text then quote",
 		in:     "said:\n> yes",

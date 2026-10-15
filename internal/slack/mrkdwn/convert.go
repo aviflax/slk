@@ -5,6 +5,7 @@ import (
 
 	"github.com/slack-go/slack"
 	"github.com/yuin/goldmark"
+	"github.com/yuin/goldmark/ast"
 	"github.com/yuin/goldmark/extension"
 	"github.com/yuin/goldmark/parser"
 	"github.com/yuin/goldmark/text"
@@ -74,10 +75,68 @@ func newParser() parser.Parser {
 	)
 }
 
-// indentedParagraphParser lets a paragraph open on a line indented four
-// or more spaces. goldmark offers such a line only to parsers that
-// accept indented lines, which in CommonMark is the indented code
-// block parser alone; with that parser gone the line would be dropped.
+// indentedParagraphParser is goldmark's paragraph parser with two
+// changes to where a paragraph may start.
+//
+// It opens on a line indented four or more spaces. goldmark offers
+// such a line only to parsers that accept indented lines, which in
+// CommonMark is the indented code block parser alone; with that parser
+// gone the line would be dropped.
+//
+// And it ends a quote at the first line without the quote's ">"
+// markers. CommonMark's lazy continuation would add that line to the
+// quote's last paragraph, but in Slack a quote is only its marked
+// lines, so "> what you said\nmy reply" is a quote and then a reply.
+// goldmark tries a lazy line as a paragraph continuation only when no
+// parser that can interrupt a paragraph opens a block on it, so this
+// parser claims to interrupt paragraphs and opens one exactly on such
+// a lazy line. Everywhere else it opens only where the stock parser
+// would.
 type indentedParagraphParser struct{ parser.BlockParser }
 
 func (indentedParagraphParser) CanAcceptIndentedLine() bool { return true }
+
+func (indentedParagraphParser) CanInterruptParagraph() bool { return true }
+
+func (p indentedParagraphParser) Open(parent ast.Node, reader text.Reader, pc parser.Context) (ast.Node, parser.State) {
+	if last := pc.LastOpenedBlock().Node; last != nil && ast.IsParagraph(last) && !lazyQuoteLine(last, reader) {
+		// An ordinary paragraph continuation: leave it to Continue.
+		return nil, parser.NoChildren
+	}
+	return p.BlockParser.Open(parent, reader, pc)
+}
+
+// lazyQuoteLine reports whether the line reader is on would continue
+// para, a paragraph inside a quote, without carrying that quote's ">"
+// markers: CommonMark's lazy continuation line.
+func lazyQuoteLine(para ast.Node, reader text.Reader) bool {
+	depth := 0
+	for n := para.Parent(); n != nil; n = n.Parent() {
+		if _, ok := n.(*ast.Blockquote); ok {
+			depth++
+		}
+	}
+	if depth == 0 {
+		return false
+	}
+	src := reader.Source()
+	_, seg := reader.PeekLine()
+	return quoteMarkers(src, lineStart(src, seg.Start)) < depth
+}
+
+// quoteMarkers counts the ">" markers that open the line starting at
+// i, each allowed up to three spaces before it.
+func quoteMarkers(src []byte, i int) int {
+	n := 0
+	for {
+		j := i
+		for j < len(src) && j-i < 3 && src[j] == ' ' {
+			j++
+		}
+		if j >= len(src) || src[j] != '>' {
+			return n
+		}
+		n++
+		i = j + 1
+	}
+}
