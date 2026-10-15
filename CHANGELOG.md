@@ -8,11 +8,54 @@ Earlier history, up to v0.26.2, is in [upstream's releases](https://github.com/g
 
 ## [Unreleased]
 
+### Changed
+
+- Edits and deletes show at once. An edit appears in every pane showing the
+  message as soon as you press Enter, and a deleted message leaves right
+  away. If Slack refuses, the message goes back to what it was: a failed
+  edit reopens the editor with your text, and a failed delete puts the
+  message back where it was.
+- A message that arrives while you have moved up the channel or thread no
+  longer pulls the cursor and the view down to it. "-- more below --" shows
+  instead, the view stays where you were, and the message stays unread until
+  you scroll down to it.
+- A failed send, reply or edit always gives your text back. It goes back to
+  the composer, or, when you have already typed something new there, onto
+  the clipboard together with any other unsent text, and the toast says so.
+
 ### Fixed
 
 - The update hint now shows up within a few hours of a release. slk asked
   GitHub at most once a day and only at startup, so a release published
   after that check went unnoticed until the next day, or until a restart.
+- Your own messages no longer go missing or show twice. For a few seconds
+  after each send slk hid every message of yours arriving in that channel,
+  which could hide your file uploads and messages sent from another device
+  until a reload, and a sent message could sometimes appear twice.
+- Messages in a pane stay in time order, even when they arrive out of order.
+- A request to Slack that hangs now times out. Sends, edits, deletes,
+  reactions and history fetches could wait forever, and a stuck send kept
+  your own new messages in that conversation from showing.
+- Keys pressed right after Enter act on the message you just sent. Pressing
+  D or e quickly could act on the message before it.
+- Edits show their new text. An edited message kept drawing its old text
+  until a reload, and "(edited)" disappeared after any reload. Link previews
+  and reply-count updates no longer mark a message edited.
+- A pending send, edit or delete survives a reload of the channel or thread.
+- Slack's read position never moves backward on its own. A message that
+  showed up late could mark newer messages unread again.
+- A reply is counted once in its parent's reply count, and a parent loaded
+  from the cache keeps its count when an event for it arrives.
+- The view stays put when a message above it changes height, and a selected
+  message is never pushed out of view. At the bottom of a pane, the last
+  message is no longer half hidden under "-- more below --".
+- The "── new ──" line no longer appears above your own message.
+- The mention, channel and emoji pickers let Enter through once nothing
+  matches what you typed. The first Enter used to be swallowed.
+- A link whose label is empty is drawn as a plain link instead of the URL
+  followed by a stray "|".
+- A failed channel join or older-history load shows a toast instead of
+  failing silently.
 
 ## [0.28.0] - 2026-10-15
 

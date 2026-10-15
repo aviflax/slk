@@ -126,6 +126,7 @@ Last updated: 2026-10-15
 - [x] Sidebar auto-hides on narrow terminals; threads open side by side from 120 columns
 - [x] Grouped `?` help overlay; `:help`, `:quit`, `:qa`; `:q` quits on the last window
 - [x] `Ctrl+X` opens `$EDITOR`; `Ctrl+E` / `Ctrl+A` move within the line
+- [x] Optimistic sends, replies, edits and deletes, rolled back on failure without losing text (design: `docs/superpowers/specs/2026-10-15-optimistic-updates-design.md`)
 
 ### Low Priority
 
