@@ -104,6 +104,11 @@ func ShouldNotify(ctx NotifyContext, channelID, userID, text, channelType string
 	if len(ctx.OnKeyword) > 0 {
 		lower := strings.ToLower(text)
 		for _, kw := range ctx.OnKeyword {
+			// strings.Contains(x, "") is true, so a blank entry in
+			// on_keyword would notify for every message.
+			if kw == "" {
+				continue
+			}
 			if strings.Contains(lower, strings.ToLower(kw)) {
 				return true
 			}

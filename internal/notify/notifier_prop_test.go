@@ -80,3 +80,15 @@ func TestShouldNotifyMonotoneInTriggers(t *testing.T) {
 		}
 	})
 }
+
+// An empty keyword entry (on_keyword = [""]) is no trigger: with
+// mention and DM triggers off, no text notifies.
+func TestShouldNotifyEmptyKeywordIsNoTrigger(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		ctx := NotifyContext{CurrentUserID: "USELF", OnKeyword: []string{""}}
+		text := proptest.SlackText(nil, nil).Draw(t, "text")
+		if ShouldNotify(ctx, "C1", "UOTHER", text, "channel") {
+			t.Fatalf("empty keyword notified for %q", text)
+		}
+	})
+}
