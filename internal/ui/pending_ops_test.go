@@ -205,72 +205,77 @@ func TestPendingSend_TwoSendsEveryInterleaving(t *testing.T) {
 	events := []string{"echo1", "echo2", "result1", "result2", "phone"}
 	for _, fail := range []int{0, 1, 2} {
 		permute(events, func(order []string) {
+			order = slices.Clone(order)
 			name := fmt.Sprintf("fail=%d %v", fail, order)
-			a := typedApp(t)
-			a.messagepane.SetMessages(nil)
-			var log rowLog
-			a.Update(SendMessageMsg{ChannelID: "C1", Text: "one", TeamID: "T1", Typed: "one typed"})
-			a.Update(SendMessageMsg{ChannelID: "C1", Text: "two", TeamID: "T1", Typed: "two typed"})
-			rows := a.messagepane.Messages()
-			locals := []string{rows[0].TS, rows[1].TS}
-			reals := []string{"10.000001", "10.000002"}
-			failed := false
-			for _, ev := range order {
-				var cmd tea.Cmd
-				switch ev {
-				case "echo1", "echo2":
-					i := int(ev[4] - '1')
-					_, cmd = a.Update(echo("C1", reals[i], "", fmt.Sprintf("echo%d text", i+1)))
-				case "phone":
-					_, cmd = a.Update(echo("C1", "10.000003", "", "phone"))
-				case "result1", "result2":
-					i := int(ev[6] - '1')
+			// Each interleaving builds its own App: they run in parallel.
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+				a := typedApp(t)
+				a.messagepane.SetMessages(nil)
+				var log rowLog
+				a.Update(SendMessageMsg{ChannelID: "C1", Text: "one", TeamID: "T1", Typed: "one typed"})
+				a.Update(SendMessageMsg{ChannelID: "C1", Text: "two", TeamID: "T1", Typed: "two typed"})
+				rows := a.messagepane.Messages()
+				locals := []string{rows[0].TS, rows[1].TS}
+				reals := []string{"10.000001", "10.000002"}
+				failed := false
+				for _, ev := range order {
+					var cmd tea.Cmd
+					switch ev {
+					case "echo1", "echo2":
+						i := int(ev[4] - '1')
+						_, cmd = a.Update(echo("C1", reals[i], "", fmt.Sprintf("echo%d text", i+1)))
+					case "phone":
+						_, cmd = a.Update(echo("C1", "10.000003", "", "phone"))
+					case "result1", "result2":
+						i := int(ev[6] - '1')
+						if fail == i+1 {
+							_, cmd = a.Update(MessageSendFailedMsg{ChannelID: "C1", LocalTS: locals[i], Reason: "timeout"})
+							failed = sendFailed(t, cmd)
+						} else {
+							_, cmd = a.Update(MessageSentMsg{ChannelID: "C1", LocalTS: locals[i],
+								Message: messages.MessageItem{TS: reals[i], UserID: "USELF", Text: fmt.Sprintf("sent%d", i+1)}})
+						}
+					}
+					_ = cmd
+					log.note(a.messagepane.Messages())
+				}
+				want := map[string]bool{"10.000003=phone": true}
+				for i, real := range reals {
 					if fail == i+1 {
-						_, cmd = a.Update(MessageSendFailedMsg{ChannelID: "C1", LocalTS: locals[i], Reason: "timeout"})
-						failed = sendFailed(t, cmd)
+						want[real+"=echo"+fmt.Sprint(i+1)+" text"] = true
 					} else {
-						_, cmd = a.Update(MessageSentMsg{ChannelID: "C1", LocalTS: locals[i],
-							Message: messages.MessageItem{TS: reals[i], UserID: "USELF", Text: fmt.Sprintf("sent%d", i+1)}})
+						want[real+"=sent"+fmt.Sprint(i+1)] = true
+						log.never(t, fmt.Sprintf("echo%d text", i+1))
 					}
 				}
-				_ = cmd
-				log.note(a.messagepane.Messages())
-			}
-			want := map[string]bool{"10.000003=phone": true}
-			for i, real := range reals {
-				if fail == i+1 {
-					want[real+"=echo"+fmt.Sprint(i+1)+" text"] = true
-				} else {
-					want[real+"=sent"+fmt.Sprint(i+1)] = true
-					log.never(t, fmt.Sprintf("echo%d text", i+1))
+				got := rowsOf(a.messagepane.Messages())
+				if len(got) != len(want) {
+					t.Fatalf("%s: rows %q, want %d rows %v", name, got, len(want), want)
 				}
-			}
-			got := rowsOf(a.messagepane.Messages())
-			if len(got) != len(want) {
-				t.Fatalf("%s: rows %q, want %d rows %v", name, got, len(want), want)
-			}
-			for _, r := range got {
-				if !want[r] {
-					t.Fatalf("%s: rows %q, want %v", name, got, want)
+				for _, r := range got {
+					if !want[r] {
+						t.Fatalf("%s: rows %q, want %v", name, got, want)
+					}
 				}
-			}
-			// In TS order, whatever order they arrived in.
-			if !slices.IsSorted(got) {
-				t.Fatalf("%s: rows %q are not in TS order", name, got)
-			}
-			for i, s := range log.seen {
-				if err := paneOrderErr(s); err != "" {
-					t.Fatalf("%s: step %d: %s", name, i, err)
+				// In TS order, whatever order they arrived in.
+				if !slices.IsSorted(got) {
+					t.Fatalf("%s: rows %q are not in TS order", name, got)
 				}
-			}
-			if fail != 0 {
-				if !failed {
-					t.Fatalf("%s: the failure was not reported", name)
+				for i, s := range log.seen {
+					if err := paneOrderErr(s); err != "" {
+						t.Fatalf("%s: step %d: %s", name, i, err)
+					}
 				}
-				if v := a.compose.Value(); v != []string{"one typed", "two typed"}[fail-1] {
-					t.Fatalf("%s: composer = %q, want the failed text back", name, v)
+				if fail != 0 {
+					if !failed {
+						t.Fatalf("%s: the failure was not reported", name)
+					}
+					if v := a.compose.Value(); v != []string{"one typed", "two typed"}[fail-1] {
+						t.Fatalf("%s: composer = %q, want the failed text back", name, v)
+					}
 				}
-			}
+			})
 		})
 	}
 }
