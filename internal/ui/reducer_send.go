@@ -577,8 +577,11 @@ func (a *App) showBody(channelID, ts string, body messages.Body) (prior messages
 // editor is never closed here: submitEdit already closed it, and an
 // editor open now is a newer edit.
 func reduceMessageEdited(a *App, m MessageEditedMsg) tea.Cmd {
+	var gone tea.Cmd
 	if m.NotFound {
-		a.pendingOps.EditGone(m.ChannelID, m.TS)
+		// Slack has no such message: it was deleted, so it leaves every
+		// pane as its message_deleted echo would take it out.
+		gone = a.applyMessageDeleted(m.ChannelID, m.TS)
 	}
 	s, found := a.pendingOps.EndEdit(m.EditID, m.Err == nil)
 	if !found {
@@ -588,9 +591,9 @@ func reduceMessageEdited(a *App, m MessageEditedMsg) tea.Cmd {
 			a.showBody(m.ChannelID, m.TS, messages.Body{Text: m.Text, Edited: true})
 		}
 		if m.Err == nil {
-			return nil
+			return gone
 		}
-		return editFailedToast(m.Err, false)
+		return tea.Batch(gone, editFailedToast(m.Err, false))
 	}
 	if s.showKnown {
 		a.showBody(m.ChannelID, m.TS, s.show)
@@ -598,7 +601,7 @@ func reduceMessageEdited(a *App, m MessageEditedMsg) tea.Cmd {
 	if m.Err == nil {
 		a.recovered(s.ended.typed)
 	}
-	var cmds []tea.Cmd
+	cmds := []tea.Cmd{gone}
 	if s.next != nil {
 		cmds = append(cmds, a.sendEdit(*s.next))
 	}

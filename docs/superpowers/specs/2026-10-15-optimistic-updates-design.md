@@ -389,7 +389,8 @@ The flow for an edit:
   is deleted (its echo, a successful delete, or Slack's
   message_not_found, `MessageEditedMsg.NotFound`) or its delete is
   pending, the text goes to the clipboard instead: a draft would post it
-  as a new message. A waiting edit whose message is gone is never sent
+  as a new message. message_not_found also takes the message out of
+  every pane (`applyMessageDeleted`), as its echo would. A waiting edit whose message is gone is never sent
   and its text is the one given back. The result never closes the
   editor: any editor open by then is a newer edit.
 

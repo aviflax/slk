@@ -292,6 +292,32 @@ func TestPendingEdit_FailureAfterMovingOnGivesDraft(t *testing.T) {
 	})
 }
 
+// Slack's message_not_found for an edit means the message is gone: it
+// leaves every pane, as its deletion would, rather than staying with
+// its old text beside a toast that says it does not exist.
+func TestPendingEdit_NotFoundRemovesTheRow(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		panel Panel
+		ts    string
+	}{
+		{"channel message", PanelMessages, "1.000000"},
+		{"thread reply", PanelThread, "6.000000"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			a := editApp(t, errors.New("message_not_found"))
+			res := editFrom(t, a, tc.panel, tc.ts, "new")
+			res.NotFound = true
+			a.Update(res)
+			for _, rows := range [][]messages.MessageItem{a.messagepane.Messages(), a.threadPanel.Replies()} {
+				if messages.FirstIndexOfTS(rows, tc.ts) >= 0 {
+					t.Errorf("%s still shown after message_not_found: %q", tc.ts, rowsOf(rows))
+				}
+			}
+		})
+	}
+}
+
 // The message_changed echo of the user's own edit changes nothing,
 // whether it beats the result or follows it.
 func TestPendingEdit_EchoIsHarmless(t *testing.T) {
