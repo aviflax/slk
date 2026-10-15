@@ -605,10 +605,10 @@ type App struct {
 	// Falls back to 3 when unset (matches the pre-config behavior).
 	mouseWheelLines int
 
-	// pendingOps is the ledger of the user's optimistic sends, which
-	// tells their WS echoes apart from the user's other messages: an
-	// echo before the HTTP result is adopted by its send, one after it
-	// is dropped by TS. See internal/ui/pending_ops.go.
+	// pendingOps is the ledger of the user's optimistic sends, edits
+	// and deletes. It holds the user's own echoes in a conversation
+	// while a send is pending there and drops those its result showed.
+	// See internal/ui/pending_ops.go.
 	pendingOps *pendingOps
 
 	// nowTimestampFormatter renders "now" using the same format used

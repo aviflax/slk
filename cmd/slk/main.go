@@ -972,7 +972,8 @@ func run() error {
 				}
 				client := wctx.Client
 				userNames := wctx.UserNames
-				ctx := context.Background()
+				ctx, cancel := context.WithTimeout(context.Background(), sendTimeout)
+				defer cancel()
 				ts, sentMrkdwn, err := client.SendMessage(ctx, chIDStr, text)
 				if err != nil {
 					log.Printf("Warning: failed to send message: %v", err)
@@ -1207,7 +1208,8 @@ func run() error {
 				}
 				client := wctx.Client
 				userNames := wctx.UserNames
-				ctx := context.Background()
+				ctx, cancel := context.WithTimeout(context.Background(), sendTimeout)
+				defer cancel()
 				ts, sentMrkdwn, err := client.SendReply(ctx, chIDStr, threadTSStr, text, broadcast)
 				if err != nil {
 					log.Printf("Warning: failed to send thread reply: %v", err)

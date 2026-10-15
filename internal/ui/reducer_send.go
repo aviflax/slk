@@ -9,7 +9,7 @@
 //	NewMessageMsg            - inbound WS event for any channel:
 //	                           edit-echo update, self-send echo
 //	                           handling (drop by recorded TS, or
-//	                           adoption by a pending send),
+//	                           held while a send is pending),
 //	                           append-to-pane, staging a
 //	                           focus-gated read-cursor advance or
 //	                           surfacing the unread dot, and
@@ -20,8 +20,7 @@
 //	                           authoritative message.
 //	MessageSendFailedMsg     - send failed: roll back placeholder,
 //	                           give the typed text back + fire
-//	                           SendFailed toast, unless the echo
-//	                           already showed it posted.
+//	                           SendFailed toast.
 //	EditMessageMsg           - user edit: show the new text at
 //	                           once, record a pending edit,
 //	                           chat.update call.
@@ -81,10 +80,11 @@ var reduceSend reducerFunc = func(a *App, msg tea.Msg) (tea.Cmd, bool) {
 		if m.teamID != a.activeTeamID {
 			return nil, true
 		}
-		// A concurrent compose send in this channel can adopt the forward's
-		// self-authored WS echo as its own. Reconcile the HTTP result without
-		// touching drafts or placeholders. AppendMessage deduplicates echoes
-		// that arrived first.
+		// The forward's self-authored WS echo may be held by a compose
+		// send pending in this channel, so show the HTTP result here
+		// without touching drafts or placeholders. AppendMessage
+		// deduplicates the echo whichever arrives first, including one
+		// released later.
 		for _, mm := range a.modelsForChannel(m.channelID) {
 			mm.AppendMessage(cloneMessageItem(m.message))
 		}
@@ -94,44 +94,37 @@ var reduceSend reducerFunc = func(a *App, msg tea.Msg) (tea.Cmd, bool) {
 		// The chat.postMessage HTTP response landed. Settle (see
 		// rowSink) swaps the "local:..." placeholder from the
 		// instant-display path (SendMessageMsg above) for the
-		// authoritative message. When the echo got in first and was
-		// adopted, the placeholder is already gone and the echo's
-		// row takes the authoritative message. With no placeholder
-		// (test paths firing MessageSentMsg directly, or the user
-		// navigated away and back between Enter and the HTTP
-		// response) the message is upserted by its Slack TS.
-		ins, ok := a.pendingOps.EndInsert(m.LocalTS)
+		// authoritative message. With no placeholder (test paths
+		// firing MessageSentMsg directly, or the user navigated
+		// away and back between Enter and the HTTP response) the
+		// message is upserted by its Slack TS. Echoes held while the
+		// send was pending are released after it.
+		ins, release, ok := a.pendingOps.EndInsert(m.LocalTS, m.Message.TS)
 		if m.Message.TS == "" {
 			// Nothing to settle the placeholder onto. Remove it
-			// rather than leave a row that never resolves, unless
-			// an echo already settled it (that row is the posted
-			// message).
-			if !ins.adopted && m.LocalTS != "" {
+			// rather than leave a row that never resolves.
+			if m.LocalTS != "" {
 				if !ok {
 					ins = pendingInsert{channelID: m.ChannelID}
 				}
 				a.insertSinks(ins).removeLocal(m.LocalTS)
 			}
-			return nil, true
+			return a.releaseHeld(release), true
 		}
-		a.pendingOps.RecordSent(m.Message.TS)
 		// settle gives each channel window its own clone.
 		a.sinksFor(m.ChannelID).settle(m.LocalTS, m.Message)
-		return nil, true
+		return a.releaseHeld(release), true
 
 	case MessageSendFailedMsg:
 		// The chat.postMessage HTTP call failed; roll back the
 		// optimistic placeholder so the user can see the send
-		// didn't go through. A toast surfaces the reason. If the
-		// echo was adopted, Slack posted the message (the call
-		// failed after it was accepted, e.g. a timeout), so the row
-		// stays and nothing is reported.
-		// Otherwise the composer was reset at Enter, so the text as
-		// typed goes back to it unless it holds something newer.
-		ins, ok := a.pendingOps.EndInsert(m.LocalTS)
-		if ok && ins.adopted {
-			return nil, true
-		}
+		// didn't go through. A toast surfaces the reason. The
+		// composer was reset at Enter, so the text as typed goes
+		// back to it unless it holds something newer. Echoes held
+		// while the send was pending are released after it: if
+		// Slack posted the message anyway (the call failed after it
+		// was accepted, e.g. a timeout), its echo shows it.
+		ins, release, ok := a.pendingOps.EndInsert(m.LocalTS, "")
 		if m.LocalTS != "" {
 			a.sinksFor(m.ChannelID).removeLocal(m.LocalTS)
 		}
@@ -139,9 +132,9 @@ var reduceSend reducerFunc = func(a *App, msg tea.Msg) (tea.Cmd, bool) {
 			a.offerTypedBack(ins.origin())
 		}
 		reason := m.Reason
-		return func() tea.Msg {
+		return tea.Batch(func() tea.Msg {
 			return statusbar.SendFailedMsg{Reason: reason}
-		}, true
+		}, a.releaseHeld(release)), true
 
 	case EditMessageMsg:
 		return reduceEditMessage(a, m), true
@@ -216,6 +209,7 @@ var reduceSend reducerFunc = func(a *App, msg tea.Msg) (tea.Cmd, bool) {
 		debuglog.Cache("WSMessageDeletedMsg: channel=%s ts=%s active=%s",
 			m.ChannelID, m.TS, a.activeChannelID)
 		a.pendingOps.DeleteEchoed(m.ChannelID, m.TS)
+		a.pendingOps.DropHeld(m.ChannelID, m.TS)
 		return a.applyMessageDeleted(m.ChannelID, m.TS), true
 	}
 	return nil, false
@@ -223,7 +217,7 @@ var reduceSend reducerFunc = func(a *App, msg tea.Msg) (tea.Cmd, bool) {
 
 // reduceNewMessage handles NewMessageMsg. Extracted because the
 // arm is ~100 lines covering six decision branches (edit echo,
-// self-send dedup, adoption by a pending send, the ephemeral
+// self-send dedup, holding while a send is pending, the ephemeral
 // display-only return, the read-state decision for the channel and
 // thread cursors, threads-list dirty bump). The ephemeral branch
 // returns after the message is displayed, before any read-state work.
@@ -249,7 +243,9 @@ func reduceNewMessage(a *App, m NewMessageMsg) tea.Cmd {
 				m.ChannelID, m.Message.TS)
 			return nil
 		}
-		a.shownSinks(m.ChannelID).patch(m.Message.TS, setEditedText(m.Message.Text, true))
+		edit := setEditedText(m.Message.Text, true)
+		a.shownSinks(m.ChannelID).patch(m.Message.TS, edit)
+		a.pendingOps.PatchHeld(m.ChannelID, m.Message.TS, edit)
 		return nil
 	}
 	// Skip the WS echo of our own optimistic add. The corresponding
@@ -261,21 +257,26 @@ func reduceNewMessage(a *App, m NewMessageMsg) tea.Cmd {
 			m.ChannelID, m.Message.TS)
 		return nil
 	}
-	// An echo of a send that is still waiting for its HTTP result
-	// takes the place of that send's placeholder, in every pane the
-	// result would write, instead of being appended beside it. The
-	// result then lands Slack's response on it and does the side
-	// effects (reply count, threads dirty), so none are done here.
-	// An ephemeral is never an echo of chat.postMessage.
-	if !m.Message.Ephemeral && m.Message.UserID != "" && m.Message.UserID == a.currentUserID {
-		if ins, ok := a.pendingOps.AdoptEcho(m.ChannelID, m.Message); ok {
-			debuglog.Cache("NewMessageMsg: channel=%s ts=%s decision=adopted_pending_send local=%s",
-				m.ChannelID, m.Message.TS, ins.localTS)
-			a.pendingOps.RecordSent(m.Message.TS)
-			a.insertSinks(ins).settle(ins.localTS, m.Message)
-			return nil
-		}
+	// While a send is pending in this conversation, the user's own
+	// message is held rather than shown: it may be that send's echo,
+	// another pending send's, or a message posted elsewhere, and
+	// nothing in it says which. The send's result releases it (see
+	// pendingOps). An ephemeral is never an echo of chat.postMessage.
+	if !m.Message.Ephemeral && m.Message.UserID != "" && m.Message.UserID == a.currentUserID &&
+		a.pendingOps.HoldEcho(m) {
+		debuglog.Cache("NewMessageMsg: channel=%s ts=%s decision=held_pending_send",
+			m.ChannelID, m.Message.TS)
+		return nil
 	}
+	return showNewMessage(a, m)
+}
+
+// showNewMessage shows m, a new message that is neither an edit nor
+// the echo of a send this session made, in every pane on its
+// conversation and does what a new message does to read state and the
+// threads list. reduceNewMessage calls it once the message passes its
+// checks, and releaseHeld for a message held while a send was pending.
+func showNewMessage(a *App, m NewMessageMsg) tea.Cmd {
 	// An app's message ends its "working" status in this channel even
 	// when the clearing ai_assistant_status never arrives.
 	if m.Message.UserID != "" {
@@ -446,7 +447,8 @@ func reduceSendMessage(a *App, m SendMessageMsg) tea.Cmd {
 	// styled in the placeholder rather than literal until the swap.
 	localTS := a.pendingOps.NextLocalTS()
 	// Recorded whether or not a pane shows the placeholder, so the
-	// echo is adopted rather than appended either way.
+	// user's own messages in the channel are held until the result
+	// either way.
 	ins := pendingInsert{localTS: localTS, channelID: m.ChannelID, teamID: m.TeamID, typed: m.Typed}
 	a.pendingOps.BeginInsert(ins)
 	for _, s := range a.sinksFor(m.ChannelID).channel {
@@ -549,4 +551,18 @@ func (a *App) applyMessageDeleted(channelID, ts string) tea.Cmd {
 		}
 	}
 	return a.dropActionPrompt(channelID, ts)
+}
+
+// releaseHeld shows echoes a resolved send held (pendingOps.EndInsert)
+// as the new messages they are, in order, through showNewMessage, so
+// their reply counts, read state and threads-list refresh happen as for
+// any message. It returns their commands.
+func (a *App) releaseHeld(held []NewMessageMsg) tea.Cmd {
+	var cmds []tea.Cmd
+	for _, m := range held {
+		debuglog.Cache("NewMessageMsg: channel=%s ts=%s decision=released_held_echo",
+			m.ChannelID, m.Message.TS)
+		cmds = append(cmds, showNewMessage(a, m))
+	}
+	return tea.Batch(cmds...)
 }

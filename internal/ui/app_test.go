@@ -3383,15 +3383,12 @@ func TestConversationOpenedMsg_InactiveWorkspaceIgnored(t *testing.T) {
 	}
 }
 
-// TestSelfSendInFlight_SuppressesEarlyWSEcho asserts that a WS echo of
-// a slk-originated send that arrives before the HTTP response takes the
-// placeholder's place instead of rendering beside it (the pending send
-// adopts it), and that the response then lands its own text on that
-// row.
-//
-// Cross-session messages (no pending send in that conversation, because
-// the user sent from another tool) must still pass through.
-func TestSelfSendInFlight_SuppressesEarlyWSEcho(t *testing.T) {
+// TestSelfSendInFlight_HoldsEarlyWSEcho asserts that a WS echo of a
+// slk-originated send that arrives before the HTTP response is held
+// (neither rendered beside the placeholder nor put in its place), and
+// that the response then lands its own text on the placeholder's row
+// and drops the held echo.
+func TestSelfSendInFlight_HoldsEarlyWSEcho(t *testing.T) {
 	app := NewApp()
 	app.SetCurrentUserID("USELF")
 	app.activeChannelID = "C1"
@@ -3412,16 +3409,17 @@ func TestSelfSendInFlight_SuppressesEarlyWSEcho(t *testing.T) {
 	// The LocalTS the send's result will carry, read off the placeholder.
 	localTS := app.messagepane.Messages()[0].TS
 
-	// Slack's WS echo arrives BEFORE chat.postMessage HTTP responds.
-	// The pending send adopts it so we don't double-render.
+	// Slack's WS echo arrives BEFORE chat.postMessage HTTP responds,
+	// with Slack's flattened text. It is held: the placeholder stays
+	// as typed.
 	app.Update(NewMessageMsg{
 		ChannelID: "C1",
 		Message: messages.MessageItem{
 			TS: "1700000999.000001", UserID: "USELF", Text: "Hello World",
 		},
 	})
-	if got := len(app.messagepane.Messages()); got != 1 {
-		t.Errorf("WS echo double-rendered alongside placeholder; got %d messages, want 1", got)
+	if got := app.messagepane.Messages(); len(got) != 1 || got[0].TS != localTS || got[0].Text != "Hello\nWorld" {
+		t.Errorf("after the early echo rows = %+v, want the placeholder alone, unchanged", got)
 	}
 
 	// MessageSentMsg arrives with the converted-mrkdwn text. The

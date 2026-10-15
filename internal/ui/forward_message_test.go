@@ -141,7 +141,7 @@ func TestForwardMessageThreadsListDoesNotUseHiddenMessage(t *testing.T) {
 }
 
 func TestForwardMessageCompletionReconcilesSuppressedEcho(t *testing.T) {
-	for _, order := range []string{"echo adopted by a pending send", "echo first", "response first", "different workspace"} {
+	for _, order := range []string{"echo held by a pending send", "echo first", "response first", "different workspace"} {
 		t.Run(order, func(t *testing.T) {
 			a := newTestApp(t, withActiveTeam("T1"), withActiveChannel("C1"))
 			a.SetCurrentUserID("SELF")
@@ -150,8 +150,10 @@ func TestForwardMessageCompletionReconcilesSuppressedEcho(t *testing.T) {
 			item := messages.MessageItem{TS: "20.0", Text: "https://example.slack.com/archives/C2/p1000000", UserID: "SELF"}
 			echo := NewMessageMsg{ChannelID: "C1", Message: item}
 			completion := messageForwardedMsg{teamID: "T1", channelID: "C1", destination: "#general", message: item}
-			if order == "echo adopted by a pending send" {
+			var local string
+			if order == "echo held by a pending send" {
 				a.Update(SendMessageMsg{ChannelID: "C1", Text: "concurrent"})
+				local = a.messagepane.Messages()[0].TS
 			}
 			if order == "different workspace" {
 				a.activeTeamID = "T2"
@@ -161,6 +163,15 @@ func TestForwardMessageCompletionReconcilesSuppressedEcho(t *testing.T) {
 			a.Update(completion)
 			if order == "response first" {
 				a.Update(echo)
+			}
+			if local != "" {
+				// The send's result releases the held echo, which the
+				// forward's result already showed.
+				a.Update(MessageSentMsg{ChannelID: "C1", LocalTS: local, Message: messages.MessageItem{TS: "19.0", Text: "concurrent", UserID: "SELF"}})
+				if got := rowsOf(a.messagepane.Messages()); len(got) != 2 || got[0] != "19.0=concurrent" || got[1] != item.TS+"="+item.Text {
+					t.Fatalf("rows = %q, want the send and the forward once each", got)
+				}
+				return
 			}
 			want := 1
 			if order == "different workspace" {

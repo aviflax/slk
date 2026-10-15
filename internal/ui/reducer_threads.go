@@ -332,8 +332,8 @@ var reduceThreads reducerFunc = func(a *App, msg tea.Msg) (tea.Cmd, bool) {
 		}
 		// Broadcast ("Also send to #channel"): the reply will also
 		// land in the parent channel feed as a thread_broadcast row.
-		// The echo is adopted by this send or dropped after
-		// ThreadReplySentMsg (pendingOps), so the only way the feed
+		// The echo is held while the reply is pending and dropped
+		// once ThreadReplySentMsg records its TS (pendingOps), so the only way the feed
 		// shows the row promptly is this optimistic add + the swap
 		// in ThreadReplySentMsg below.
 		// sinks.channel is empty unless m.Broadcast.
@@ -353,27 +353,27 @@ var reduceThreads reducerFunc = func(a *App, msg tea.Msg) (tea.Cmd, bool) {
 		// chat.postMessage for the thread reply landed. If a
 		// "local:..." placeholder is in the thread panel from the
 		// instant-display path (SendThreadReplyMsg above), swap it
-		// for the authoritative message (rowSink.Settle, which also
-		// covers an echo adopted first); otherwise it is upserted.
+		// for the authoritative message (rowSink.Settle); otherwise
+		// it is upserted. Echoes held while the reply was pending
+		// are released after it.
 		//
 		// Note: the internal Slack flannel WebSocket does not always
 		// echo self-posted thread replies as a plain "message" event,
 		// so we cannot rely on the WS echo alone -- the HTTP response
 		// must apply all the side effects (parent reply count, threads
 		// dirty) here.
-		ins, ok := a.pendingOps.EndInsert(m.LocalTS)
+		ins, release, ok := a.pendingOps.EndInsert(m.LocalTS, m.Message.TS)
 		if m.Message.TS == "" {
 			// As in MessageSentMsg: drop the placeholder that
-			// cannot be settled, unless an echo already did.
-			if !ins.adopted && m.LocalTS != "" {
+			// cannot be settled.
+			if m.LocalTS != "" {
 				if !ok {
 					ins = pendingInsert{channelID: m.ChannelID, threadTS: m.ThreadTS, broadcast: m.Broadcast}
 				}
 				a.insertSinks(ins).removeLocal(m.LocalTS)
 			}
-			return nil, true
+			return a.releaseHeld(release), true
 		}
-		a.pendingOps.RecordSent(m.Message.TS)
 		// Update the thread panel whenever the visible thread
 		// matches, regardless of activeChannelID. When a thread is
 		// opened from the threads view, activeChannelID is not
@@ -390,24 +390,16 @@ var reduceThreads reducerFunc = func(a *App, msg tea.Msg) (tea.Cmd, bool) {
 		for _, mm := range a.modelsForChannel(m.ChannelID) {
 			mm.IncrementReplyCount(m.ThreadTS, m.Message.TS)
 		}
-		if c := a.scheduleThreadsDirty(); c != nil {
-			return c, true
-		}
-		return nil, true
+		return tea.Batch(a.scheduleThreadsDirty(), a.releaseHeld(release)), true
 
 	case ThreadReplySendFailedMsg:
 		// chat.postMessage for the thread reply failed; roll back
 		// the optimistic placeholder. Mirrors MessageSendFailedMsg.
 		// For broadcasts, also roll back the thread_broadcast row
-		// optimistically added to the channel feed. As with
-		// MessageSendFailedMsg, an adopted echo means the reply was
-		// posted: keep it and report nothing.
-		// Otherwise the typed text goes back to the thread
-		// composer, as there.
-		ins, ok := a.pendingOps.EndInsert(m.LocalTS)
-		if ok && ins.adopted {
-			return nil, true
-		}
+		// optimistically added to the channel feed. The typed text
+		// goes back to the thread composer, as there, and the
+		// echoes held while the reply was pending are released.
+		ins, release, ok := a.pendingOps.EndInsert(m.LocalTS, "")
 		if m.LocalTS != "" {
 			a.replySinksFor(m.ChannelID, m.ThreadTS, m.Broadcast).removeLocal(m.LocalTS)
 		}
@@ -415,9 +407,9 @@ var reduceThreads reducerFunc = func(a *App, msg tea.Msg) (tea.Cmd, bool) {
 			a.offerTypedBack(ins.origin())
 		}
 		reason := m.Reason
-		return func() tea.Msg {
+		return tea.Batch(func() tea.Msg {
 			return statusbar.SendFailedMsg{Reason: reason}
-		}, true
+		}, a.releaseHeld(release)), true
 	}
 	return nil, false
 }

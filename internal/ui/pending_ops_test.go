@@ -1,11 +1,17 @@
 package ui
 
 import (
+	"fmt"
+	"slices"
 	"strings"
 	"testing"
+	"time"
+
+	tea "charm.land/bubbletea/v2"
 
 	"github.com/gammons/slk/internal/ui/mentionpicker"
 	"github.com/gammons/slk/internal/ui/messages"
+	"github.com/gammons/slk/internal/ui/statusbar"
 )
 
 // pendingApp is an App on C1 for the current user USELF, with no
@@ -56,20 +62,83 @@ func wantRows(t *testing.T, what string, rows []messages.MessageItem, want ...st
 	}
 }
 
-// An echo that beats the HTTP result takes the placeholder's place at
-// once, and the result then replaces it with Slack's response.
-func TestPendingSend_EchoBeforeResultShowsOneRow(t *testing.T) {
-	a := pendingApp(t)
-	local := sendTop(t, a, "hello")
+// rowLog records a pane's rows after each step, to check what the
+// user saw on the way and not only where it ended.
+type rowLog struct {
+	seen []string
+}
 
-	_, cmd := a.Update(echo("C1", "10.000001", "", "hello (echo)"))
-	if cmd != nil {
-		t.Errorf("adopted echo returned a command; the HTTP result does the side effects")
+func (l *rowLog) note(rows []messages.MessageItem) {
+	l.seen = append(l.seen, strings.Join(rowsOf(rows), " | "))
+}
+
+// never fails when any recorded step showed text.
+func (l *rowLog) never(t *testing.T, text string) {
+	t.Helper()
+	for i, s := range l.seen {
+		if strings.Contains(s, "="+text) {
+			t.Fatalf("step %d showed %q: %q", i, text, l.seen)
+		}
 	}
-	wantRows(t, "after echo", a.messagepane.Messages(), "10.000001=hello (echo)")
+}
 
-	a.Update(MessageSentMsg{ChannelID: "C1", LocalTS: local, Message: messages.MessageItem{TS: "10.000001", UserID: "USELF", Text: "hello"}})
-	wantRows(t, "after result", a.messagepane.Messages(), "10.000001=hello")
+// drainMsgs runs cmd once, the members of a batch concurrently, and
+// returns every message delivered within d.
+func drainMsgs(cmd tea.Cmd, d time.Duration) []tea.Msg {
+	ch := make(chan tea.Msg, 64)
+	var run func(tea.Cmd)
+	run = func(c tea.Cmd) {
+		if c == nil {
+			return
+		}
+		m := c()
+		if b, ok := m.(tea.BatchMsg); ok {
+			for _, x := range b {
+				go run(x)
+			}
+			return
+		}
+		ch <- m
+	}
+	go run(cmd)
+	var out []tea.Msg
+	deadline := time.After(d)
+	for {
+		select {
+		case m := <-ch:
+			out = append(out, m)
+		case <-deadline:
+			return out
+		}
+	}
+}
+
+// sendFailed reports whether cmd delivers the send-failure toast.
+func sendFailed(t *testing.T, cmd tea.Cmd) bool {
+	t.Helper()
+	if cmd == nil {
+		return false
+	}
+	return len(deliveredMsgs[statusbar.SendFailedMsg](t, cmd)) == 1
+}
+
+// An echo that beats the HTTP result is held: the placeholder stays
+// until the result replaces it with Slack's response, and the echo's
+// own text (Slack's normalised version) is never shown.
+func TestPendingSend_EchoBeforeResultHeld(t *testing.T) {
+	a := pendingApp(t)
+	var log rowLog
+	local := sendTop(t, a, "hello")
+	log.note(a.messagepane.Messages())
+
+	a.Update(echo("C1", "10.000001", "", "hello (echo)"))
+	log.note(a.messagepane.Messages())
+	wantRows(t, "after echo", a.messagepane.Messages(), local+"=hello")
+
+	a.Update(MessageSentMsg{ChannelID: "C1", LocalTS: local, Message: messages.MessageItem{TS: "10.000001", UserID: "USELF", Text: "hello!"}})
+	log.note(a.messagepane.Messages())
+	wantRows(t, "after result", a.messagepane.Messages(), "10.000001=hello!")
+	log.never(t, "hello (echo)")
 }
 
 // An echo that arrives after the HTTP result is dropped.
@@ -81,20 +150,24 @@ func TestPendingSend_EchoAfterResultIsDropped(t *testing.T) {
 	wantRows(t, "after echo", a.messagepane.Messages(), "10.000001=hello")
 }
 
-// slk's own file upload is only ever rendered from its echo, so a text
-// send pending in the same channel must not swallow it.
-func TestPendingSend_UploadEchoRenders(t *testing.T) {
+// slk's own file upload is only ever rendered from its echo. One that
+// arrives while a send is pending in the channel is held with the rest
+// and shown once the send resolves.
+func TestPendingSend_UploadEchoRendersAfterRelease(t *testing.T) {
 	a := pendingApp(t)
 	local := sendTop(t, a, "hello")
 	up := echo("C1", "10.000002", "", "a file")
 	up.Message.Attachments = []messages.Attachment{{Kind: "file", Name: "notes.txt"}}
 	a.Update(up)
-	wantRows(t, "after upload echo", a.messagepane.Messages(), local+"=hello", "10.000002=a file")
+	wantRows(t, "after upload echo", a.messagepane.Messages(), local+"=hello")
+	a.Update(MessageSentMsg{ChannelID: "C1", LocalTS: local, Message: messages.MessageItem{TS: "10.000001", UserID: "USELF", Text: "hello"}})
+	wantRows(t, "after result", a.messagepane.Messages(), "10.000001=hello", "10.000002=a file")
 }
 
-// A message the user sends from another client renders while a send is
-// pending anywhere it does not match: another channel, or another
-// thread of the same channel.
+// A message the user sends from another client renders at once while a
+// send is pending in another conversation: another channel, or another
+// thread of the same channel, or the channel's top level while a reply
+// is pending.
 func TestPendingSend_SelfMessageElsewhereRenders(t *testing.T) {
 	t.Run("top-level echo while a reply is pending", func(t *testing.T) {
 		a := pendingApp(t)
@@ -116,71 +189,182 @@ func TestPendingSend_SelfMessageElsewhereRenders(t *testing.T) {
 	})
 	t.Run("another channel", func(t *testing.T) {
 		a := pendingApp(t)
-		local := sendTop(t, a, "hello")
-		a.Update(echo("C2", "10.000005", "", "elsewhere"))
-		wantRows(t, "C1", a.messagepane.Messages(), local+"=hello")
-		// The C2 echo did not use up the C1 send: C1's own echo is
-		// still adopted.
-		a.Update(echo("C1", "10.000006", "", "hello"))
-		wantRows(t, "C1 after its echo", a.messagepane.Messages(), "10.000006=hello")
+		a.Update(SendMessageMsg{ChannelID: "C2", Text: "elsewhere pending"})
+		a.Update(echo("C1", "10.000005", "", "here"))
+		wantRows(t, "C1", a.messagepane.Messages(), "10.000005=here")
 	})
 }
 
-// Editing a message no longer silences the user's own messages in the
-// channel.
-func TestPendingSend_EditDoesNotSuppressSelfMessages(t *testing.T) {
-	a := pendingApp(t)
-	a.Update(EditMessageMsg{ChannelID: "C1", TS: "1.000000", NewText: "edited"})
-	a.Update(echo("C1", "10.000007", "", "from my phone"))
-	wantRows(t, "channel", a.messagepane.Messages(), "10.000007=from my phone")
+// A message the user posts from another client while a send is pending
+// in the same conversation shows once that send resolves, after it,
+// with the thread's reply count right.
+func TestPendingSend_SelfMessageSameConversationRendersAfterResult(t *testing.T) {
+	t.Run("channel", func(t *testing.T) {
+		a := pendingApp(t)
+		local := sendTop(t, a, "hello")
+		a.Update(echo("C1", "10.000002", "", "from my phone"))
+		wantRows(t, "while pending", a.messagepane.Messages(), local+"=hello")
+		a.Update(MessageSentMsg{ChannelID: "C1", LocalTS: local, Message: messages.MessageItem{TS: "10.000001", UserID: "USELF", Text: "hello"}})
+		wantRows(t, "after result", a.messagepane.Messages(), "10.000001=hello", "10.000002=from my phone")
+	})
+	t.Run("thread", func(t *testing.T) {
+		a := pendingApp(t)
+		a.messagepane.SetMessages([]messages.MessageItem{{TS: "5.000000", Text: "parent"}})
+		openThread(a, "5.000000")
+		a.Update(SendThreadReplyMsg{ChannelID: "C1", ThreadTS: "5.000000", Text: "reply"})
+		local := a.threadPanel.Replies()[0].TS
+		a.Update(echo("C1", "10.000002", "5.000000", "from my phone"))
+		wantRows(t, "while pending", a.threadPanel.Replies(), local+"=reply")
+		a.Update(ThreadReplySentMsg{ChannelID: "C1", ThreadTS: "5.000000", LocalTS: local,
+			Message: messages.MessageItem{TS: "10.000001", ThreadTS: "5.000000", UserID: "USELF", Text: "reply"}})
+		wantRows(t, "after result", a.threadPanel.Replies(), "10.000001=reply", "10.000002=from my phone")
+		if n := a.messagepane.Messages()[0].ReplyCount; n != 2 {
+			t.Errorf("parent reply count = %d, want 2", n)
+		}
+	})
 }
 
-// When the echo already showed the message, a failed HTTP result means
-// the post went through anyway (a timeout after Slack accepted it): the
-// row stays and no failure is reported.
-func TestPendingSend_FailureAfterAdoptionKeepsRow(t *testing.T) {
-	a := pendingApp(t)
-	local := sendTop(t, a, "hello")
-	a.Update(echo("C1", "10.000008", "", "hello"))
-	_, cmd := a.Update(MessageSendFailedMsg{ChannelID: "C1", LocalTS: local, Reason: "timeout"})
-	if cmd != nil {
-		t.Errorf("failure after adoption returned %#v, want no toast", cmd())
+// Two sends in one channel, their echoes and their results, in every
+// order Slack can deliver them, with either send failing or neither,
+// and a message from another client among them. The rows end with each
+// message once (a failed send's echo, if Slack posted it anyway, shows
+// from the echo), a successful send never shows its echo's text, the
+// failed send gives its text back and reports it, and no placeholder is
+// left.
+func TestPendingSend_TwoSendsEveryInterleaving(t *testing.T) {
+	events := []string{"echo1", "echo2", "result1", "result2", "phone"}
+	for _, fail := range []int{0, 1, 2} {
+		permute(events, func(order []string) {
+			name := fmt.Sprintf("fail=%d %v", fail, order)
+			a := typedApp(t)
+			a.messagepane.SetMessages(nil)
+			var log rowLog
+			a.Update(SendMessageMsg{ChannelID: "C1", Text: "one", TeamID: "T1", Typed: "one typed"})
+			a.Update(SendMessageMsg{ChannelID: "C1", Text: "two", TeamID: "T1", Typed: "two typed"})
+			rows := a.messagepane.Messages()
+			locals := []string{rows[0].TS, rows[1].TS}
+			reals := []string{"10.000001", "10.000002"}
+			failed := false
+			for _, ev := range order {
+				var cmd tea.Cmd
+				switch ev {
+				case "echo1", "echo2":
+					i := int(ev[4] - '1')
+					_, cmd = a.Update(echo("C1", reals[i], "", fmt.Sprintf("echo%d text", i+1)))
+				case "phone":
+					_, cmd = a.Update(echo("C1", "10.000003", "", "phone"))
+				case "result1", "result2":
+					i := int(ev[6] - '1')
+					if fail == i+1 {
+						_, cmd = a.Update(MessageSendFailedMsg{ChannelID: "C1", LocalTS: locals[i], Reason: "timeout"})
+						failed = sendFailed(t, cmd)
+					} else {
+						_, cmd = a.Update(MessageSentMsg{ChannelID: "C1", LocalTS: locals[i],
+							Message: messages.MessageItem{TS: reals[i], UserID: "USELF", Text: fmt.Sprintf("sent%d", i+1)}})
+					}
+				}
+				_ = cmd
+				log.note(a.messagepane.Messages())
+			}
+			want := map[string]bool{"10.000003=phone": true}
+			for i, real := range reals {
+				if fail == i+1 {
+					want[real+"=echo"+fmt.Sprint(i+1)+" text"] = true
+				} else {
+					want[real+"=sent"+fmt.Sprint(i+1)] = true
+					log.never(t, fmt.Sprintf("echo%d text", i+1))
+				}
+			}
+			got := rowsOf(a.messagepane.Messages())
+			if len(got) != len(want) {
+				t.Fatalf("%s: rows %q, want %d rows %v", name, got, len(want), want)
+			}
+			for _, r := range got {
+				if !want[r] {
+					t.Fatalf("%s: rows %q, want %v", name, got, want)
+				}
+			}
+			if fail != 0 {
+				if !failed {
+					t.Fatalf("%s: the failure was not reported", name)
+				}
+				if v := a.compose.Value(); v != []string{"one typed", "two typed"}[fail-1] {
+					t.Fatalf("%s: composer = %q, want the failed text back", name, v)
+				}
+			}
+		})
 	}
-	wantRows(t, "channel", a.messagepane.Messages(), "10.000008=hello")
 }
 
-// Two quick sends are adopted by their echoes in send order, whichever
-// order their HTTP results come back in.
-func TestPendingSend_TwoSendsAdoptInOrder(t *testing.T) {
-	a := pendingApp(t)
-	first := sendTop(t, a, "one")
-	second := sendTop(t, a, "two")
-	a.Update(echo("C1", "10.000001", "", "one"))
-	wantRows(t, "after first echo", a.messagepane.Messages(), "10.000001=one", second+"=two")
-	a.Update(echo("C1", "10.000002", "", "two"))
-	wantRows(t, "after second echo", a.messagepane.Messages(), "10.000001=one", "10.000002=two")
-
-	a.Update(MessageSentMsg{ChannelID: "C1", LocalTS: second, Message: messages.MessageItem{TS: "10.000002", Text: "two!"}})
-	a.Update(MessageSentMsg{ChannelID: "C1", LocalTS: first, Message: messages.MessageItem{TS: "10.000001", Text: "one!"}})
-	wantRows(t, "after results", a.messagepane.Messages(), "10.000001=one!", "10.000002=two!")
+// permute calls f with every ordering of xs.
+func permute(xs []string, f func([]string)) {
+	var rec func(int)
+	p := slices.Clone(xs)
+	rec = func(k int) {
+		if k == len(p) {
+			f(slices.Clone(p))
+			return
+		}
+		for i := k; i < len(p); i++ {
+			p[k], p[i] = p[i], p[k]
+			rec(k + 1)
+			p[k], p[i] = p[i], p[k]
+		}
+	}
+	rec(0)
 }
 
-// A reply's echo is adopted in the thread panel, and a broadcast's in
-// the channel feed as well.
-func TestPendingReply_EchoAdoptedInEveryPane(t *testing.T) {
+// A reply whose echo arrived first and whose post then failed is shown
+// from its echo (Slack posted it), with the parent's reply count and a
+// threads-list refresh as for any reply, and the failure still gives
+// the text back and reports it.
+func TestPendingReply_EchoThenFailureShowsEcho(t *testing.T) {
+	a := typedApp(t)
+	a.threadsDirtyDebounce = time.Millisecond
+	a.messagepane.SetMessages([]messages.MessageItem{{TS: "5.000000", Text: "parent"}})
+	_, _, local := sendFromComposer(t, a, PanelThread, "hi")
+	a.Update(echo("C1", "10.000001", "5.000000", "hi"))
+	wantRows(t, "while pending", a.threadPanel.Replies(), local+"=hi")
+	_, cmd := a.Update(ThreadReplySendFailedMsg{ChannelID: "C1", ThreadTS: "5.000000", LocalTS: local, Reason: "timeout"})
+	wantRows(t, "after failure", a.threadPanel.Replies(), "10.000001=hi")
+	if n := a.messagepane.Messages()[0].ReplyCount; n != 1 {
+		t.Errorf("parent reply count = %d, want 1", n)
+	}
+	// One run: a tick's timer starts when the tick is built, so a
+	// second run of the same command would never fire it.
+	got := drainMsgs(cmd, 500*time.Millisecond)
+	if !slices.ContainsFunc(got, func(m tea.Msg) bool { _, ok := m.(statusbar.SendFailedMsg); return ok }) {
+		t.Errorf("failure not reported: %#v", got)
+	}
+	if !slices.ContainsFunc(got, func(m tea.Msg) bool { _, ok := m.(ThreadsListDirtyMsg); return ok }) {
+		t.Errorf("no threads-list refresh for the released reply: %#v", got)
+	}
+	if v := a.threadCompose.Value(); v != "hi" {
+		t.Errorf("thread composer = %q, want the text back", v)
+	}
+}
+
+// A broadcast reply's echo is held in the thread panel and the channel
+// feed alike, and its result settles both.
+func TestPendingReply_BroadcastEchoHeldInEveryPane(t *testing.T) {
 	a := pendingApp(t)
 	openThread(a, "5.000000")
 	a.Update(SendThreadReplyMsg{ChannelID: "C1", ThreadTS: "5.000000", Text: "reply", Broadcast: true})
-	e := echo("C1", "10.000009", "5.000000", "reply")
+	local := a.threadPanel.Replies()[0].TS
+	e := echo("C1", "10.000009", "5.000000", "reply (echo)")
 	e.Message.Subtype = "thread_broadcast"
 	a.Update(e)
+	wantRows(t, "thread", a.threadPanel.Replies(), local+"=reply")
+	wantRows(t, "channel", a.messagepane.Messages(), local+"=reply")
+	a.Update(ThreadReplySentMsg{ChannelID: "C1", ThreadTS: "5.000000", LocalTS: local, Broadcast: true,
+		Message: messages.MessageItem{TS: "10.000009", ThreadTS: "5.000000", Subtype: "thread_broadcast", UserID: "USELF", Text: "reply"}})
 	wantRows(t, "thread", a.threadPanel.Replies(), "10.000009=reply")
 	wantRows(t, "channel", a.messagepane.Messages(), "10.000009=reply")
 }
 
 // A sent result without a TS cannot settle the placeholder, so it
-// removes it rather than leaving a row that never resolves; a row an
-// echo already settled is the posted message and stays.
+// removes it rather than leaving a row that never resolves. An echo
+// held meanwhile is the posted message and shows.
 func TestPendingSend_EmptyTSResult(t *testing.T) {
 	t.Run("channel", func(t *testing.T) {
 		a := pendingApp(t)
@@ -197,13 +381,28 @@ func TestPendingSend_EmptyTSResult(t *testing.T) {
 		wantRows(t, "thread", a.threadPanel.Replies())
 		wantRows(t, "channel", a.messagepane.Messages())
 	})
-	t.Run("after adoption", func(t *testing.T) {
+	t.Run("echo held first", func(t *testing.T) {
 		a := pendingApp(t)
 		local := sendTop(t, a, "hello")
 		a.Update(echo("C1", "10.000001", "", "hello"))
 		a.Update(MessageSentMsg{ChannelID: "C1", LocalTS: local})
 		wantRows(t, "channel", a.messagepane.Messages(), "10.000001=hello")
 	})
+}
+
+// A held message edited or deleted before it is released shows as
+// edited, or not at all.
+func TestPendingSend_HeldEchoEditedOrDeleted(t *testing.T) {
+	a := pendingApp(t)
+	local := sendTop(t, a, "hello")
+	a.Update(echo("C1", "10.000002", "", "phone"))
+	a.Update(echo("C1", "10.000003", "", "phone 2"))
+	edited := echo("C1", "10.000002", "", "phone edited")
+	edited.Message.IsEdited = true
+	a.Update(edited)
+	a.Update(WSMessageDeletedMsg{ChannelID: "C1", TS: "10.000003"})
+	a.Update(MessageSentMsg{ChannelID: "C1", LocalTS: local, Message: messages.MessageItem{TS: "10.000001", UserID: "USELF", Text: "hello"}})
+	wantRows(t, "channel", a.messagepane.Messages(), "10.000001=hello", "10.000002=phone edited")
 }
 
 // sendFromComposer types text into the composer of panel (the channel
@@ -287,13 +486,15 @@ func TestPendingSend_FailureGivesTypedTextBack(t *testing.T) {
 			t.Errorf("composer = %q, want the newer text kept", got)
 		}
 	})
-	t.Run("not after adoption", func(t *testing.T) {
+	t.Run("echo held, then failure", func(t *testing.T) {
 		a := typedApp(t)
+		a.messagepane.SetMessages(nil)
 		_, _, local := sendFromComposer(t, a, PanelMessages, "posted")
 		a.Update(echo("C1", "10.000001", "", "posted"))
 		a.Update(MessageSendFailedMsg{ChannelID: "C1", LocalTS: local, Reason: "timeout"})
-		if got := a.compose.Value(); got != "" {
-			t.Errorf("composer = %q, want nothing given back for a posted message", got)
+		if got := a.compose.Value(); got != "posted" {
+			t.Errorf("composer = %q, want the text back: nothing proves the echo is this send's", got)
 		}
+		wantRows(t, "channel", a.messagepane.Messages(), "10.000001=posted")
 	})
 }

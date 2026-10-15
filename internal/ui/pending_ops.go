@@ -6,21 +6,28 @@
 //
 // A send (channel message, thread reply, broadcast) records a pending
 // insert under its "local:N" placeholder id. Its echo can arrive before
-// or after the chat.postMessage HTTP result:
+// or after the chat.postMessage HTTP result, and nothing in an echo
+// says which send it belongs to: the user may have two sends in flight
+// in one conversation (their results and echoes can arrive in any
+// order), or may post the same conversation from another client or
+// through a forward or upload. So an echo is never matched to a send:
 //
-//  1. Before: the echo is adopted (AdoptEcho). It settles the oldest
-//     pending insert for the same conversation, in place of being
-//     appended, and the HTTP result later replaces it with Slack's
-//     response. An echo that matches no pending insert (slk's own file
-//     uploads, a message from another Slack client) renders normally.
+//  1. Before: while any send is pending in a conversation, the user's
+//     own messages echoed in it are held (HoldEcho), not shown.
 //
-//  2. After: the HTTP result has called RecordSent with the real TS,
-//     and IsSelfSent drops the echo carrying it.
+//  2. The HTTP result ends the insert (EndInsert) and records its real
+//     TS (RecordSent). Once no send is pending in the conversation,
+//     the held echoes are released in TS order: those carrying a
+//     recorded TS are dropped (the result already showed them), the
+//     rest render as any new message does. While other sends are
+//     still pending there, only the recorded ones are dropped.
 //
-// The HTTP result ends the insert (EndInsert). A failed send gives the
-// text as typed back to the composer it came from. A failure on an
-// adopted insert is not a failure the user needs to see: the echo
-// proves Slack posted the message.
+//  3. After: IsSelfSent drops the echo carrying a recorded TS.
+//
+// A failed send gives the text as typed back to the composer it came
+// from. If Slack posted it anyway (a timeout after Slack accepted the
+// post), its held echo is released like any other and the message
+// shows once, from the echo.
 //
 // An edit (BeginEdit) shows its text at once and is settled by its
 // chat.update result (EndEdit). While any edit of a message is
@@ -39,6 +46,7 @@
 package ui
 
 import (
+	"cmp"
 	"fmt"
 	"slices"
 	"strings"
@@ -46,6 +54,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
+	"github.com/gammons/slk/internal/debuglog"
 	"github.com/gammons/slk/internal/ui/messages"
 )
 
@@ -59,9 +68,11 @@ type pendingInsert struct {
 	// text as typed, given back to its composer if the send fails.
 	teamID string
 	typed  string
-	// adopted is set once the send's echo has settled the placeholder;
-	// the message is then known to be posted.
-	adopted bool
+}
+
+// conversation is the conversation ins posts to.
+func (ins pendingInsert) conversation() conversationKey {
+	return conversationKey{ins.channelID, ins.threadTS}
 }
 
 // origin is where ins was typed, for offerTypedBack.
@@ -88,6 +99,21 @@ type pendingEdit struct {
 // origin is where e was typed, for offerTypedBack.
 func (e pendingEdit) origin() commandOrigin {
 	return commandOrigin{teamID: e.teamID, channelID: e.channelID, threadTS: e.threadTS, typed: e.typed}
+}
+
+// conversationKey names a conversation: a channel's top level
+// (threadTS "") or one thread of it.
+type conversationKey struct{ channelID, threadTS string }
+
+// conversationOf is the conversation msg, a message in channelID, was
+// posted to. A thread parent (ThreadTS == TS) is top level; a reply or
+// a thread_broadcast belongs to its parent's thread.
+func conversationOf(channelID string, msg messages.MessageItem) conversationKey {
+	threadTS := msg.ThreadTS
+	if threadTS == msg.TS {
+		threadTS = ""
+	}
+	return conversationKey{channelID, threadTS}
 }
 
 // editKey names a message by channel and TS.
@@ -131,7 +157,11 @@ type pendingDelete struct {
 // session. See the package comment.
 type pendingOps struct {
 	// inserts are the sends without an HTTP result, oldest first.
-	inserts []*pendingInsert
+	inserts []pendingInsert
+
+	// held are the user's own messages echoed in a conversation while
+	// a send was pending there, in arrival order. See HoldEcho.
+	held map[conversationKey][]NewMessageMsg
 
 	// edits holds every message with an edit awaiting its result.
 	edits  map[editKey]*editedMessage
@@ -141,8 +171,8 @@ type pendingOps struct {
 	deletes map[editKey]*pendingDelete
 
 	// sentTSes records authoritative TSes the App has observed via
-	// MessageSentMsg / ThreadReplySentMsg or an adopted echo. WS
-	// echoes carrying any of these are dropped.
+	// MessageSentMsg / ThreadReplySentMsg. WS echoes carrying any of
+	// these are dropped.
 	sentTSes map[string]time.Time
 
 	// localTSCounter is incremented per optimistic placeholder so each
@@ -155,48 +185,91 @@ func newPendingOps() *pendingOps {
 		sentTSes: make(map[string]time.Time),
 		edits:    make(map[editKey]*editedMessage),
 		deletes:  make(map[editKey]*pendingDelete),
+		held:     make(map[conversationKey][]NewMessageMsg),
 	}
 }
 
 // BeginInsert records a send whose placeholder is ins.localTS.
 func (p *pendingOps) BeginInsert(ins pendingInsert) {
-	p.inserts = append(p.inserts, &ins)
+	p.inserts = append(p.inserts, ins)
+}
+
+// pendingIn reports whether a send to conversation k is pending.
+func (p *pendingOps) pendingIn(k conversationKey) bool {
+	return slices.ContainsFunc(p.inserts, func(ins pendingInsert) bool { return ins.conversation() == k })
+}
+
+// HoldEcho holds m, a message the current user posted, when a send is
+// pending in its conversation, and reports whether it did. The caller
+// shows nothing for a held message: EndInsert hands it back once the
+// conversation has no send pending, or drops it if a result showed it.
+func (p *pendingOps) HoldEcho(m NewMessageMsg) bool {
+	k := conversationOf(m.ChannelID, m.Message)
+	if !p.pendingIn(k) {
+		return false
+	}
+	p.held[k] = append(p.held[k], m)
+	return true
 }
 
 // EndInsert removes the send with placeholder localTS and returns it;
 // ok is false when there is none (a result fired without a send, as
-// tests do).
-func (p *pendingOps) EndInsert(localTS string) (ins pendingInsert, ok bool) {
-	for i, e := range p.inserts {
-		if e.localTS == localTS {
-			p.inserts = append(p.inserts[:i], p.inserts[i+1:]...)
-			return *e, true
-		}
+// tests do). sentTS is the TS Slack gave the message, "" when the send
+// failed; it is recorded (RecordSent) before the held echoes are
+// looked at, so the send's own echo is dropped. release is what the
+// caller must now show as new messages: when no other send is pending
+// in the conversation, every held echo that no result showed, in TS
+// order.
+func (p *pendingOps) EndInsert(localTS, sentTS string) (ins pendingInsert, release []NewMessageMsg, ok bool) {
+	p.RecordSent(sentTS)
+	i := slices.IndexFunc(p.inserts, func(e pendingInsert) bool { return e.localTS == localTS })
+	if i < 0 {
+		return pendingInsert{}, nil, false
 	}
-	return pendingInsert{}, false
+	ins = p.inserts[i]
+	p.inserts = slices.Delete(p.inserts, i, i+1)
+	k := ins.conversation()
+	held := slices.DeleteFunc(p.held[k], func(m NewMessageMsg) bool {
+		if p.IsSelfSent(m.Message.TS) {
+			debuglog.Cache("NewMessageMsg: channel=%s ts=%s decision=dropped_held_self_send",
+				m.ChannelID, m.Message.TS)
+			return true
+		}
+		return false
+	})
+	if p.pendingIn(k) {
+		p.held[k] = held
+		return ins, nil, true
+	}
+	delete(p.held, k)
+	slices.SortStableFunc(held, func(x, y NewMessageMsg) int { return cmp.Compare(x.Message.TS, y.Message.TS) })
+	return ins, held, true
 }
 
-// AdoptEcho finds the oldest send that msg, a message the current user
-// posted in channelID, can be the echo of, marks it adopted and returns
-// it. A send matches when it is in the same conversation (the same
-// thread, or top level for both) and no echo has adopted it yet. An
-// echo carrying files never matches: slk sends files through the
-// upload path, which has no placeholder.
-func (p *pendingOps) AdoptEcho(channelID string, msg messages.MessageItem) (pendingInsert, bool) {
-	if len(msg.Attachments) > 0 {
-		return pendingInsert{}, false
-	}
-	threadTS := msg.ThreadTS
-	if threadTS == msg.TS {
-		threadTS = ""
-	}
-	for _, e := range p.inserts {
-		if !e.adopted && e.channelID == channelID && e.threadTS == threadTS {
-			e.adopted = true
-			return *e, true
+// PatchHeld applies f to the held message channelID/ts, if any: an
+// edit of a message the user posted elsewhere can arrive while it is
+// held.
+func (p *pendingOps) PatchHeld(channelID, ts string, f func(*messages.MessageItem)) {
+	for k, held := range p.held {
+		if k.channelID != channelID {
+			continue
+		}
+		for i := range held {
+			if held[i].Message.TS == ts {
+				f(&held[i].Message)
+			}
 		}
 	}
-	return pendingInsert{}, false
+}
+
+// DropHeld forgets the held message channelID/ts, if any: it was
+// deleted before it could be shown.
+func (p *pendingOps) DropHeld(channelID, ts string) {
+	for k, held := range p.held {
+		if k.channelID == channelID {
+			p.held[k] = slices.DeleteFunc(held, func(m NewMessageMsg) bool { return m.Message.TS == ts })
+		}
+	}
 }
 
 // BeginEdit records e under a fresh id and returns it with the id set.
