@@ -2178,10 +2178,12 @@ func (m *Model) View(height, width int) string {
 		switch {
 		case r.navIdx >= 0 && r.navIdx == m.cursor:
 			visible = append(visible, r.selected)
-		case r.channelID != "" && r.channelID == m.activeID && r.active != "":
+		case r.channelID != "" && r.channelID == m.activeID && r.active != "" && !m.threadsActive && !m.activityActive:
 			// This row is the channel the user is currently viewing in
 			// the message pane (but the cursor is elsewhere). Show the
-			// orange ▌ "active" indicator so they know where they are.
+			// orange ▌ "active" indicator so they know where they are. Not while Threads
+			// or Activity is the displayed view: the channel is not on screen
+			// then, and a second ▌ would read as a second cursor.
 			visible = append(visible, r.active)
 		case r.isThreadsRow && m.threadsActive && r.active != "":
 			// Threads view is the currently displayed view; mark the
