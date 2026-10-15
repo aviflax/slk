@@ -290,12 +290,18 @@ func TestReconnect_CountsFailureStillRefreshesTheActiveChannel(t *testing.T) {
 type fakeMemberAPI struct {
 	mu    sync.Mutex
 	calls int
+	// called receives one value per fetch when non-nil, so a test can
+	// block on the background fetch instead of polling for it.
+	called chan struct{}
 }
 
 func (f *fakeMemberAPI) GetUsersInConversation(_ context.Context, _ string) ([]string, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.calls++
+	if f.called != nil {
+		f.called <- struct{}{}
+	}
 	return []string{"U1"}, nil
 }
 
@@ -305,20 +311,25 @@ func (f *fakeMemberAPI) callCount() int {
 	return f.calls
 }
 
-func newMembershipHandler(t *testing.T, active bool) (*rtmEventHandler, *fakeMemberAPI, *cache.DB) {
+func newMembershipHandler(t *testing.T, active bool) (*rtmEventHandler, *fakeMemberAPI, *cache.DB, *[]string) {
 	t.Helper()
 	db := newTestDB(t)
 	if err := db.ReplaceChannelMembers("T1", "C1", []string{"U1"}, time.Now().Unix()); err != nil {
 		t.Fatalf("ReplaceChannelMembers: %v", err)
 	}
-	api := &fakeMemberAPI{}
-	mgr := membership.New("T1", api, db, nil, nil)
+	api := &fakeMemberAPI{called: make(chan struct{}, 8)}
+	// EnsureFresh pushes the cached set synchronously before it decides
+	// to fetch, so a push is the synchronous trace of the refresh
+	// having run at all.
+	var pushed []string
+	push := func(channelID string, _ []string) { pushed = append(pushed, channelID) }
+	mgr := membership.New("T1", api, db, push, nil)
 	h := &rtmEventHandler{
 		wsCtx:           &WorkspaceContext{Membership: mgr},
 		isActive:        func() bool { return active },
 		activeChannelID: func() string { return "C1" },
 	}
-	return h, api, db
+	return h, api, db, &pushed
 }
 
 // TestOnConnectMembershipRefreshSkipsInactiveWorkspace pins the
@@ -332,12 +343,18 @@ func newMembershipHandler(t *testing.T, active bool) (*rtmEventHandler, *fakeMem
 // user interaction. Measured live: both workspaces' OnConnect fetched
 // the same DM id 0.6 s apart; the non-owner's failed.
 func TestOnConnectMembershipRefreshSkipsInactiveWorkspace(t *testing.T) {
-	h, api, db := newMembershipHandler(t, false)
+	h, api, db, pushed := newMembershipHandler(t, false)
 	before, _, _ := db.GetChannelMembershipMeta("T1", "C1")
 
 	h.refreshActiveMembership()
-	time.Sleep(100 * time.Millisecond)
 
+	// The fetch itself runs on a goroutine the test cannot join, so the
+	// assertions that decide the test are the synchronous ones: a
+	// refresh that got past the gate pushes the cached set and zeroes
+	// the meta before it spawns that goroutine.
+	if len(*pushed) != 0 {
+		t.Errorf("background workspace ran the membership refresh for %v; want it skipped", *pushed)
+	}
 	if c := api.callCount(); c != 0 {
 		t.Errorf("background workspace fetched membership %d times for a channel it does not own; want 0", c)
 	}
@@ -348,14 +365,13 @@ func TestOnConnectMembershipRefreshSkipsInactiveWorkspace(t *testing.T) {
 }
 
 func TestOnConnectMembershipRefreshRunsForActiveWorkspace(t *testing.T) {
-	h, api, _ := newMembershipHandler(t, true)
+	h, api, _, _ := newMembershipHandler(t, true)
 
 	h.refreshActiveMembership()
 
-	deadline := time.Now().Add(time.Second)
-	for time.Now().Before(deadline) && api.callCount() == 0 {
-		time.Sleep(5 * time.Millisecond)
-	}
+	// No timeout by design: a refresh that never fetches hangs here and
+	// go test's own -timeout dumps the goroutines.
+	<-api.called
 	if c := api.callCount(); c != 1 {
 		t.Errorf("active workspace's membership refresh fetched %d times; want 1", c)
 	}
@@ -406,11 +422,8 @@ func TestSyncOnReconnect_KicksThreadSubscriptionSync(t *testing.T) {
 	if !h.syncOnReconnect("wake") {
 		t.Fatal("syncOnReconnect was deduped on its first call")
 	}
-	select {
-	case <-kicked:
-	case <-time.After(time.Second):
-		t.Fatal("reconnect catch-up did not kick the thread subscription sync")
-	}
+	// No timeout by design: a missing kick hangs and -timeout names it.
+	<-kicked
 }
 
 // The kick is a trigger, not a fetch: threadSubsGate inside
@@ -436,19 +449,12 @@ func TestSyncOnReconnect_KickSurvivesDedupedPass(t *testing.T) {
 	if h.syncOnReconnect("reconnect") {
 		t.Fatal("second pass inside the dedupe window should have been suppressed")
 	}
-	select {
-	case <-kicked:
-	case <-time.After(time.Second):
-		t.Fatal("first pass did not kick the thread subscription sync")
-	}
-	select {
-	case <-kicked:
-		// Both designs are defensible; this pins "kick even when the
-		// channel pass was deduped", since the thread gate throttles
-		// anyway and the kick is free.
-	case <-time.After(time.Second):
-		t.Fatal("deduped pass did not forward the kick to the thread gate, which owns the real throttle")
-	}
+	// No timeout by design: a missing kick hangs and -timeout names it.
+	<-kicked
+	// Both designs are defensible; this pins "kick even when the
+	// channel pass was deduped", since the thread gate throttles
+	// anyway and the kick is free.
+	<-kicked
 }
 
 // countsWithMentionsBody is a client.counts response carrying non-zero
