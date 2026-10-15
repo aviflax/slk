@@ -15,14 +15,18 @@ type mark string
 func emit(s string) Act { return func(*Scene) []tea.Msg { return []tea.Msg{mark(s)} } }
 
 type recorder struct {
-	mu   sync.Mutex
-	msgs []tea.Msg
+	mu      sync.Mutex
+	changed *sync.Cond
+	msgs    []tea.Msg
 }
 
 func (r *recorder) send(m tea.Msg) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.msgs = append(r.msgs, m)
+	if r.changed != nil {
+		r.changed.Broadcast()
+	}
 }
 
 func (r *recorder) all() []tea.Msg {
@@ -31,30 +35,31 @@ func (r *recorder) all() []tea.Msg {
 	return slices.Clone(r.msgs)
 }
 
-// waitFor polls until at least n messages have arrived.
-func (r *recorder) waitFor(t *testing.T, n int) []tea.Msg {
-	t.Helper()
-	for deadline := time.Now().Add(2 * time.Second); time.Now().Before(deadline); time.Sleep(5 * time.Millisecond) {
-		if got := r.all(); len(got) >= n {
-			return got
-		}
+// waitFor blocks until at least n messages have arrived. It has no
+// deadline of its own: a director that never plays the step hangs here
+// and go test's -timeout names the test.
+func (r *recorder) waitFor(n int) []tea.Msg {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.changed == nil {
+		r.changed = sync.NewCond(&r.mu)
 	}
-	t.Fatalf("got %d messages, want at least %d: %#v", len(r.all()), n, r.all())
-	return nil
+	for len(r.msgs) < n {
+		r.changed.Wait()
+	}
+	return slices.Clone(r.msgs)
 }
 
-// settle waits until nothing new has arrived for 50ms (3s at most).
-func (r *recorder) settle() []tea.Msg {
-	last := -1
-	for i := 0; i < 60; i++ {
-		time.Sleep(50 * time.Millisecond)
-		if n := len(r.all()); n == last {
-			break
-		} else {
-			last = n
-		}
+// playOut dispatches the events in order on the calling goroutine, the
+// way run does, and returns once every rule they started has finished.
+// Use it with an instant clock when the test needs to know that nothing
+// more is coming, which run's loop cannot say.
+func playOut(d *Director, send func(tea.Msg), events ...Event) {
+	var wg sync.WaitGroup
+	for _, ev := range events {
+		d.dispatch(context.Background(), &wg, send, ev)
 	}
-	return r.all()
+	wg.Wait()
 }
 
 // delays is an instant clock that records every delay it was asked for.
@@ -79,7 +84,7 @@ func (dl *delays) all() []time.Duration {
 }
 
 // start runs d until the test ends. The returned stop cancels it and
-// fails the test if run does not return promptly.
+// waits for run to return.
 func start(t *testing.T, d *Director, send func(tea.Msg)) (stop func()) {
 	t.Helper()
 	ctx, cancel := context.WithCancel(context.Background())
@@ -88,11 +93,7 @@ func start(t *testing.T, d *Director, send func(tea.Msg)) (stop func()) {
 	t.Cleanup(func() { cancel(); <-done })
 	return func() {
 		cancel()
-		select {
-		case <-done:
-		case <-time.After(2 * time.Second):
-			t.Fatal("director did not stop after cancel")
-		}
+		<-done
 	}
 }
 
@@ -109,7 +110,7 @@ func TestDirectorPlaysStepsInOrderAfterTheirDelays(t *testing.T) {
 
 	d.observe(Event{Kind: EventChannelOpened, ChannelID: "C1"})
 
-	if got, want := rec.waitFor(t, 3), []tea.Msg{mark("a"), mark("b"), mark("c")}; !slices.Equal(got, want) {
+	if got, want := rec.waitFor(3), []tea.Msg{mark("a"), mark("b"), mark("c")}; !slices.Equal(got, want) {
 		t.Errorf("messages = %v, want %v", got, want)
 	}
 	if got, want := dl.all(), []time.Duration{time.Second, 2 * time.Second, 3 * time.Second}; !slices.Equal(got, want) {
@@ -124,13 +125,13 @@ func TestDirectorOnceRulesPlayOnce(t *testing.T) {
 	})
 	d.after = (&delays{}).instant
 	rec := &recorder{}
-	start(t, d, rec.send)
 
-	d.observe(Event{Kind: EventChannelOpened, ChannelID: "C1"})
-	d.observe(Event{Kind: EventChannelOpened, ChannelID: "C1"})
-	d.observe(Event{Kind: EventChannelOpened, ChannelID: "C2"})
+	playOut(d, rec.send,
+		Event{Kind: EventChannelOpened, ChannelID: "C1"},
+		Event{Kind: EventChannelOpened, ChannelID: "C1"},
+		Event{Kind: EventChannelOpened, ChannelID: "C2"})
 
-	got := rec.settle()
+	got := rec.all()
 	if n := len(slices.DeleteFunc(slices.Clone(got), func(m tea.Msg) bool { return m != mark("once") })); n != 1 {
 		t.Errorf("once-rule played %d times: %v", n, got)
 	}
@@ -141,17 +142,21 @@ func TestDirectorFiresStartOnItsOwn(t *testing.T) {
 	d.after = (&delays{}).instant
 	rec := &recorder{}
 	start(t, d, rec.send)
-	if got := rec.waitFor(t, 1); got[0] != mark("hello") {
+	if got := rec.waitFor(1); got[0] != mark("hello") {
 		t.Errorf("got %v", got)
 	}
 }
 
 func TestDirectorCancelStopsPendingSteps(t *testing.T) {
 	d := newDirector(fixtureWorld(), []Rule{{When: on(EventStart, anyChannel), Steps: []Step{{After: time.Hour, Act: emit("late")}}}})
-	d.after = func(time.Duration) <-chan time.Time { return make(chan time.Time) } // never fires
+	waiting := make(chan struct{})
+	d.after = func(time.Duration) <-chan time.Time { // never fires
+		close(waiting)
+		return make(chan time.Time)
+	}
 	rec := &recorder{}
 	stop := start(t, d, rec.send)
-	time.Sleep(20 * time.Millisecond)
+	<-waiting // the step is now parked on its delay
 	stop()
 	if got := rec.all(); len(got) != 0 {
 		t.Errorf("a step fired after cancel: %v", got)
@@ -160,16 +165,9 @@ func TestDirectorCancelStopsPendingSteps(t *testing.T) {
 
 func TestObserveNeverBlocks(t *testing.T) {
 	d := newDirector(fixtureWorld(), nil)
-	done := make(chan struct{})
-	go func() {
-		for i := 0; i < 1000; i++ {
-			d.observe(Event{Kind: EventMessageSent})
-		}
-		close(done)
-	}()
-	select {
-	case <-done:
-	case <-time.After(time.Second):
-		t.Fatal("observe blocked with nobody running the director")
+	// Nobody runs the director and the queue holds 64: a blocking
+	// observe hangs here until go test's -timeout.
+	for i := 0; i < 1000; i++ {
+		d.observe(Event{Kind: EventMessageSent})
 	}
 }

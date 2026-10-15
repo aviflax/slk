@@ -30,7 +30,7 @@ func TestHeroEngineeringRule(t *testing.T) {
 	start(t, d, rec.send)
 
 	d.observe(Event{Kind: EventChannelOpened, TeamID: teamLumen, ChannelID: chEngineering})
-	got := rec.waitFor(t, 3)
+	got := rec.waitFor(3)
 
 	typing, ok := got[0].(ui.UserTypingMsg)
 	if !ok || typing.UserID != uPriya || typing.ChannelID != chEngineering || typing.WorkspaceID != teamLumen {
@@ -70,7 +70,7 @@ func TestAnswerTheUserPicksTheRightResponder(t *testing.T) {
 		rec := &recorder{}
 		stop := start(t, d, rec.send)
 		d.observe(Event{Kind: EventMessageSent, TeamID: w.teamOf(tc.channel), ChannelID: tc.channel, ThreadTS: tc.thread})
-		got := rec.waitFor(t, 2)
+		got := rec.waitFor(2)
 		stop()
 
 		if typing, ok := got[0].(ui.UserTypingMsg); !ok || typing.UserID != tc.want || typing.ChannelID != tc.channel {
@@ -94,18 +94,15 @@ func TestEveryScenarioPlaysAgainstTheFixtures(t *testing.T) {
 			d := newDirector(w, rules)
 			d.after = (&delays{}).instant
 			rec := &recorder{}
-			start(t, d, rec.send)
-			for _, ev := range []Event{
-				{Kind: EventChannelOpened, TeamID: teamLumen, ChannelID: chGeneral},
-				{Kind: EventChannelOpened, TeamID: teamLumen, ChannelID: chEngineering},
-				{Kind: EventThreadOpened, TeamID: teamLumen, ChannelID: chDeploys, ThreadTS: threadIn(t, w, chDeploys)},
-				{Kind: EventMessageSent, TeamID: teamLumen, ChannelID: dmSam},
-				{Kind: EventWorkspaceSwitched, TeamID: teamDriftwood},
-			} {
-				d.observe(ev)
-			}
+			playOut(d, rec.send,
+				Event{Kind: EventStart},
+				Event{Kind: EventChannelOpened, TeamID: teamLumen, ChannelID: chGeneral},
+				Event{Kind: EventChannelOpened, TeamID: teamLumen, ChannelID: chEngineering},
+				Event{Kind: EventThreadOpened, TeamID: teamLumen, ChannelID: chDeploys, ThreadTS: threadIn(t, w, chDeploys)},
+				Event{Kind: EventMessageSent, TeamID: teamLumen, ChannelID: dmSam},
+				Event{Kind: EventWorkspaceSwitched, TeamID: teamDriftwood})
 			lively := 0
-			for _, m := range rec.settle() {
+			for _, m := range rec.all() {
 				switch m := m.(type) {
 				case ui.ToastMsg:
 					t.Errorf("scenario references something missing: %s", m.Text)
