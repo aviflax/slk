@@ -8,8 +8,60 @@ Earlier history, up to v0.26.2, is in [upstream's releases](https://github.com/g
 
 ## [Unreleased]
 
+## [0.28.0] - 2026-10-15
+
+### Added
+
+- Messages that mention you stand out, the way they do in the Slack desktop
+  app. A message that names you gets a yellow bar in the left gutter, a faint
+  warm tint across the row, and a pill behind your `@name`. An `@here`,
+  `@channel` or `@everyone` message gets only the bar. Your own messages are
+  never marked. Custom themes can set `mention_bar`, `mention_bg` and
+  `mention_pill_bg`; they default to shades of the theme's `warning` colour.
+
+### Changed
+
+- Channels in each sidebar section are listed alphabetically, ignoring case and
+  accents. Channels pinned with a `:N` suffix in a config section still come
+  first, and the Starred section still lists channels before people. slk can't
+  read the sort order chosen in the official Slack client.
+- When a channel matches more than one config section with the same `order`,
+  it goes in the one whose name sorts first. It used to land in a different
+  one from run to run.
+
 ### Fixed
 
+- Sending a message that starts with a number and a full stop no longer
+  renumbers it: "2024. was a year" was sent as "1. was a year", and a list
+  typed from 5 was sent counting from 1.
+- Text typed on the same line as an opening ```` ``` ```` is no longer dropped
+  when the message is sent.
+- A block quote that wraps onto more than one line keeps its bar and muted
+  colour on every line, not just the first.
+- Loading older history into an empty channel could crash slk.
+- Older history could show a message twice after one of your own messages was
+  sent.
+- When a message or thread reply failed to send, the cursor jumped to the next
+  message. It now stays where it was.
+- Removing a reaction in a channel could show the wrong reactions on the open
+  thread's parent message.
+- A config section named like a built-in one (for example `Channels`) was drawn
+  twice in the sidebar.
+- Page Down in the sidebar could move the cursor up after a fast scroll.
+- The channel finder ranked names with accents, CJK or emoji below equally close
+  plain-ASCII names.
+- Activity and Threads cards with a link in them could run one column past the
+  edge of the pane.
+- Copying a selection that starts with a combining accent no longer drops the
+  accent.
+- A wide character (CJK or emoji) where the scrollbar is drawn no longer shifts
+  the scrollbar a column to the left on that row.
+- A blank entry in `on_keyword` sent a desktop notification for every message.
+  Blank entries are now ignored.
+- `slk export` in a time zone whose daylight saving time once began at midnight
+  (such as America/Sao_Paulo) started those days an hour early.
+- Saving a theme whose name contains the DEL character wrote a config file slk
+  could not load.
 - On Linux, `slk open` with a request slk rejects for length could report
   "connection reset by peer" instead of slk's reason.
 - Installing or upgrading the Homebrew cask no longer prints a warning that
@@ -88,4 +140,5 @@ v0.26.2.
   last-viewed channel drops its `▌` marker while Threads or Activity is the
   view on screen.
 
+[0.28.0]: https://github.com/kirahowe/slk/releases/tag/v0.28.0
 [0.27.0]: https://github.com/kirahowe/slk/releases/tag/v0.27.0

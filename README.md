@@ -27,6 +27,7 @@ This is a fork of [gammons/slk](https://github.com/gammons/slk), maintained by K
 - Real-time messages, edits, deletes, reactions, typing indicators, apps' "working" status
 - Inline images (kitty graphics / sixel / half-block fallback) with full-screen preview
 - Threads side panel + a workspace-wide threads view
+- Messages that mention you are highlighted like in Slack's desktop app: a gutter bar, a tinted row, and your `@name` in a pill
 - Activity feed: mentions, thread replies, reactions, and DMs in one list, like Slack's Activity tab
 - Smart paste: clipboard images, file paths, or text — multiple attachments + caption in one send
 - Slack-native sidebar sections, kept live; or glob-based config sections

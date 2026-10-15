@@ -246,6 +246,13 @@ sidebar_background = "#19171D"
 sidebar_text       = "#D1D2D3"
 sidebar_text_muted = "#9A9B9E"
 rail_background    = "#19171D"
+
+# Optional mention highlight: the gutter bar on a message that mentions
+# you, the row's tint, and the pill behind your @name. They default to
+# warning, and warning mixed into background at 10% and 35%.
+mention_bar     = "#FFB86C"
+mention_bg      = "#3E383B"
+mention_pill_bg = "#735C49"
 ```
 
 Every built-in theme now sets a channels-panel (sidebar) background that is

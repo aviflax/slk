@@ -7,6 +7,7 @@
 - Edit your own messages (`E`) — reuses the compose box with stash/restore for any in-progress draft
 - Delete your own messages (`D`) — centered confirmation overlay with message preview
 - Slack markdown rendering (bold, italic, strikethrough, code, blockquotes, links, mentions)
+- Mentions of you stand out: a message that names you gets a yellow bar in the gutter, a faint tint across the row, and a pill behind your `@name`; an `@here` / `@channel` / `@everyone` message gets only the bar. Your own messages are never marked. Theme keys `mention_bar`, `mention_bg` and `mention_pill_bg` change the colours
 - Emoji shortcodes (`:rocket:` → 🚀)
 - Day separators (Today, Yesterday, Monday, full date)
 - Infinite scroll backfill into SQLite cache
