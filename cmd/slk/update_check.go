@@ -168,8 +168,20 @@ func saveUpdateCache(path string, c updateCache) error {
 	if err != nil {
 		return err
 	}
-	tmp := path + ".tmp"
-	if err := os.WriteFile(tmp, b, 0o600); err != nil {
+	// A temp file of its own (CreateTemp, mode 0600) in the target's
+	// directory, so two slk processes saving at once cannot write the
+	// same file, and the rename stays on one filesystem.
+	f, err := os.CreateTemp(filepath.Dir(path), ".update-check-*.tmp")
+	if err != nil {
+		return err
+	}
+	tmp := f.Name()
+	defer os.Remove(tmp) // no-op once the rename succeeds
+	if _, err := f.Write(b); err != nil {
+		f.Close()
+		return err
+	}
+	if err := f.Close(); err != nil {
 		return err
 	}
 	return os.Rename(tmp, path)

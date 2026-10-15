@@ -7,9 +7,43 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
+
+// Two slk processes can save the cache at once, so each save needs its
+// own temp file. Whatever sits at the old fixed name (here a directory)
+// must not block a save either.
+func TestSaveUpdateCacheUsesUniqueTempFile(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "update-check.json")
+	if err := os.Mkdir(path+".tmp", 0o700); err != nil {
+		t.Fatal(err)
+	}
+	var wg sync.WaitGroup
+	errs := make(chan error, 8)
+	for i := 0; i < 8; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			errs <- saveUpdateCache(path, updateCache{Latest: "0.26.0"})
+		}()
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		if err != nil {
+			t.Fatalf("saveUpdateCache: %v", err)
+		}
+	}
+	if got, ok := loadUpdateCache(path); !ok || got.Latest != "0.26.0" {
+		t.Errorf("cache = %+v, %v", got, ok)
+	}
+	if entries, _ := os.ReadDir(dir); len(entries) != 2 {
+		t.Errorf("directory holds %d entries, want the cache and the pre-existing .tmp only", len(entries))
+	}
+}
 
 func TestIsNewerVersion(t *testing.T) {
 	for _, tc := range []struct {
