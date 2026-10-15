@@ -6,7 +6,6 @@ import (
 	"strconv"
 	"strings"
 	"testing"
-	"time"
 )
 
 func TestStatusReporter_RunsWithEnv(t *testing.T) {
@@ -42,17 +41,26 @@ func TestStatusReporter_NilEnqueueIsNoop(t *testing.T) {
 	sr.Enqueue(1, 0, "ws", "title") // must not panic or block
 }
 
-// waitFor polls cond until it returns true or the deadline passes.
-func waitFor(t *testing.T, d time.Duration, cond func() bool, desc string) {
-	t.Helper()
-	deadline := time.Now().Add(d)
-	for time.Now().Before(deadline) {
-		if cond() {
+// watchRuns makes sr signal on the returned channels as its worker starts
+// and finishes each state. Call it before the first Enqueue. The channels
+// are buffered past any run count in this file, so the worker never waits
+// on the test.
+func watchRuns(sr *StatusReporter) (started, finished <-chan statusState) {
+	st, fin := make(chan statusState, 64), make(chan statusState, 64)
+	sr.beforeRun = func(s statusState) { st <- s }
+	sr.afterRun = func(s statusState) { fin <- s }
+	return st, fin
+}
+
+// awaitState receives from ch until the state with the given unread count
+// arrives. It has no deadline: if that state never runs, go test's own
+// timeout dumps the stuck goroutine.
+func awaitState(ch <-chan statusState, unread int) {
+	for s := range ch {
+		if s.unread == unread {
 			return
 		}
-		time.Sleep(5 * time.Millisecond)
 	}
-	t.Fatalf("timed out waiting for %s", desc)
 }
 
 // Enqueue during an in-flight run must not spawn an overlapping subprocess;
@@ -62,17 +70,13 @@ func waitFor(t *testing.T, d time.Duration, cond func() bool, desc string) {
 func TestStatusReporter_SerializesAndCoalesces(t *testing.T) {
 	dir := t.TempDir()
 	out := filepath.Join(dir, "out")
-	started := filepath.Join(dir, "started")
 	gate := filepath.Join(dir, "gate")
 	sr := NewStatusReporter(`echo "$SLK_UNREAD" >>` + out +
-		`; if [ ! -f ` + gate + ` ]; then touch ` + started +
-		`; while [ ! -f ` + gate + ` ]; do sleep 0.01; done; fi`)
+		`; while [ ! -f ` + gate + ` ]; do sleep 0.01; done`)
+	started, finished := watchRuns(sr)
 
 	sr.Enqueue(1, 0, "ws", "t")
-	waitFor(t, 5*time.Second, func() bool {
-		_, err := os.Stat(started)
-		return err == nil
-	}, "first status_command to start")
+	awaitState(started, 1) // the worker is inside run 1 and stays there until the gate opens
 
 	// Worker is blocked inside run 1: these must coalesce down to just 9.
 	for i := 2; i <= 9; i++ {
@@ -82,10 +86,7 @@ func TestStatusReporter_SerializesAndCoalesces(t *testing.T) {
 		t.Fatalf("creating gate file: %v", err)
 	}
 
-	waitFor(t, 5*time.Second, func() bool {
-		body, err := os.ReadFile(out)
-		return err == nil && strings.Count(string(body), "\n") >= 2
-	}, "coalesced second run to complete")
+	awaitState(finished, 9)
 	body, err := os.ReadFile(out)
 	if err != nil {
 		t.Fatalf("reading output: %v", err)
@@ -102,17 +103,11 @@ func TestStatusReporter_BurstConvergesToFinalState(t *testing.T) {
 	out := filepath.Join(t.TempDir(), "out")
 	sr := NewStatusReporter(`echo "$SLK_UNREAD" >>` + out)
 	const last = 50
+	_, finished := watchRuns(sr)
 	for i := 0; i <= last; i++ {
 		sr.Enqueue(i, 0, "ws", "t")
 	}
-	waitFor(t, 5*time.Second, func() bool {
-		body, err := os.ReadFile(out)
-		if err != nil {
-			return false
-		}
-		lines := strings.Fields(string(body))
-		return len(lines) > 0 && lines[len(lines)-1] == "50"
-	}, "final state to be reported")
+	awaitState(finished, last) // the newest state always runs
 
 	body, err := os.ReadFile(out)
 	if err != nil {

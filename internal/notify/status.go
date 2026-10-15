@@ -33,6 +33,12 @@ type StatusReporter struct {
 	// latest is a capacity-1 mailbox: Enqueue evicts any pending state, and
 	// the worker always runs the newest.
 	latest chan statusState
+
+	// beforeRun and afterRun, when set, are called by the worker around
+	// each execution with the state it runs. Tests use them as signals;
+	// they are nil in production and must be set before the first Enqueue.
+	beforeRun func(statusState)
+	afterRun  func(statusState)
 }
 
 // NewStatusReporter returns a StatusReporter with its worker started, or nil
@@ -79,8 +85,14 @@ func (r *StatusReporter) Enqueue(unread, otherUnread int, workspace, title strin
 // debuglog ([notify]) rather than dropped, since nothing else observes them.
 func (r *StatusReporter) run() {
 	for s := range r.latest {
+		if r.beforeRun != nil {
+			r.beforeRun(s)
+		}
 		if err := r.Report(s.unread, s.otherUnread, s.workspace, s.title); err != nil {
 			debuglog.Notify("status_command failed: %v", err)
+		}
+		if r.afterRun != nil {
+			r.afterRun(s)
 		}
 	}
 }
