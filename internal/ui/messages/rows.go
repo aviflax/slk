@@ -1,8 +1,10 @@
 package messages
 
 import (
+	"cmp"
 	"fmt"
 	"slices"
+	"strconv"
 	"strings"
 )
 
@@ -138,22 +140,70 @@ func PatchTS(rows []MessageItem, ts string, f func(*MessageItem)) ([]MessageItem
 }
 
 // RemovedRow is a row a pane took out (by Remove), with what it takes
-// to put it back: the index it was at, and whether it was the selected
-// row.
+// to put it back: whether it was the selected row, and the TS of the
+// row the removal left the cursor on ("" for none), so a restore can
+// tell whether the user has moved the cursor since.
 type RemovedRow struct {
 	Item     MessageItem
-	Index    int
 	Selected bool
+	LeftOn   string
 }
 
-// Reinsert puts item back at index i, clamped to the slice, and reports
-// RowAdded there. When a row with item's TS is already present (the
-// pane reloaded it) nothing changes: RowNone.
-func Reinsert(rows []MessageItem, item MessageItem, i int) ([]MessageItem, RowChange) {
+// CompareTS orders two Slack TSes ("<seconds>.<microseconds>") by time,
+// numerically, so "9.5" sorts before "10.0". A TS that is not of that
+// shape (a placeholder) compares as a string.
+func CompareTS(a, b string) int {
+	as, af, aok := splitTS(a)
+	bs, bf, bok := splitTS(b)
+	if !aok || !bok {
+		return strings.Compare(a, b)
+	}
+	if c := cmp.Compare(as, bs); c != 0 {
+		return c
+	}
+	return cmp.Compare(af, bf)
+}
+
+// splitTS parses a Slack TS into whole seconds and microseconds.
+func splitTS(ts string) (sec, micro int64, ok bool) {
+	whole, frac, _ := strings.Cut(ts, ".")
+	sec, err := strconv.ParseInt(whole, 10, 64)
+	if err != nil || len(frac) > 6 {
+		return 0, 0, false
+	}
+	if frac != "" {
+		f, err := strconv.ParseInt(frac+strings.Repeat("0", 6-len(frac)), 10, 64)
+		if err != nil || f < 0 {
+			return 0, 0, false
+		}
+		micro = f
+	}
+	return sec, micro, sec >= 0
+}
+
+// Reinsert puts item back where its TS belongs and reports RowAdded
+// there: before the first row Slack knows with a later TS, or, when
+// there is none, after the last such row, ahead of any placeholders
+// (IsLocalTS rows, which are newer than anything Slack has). Rows that
+// were loaded or added since the removal (older history prepended, new
+// messages appended) therefore do not move it. When a row with item's
+// TS is already present (the pane reloaded it) nothing changes:
+// RowNone.
+func Reinsert(rows []MessageItem, item MessageItem) ([]MessageItem, RowChange) {
 	if item.TS != "" && FirstIndexOfTS(rows, item.TS) >= 0 {
 		return rows, noRowChange
 	}
-	i = max(0, min(i, len(rows)))
+	i := 0
+	for j, r := range rows {
+		if IsLocalTS(r.TS) {
+			continue
+		}
+		if CompareTS(r.TS, item.TS) > 0 {
+			i = j
+			break
+		}
+		i = j + 1
+	}
 	return slices.Insert(rows, i, item), RowChange{Op: RowAdded, Index: i}
 }
 

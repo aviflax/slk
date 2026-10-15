@@ -228,3 +228,43 @@ func TestPendingDelete_NilResultFails(t *testing.T) {
 	wantRows(t, "channel", a.messagepane.Messages(),
 		"1.000000=one", "2.000000=two", "3.000000=three", "5.000000=parent", "7.000000=bcast")
 }
+
+// A failed delete puts the message back in TS order, so older history
+// loaded while the delete was pending does not push it out of place.
+func TestPendingDelete_FailureRestoresInTSOrder(t *testing.T) {
+	a := deleteApp(t, errors.New("boom"))
+	res := deleteFrom(t, a, PanelMessages, "2.000000")
+	a.messagepane.PrependMessages([]messages.MessageItem{
+		{TS: "0.100000", Text: "old a"}, {TS: "0.200000", Text: "old b"},
+	})
+	a.Update(res)
+	wantRows(t, "channel", a.messagepane.Messages(),
+		"0.100000=old a", "0.200000=old b", "1.000000=one", "2.000000=two",
+		"3.000000=three", "5.000000=parent", "7.000000=bcast")
+	if got := selectedTS(t, a, PanelMessages); got != "2.000000" {
+		t.Errorf("selection = %q, want the restored message", got)
+	}
+}
+
+// The restored message takes the cursor back only when the cursor is
+// still where the delete left it.
+func TestPendingDelete_FailureLeavesAMovedCursor(t *testing.T) {
+	t.Run("channel", func(t *testing.T) {
+		a := deleteApp(t, errors.New("boom"))
+		res := deleteFrom(t, a, PanelMessages, "2.000000")
+		a.messagepane.SelectByTS("5.000000")
+		a.Update(res)
+		if got := selectedTS(t, a, PanelMessages); got != "5.000000" {
+			t.Errorf("selection = %q, want it left on 5.000000", got)
+		}
+	})
+	t.Run("thread", func(t *testing.T) {
+		a := deleteApp(t, errors.New("boom"))
+		res := deleteFrom(t, a, PanelThread, "7.000000")
+		a.threadPanel.SelectByIndex(messages.FirstIndexOfTS(a.threadPanel.Replies(), "8.000000"))
+		a.Update(res)
+		if got := selectedTS(t, a, PanelThread); got != "8.000000" {
+			t.Errorf("thread selection = %q, want it left on 8.000000", got)
+		}
+	})
+}

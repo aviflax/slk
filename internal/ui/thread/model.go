@@ -560,9 +560,10 @@ func (m *Model) RemoveMessageByTS(ts string) bool {
 	return ok
 }
 
-// Remove takes out the first reply with TS ts and returns it with its
-// index and whether it was selected, for Restore. The parent is not a
-// reply and is never removed. A missing TS changes nothing.
+// Remove takes out the first reply with TS ts and returns it with
+// whether it was selected and where the cursor was left, for Restore.
+// The parent is not a reply and is never removed. A missing TS changes
+// nothing.
 //
 // It steps the selection back on i <= selected, where
 // RemoveLocalSentReply uses i < selected, and falls back to the parent
@@ -572,7 +573,7 @@ func (m *Model) Remove(ts string) (messages.RemovedRow, bool) {
 	if i < 0 {
 		return messages.RemovedRow{}, false
 	}
-	removed := messages.RemovedRow{Item: m.replies[i], Index: i, Selected: i == m.selected}
+	removed := messages.RemovedRow{Item: m.replies[i], Selected: i == m.selected}
 	m.replies, _ = messages.RemoveAt(m.replies, i)
 	if i <= m.selected && m.selected > 0 {
 		m.selected--
@@ -584,22 +585,36 @@ func (m *Model) Remove(ts string) (messages.RemovedRow, bool) {
 			m.selected = len(m.replies) - 1
 		}
 	}
+	removed.LeftOn = m.selectedTS()
 	m.InvalidateCache()
 	return removed, true
 }
 
-// Restore puts back a reply Remove took out, at its old index
-// (messages.Reinsert: clamped, and nothing when the reply is shown
-// again already). A reply that was selected is selected again;
-// otherwise the cursor stays where it is.
+// selectedTS is the TS of the selected row, the parent's when it is
+// selected, "" when there is none.
+func (m *Model) selectedTS() string {
+	switch {
+	case m.selected == parentSelected:
+		return m.parent.TS
+	case m.selected < 0 || m.selected >= len(m.replies):
+		return ""
+	}
+	return m.replies[m.selected].TS
+}
+
+// Restore puts back a reply Remove took out, where its TS belongs
+// (messages.Reinsert; nothing when the reply is shown again already). A
+// reply that was selected is selected again if the cursor is still
+// where Remove left it; otherwise the cursor stays where it is.
 func (m *Model) Restore(r messages.RemovedRow) {
-	rows, ch := messages.Reinsert(m.replies, r.Item, r.Index)
+	cursorKept := m.selectedTS() == r.LeftOn
+	rows, ch := messages.Reinsert(m.replies, r.Item)
 	if ch.Op == messages.RowNone {
 		return
 	}
 	m.replies = rows
 	switch {
-	case r.Selected:
+	case r.Selected && cursorKept:
 		m.selected = ch.Index
 	case m.selected != parentSelected && ch.Index <= m.selected:
 		m.selected++

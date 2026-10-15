@@ -1,6 +1,8 @@
 package messages
 
 import (
+	"cmp"
+	"fmt"
 	"slices"
 	"strings"
 	"testing"
@@ -146,26 +148,87 @@ func TestRemoveTSThenReinsertRestores(t *testing.T) {
 	})
 }
 
-// Reinsert undoes a removal by index: removing a row and reinserting
-// it at the reported index gives the original slice back, and
-// reinserting a row whose TS is still present changes nothing.
+// drawSortedRows is a pane's rows as Slack returns them: distinct Slack
+// TSes in time order, then now and then a few placeholders at the end
+// (sends still pending, newer than anything Slack has).
+func drawSortedRows(t *rapid.T) []MessageItem {
+	tss := rapid.SliceOfNDistinct(proptest.TS(), 0, 12, func(s string) string { return s }).Draw(t, "tss")
+	slices.SortFunc(tss, CompareTS)
+	rows := make([]MessageItem, 0, len(tss)+2)
+	for _, ts := range tss {
+		rows = append(rows, MessageItem{TS: ts, Text: proptest.Word().Draw(t, "text")})
+	}
+	for n := range rapid.IntRange(0, 2).Draw(t, "locals") {
+		rows = append(rows, MessageItem{TS: LocalTS(uint64(n + 1))})
+	}
+	return rows
+}
+
+// realSorted reports whether the rows Slack knows are in time order.
+func realSorted(rows []MessageItem) bool {
+	real := slices.DeleteFunc(slices.Clone(rows), func(r MessageItem) bool { return IsLocalTS(r.TS) })
+	return slices.IsSortedFunc(real, func(a, b MessageItem) int { return CompareTS(a.TS, b.TS) })
+}
+
+// On rows in TS order, Reinsert undoes a removal: removing a row and
+// reinserting it gives the original slice back, and reinserting a row
+// whose TS is still present changes nothing.
 func TestReinsertUndoesRemove(t *testing.T) {
 	rapid.Check(t, func(t *rapid.T) {
-		rows := drawRows(t)
-		if len(rows) == 0 {
+		rows := drawSortedRows(t)
+		i := slices.IndexFunc(rows, func(r MessageItem) bool { return IsLocalTS(r.TS) })
+		if i < 0 {
+			i = len(rows)
+		}
+		if i == 0 {
 			return
 		}
-		i := rapid.IntRange(0, len(rows)-1).Draw(t, "i")
+		i = rapid.IntRange(0, i-1).Draw(t, "i")
 		before := slices.Clone(rows)
 		item := rows[i]
 		got, ch := RemoveAt(rows, i)
-		got, back := Reinsert(got, item, ch.Index)
-		if back != (RowChange{Op: RowAdded, Index: i}) || !sameRows(got, before) {
-			t.Fatalf("reinsert at %d: %v [%s], want [%s]", i, back, tsList(got), tsList(before))
+		got, back := Reinsert(got, item)
+		if back != (RowChange{Op: RowAdded, Index: ch.Index}) || !sameRows(got, before) {
+			t.Fatalf("reinsert of %d: %v [%s], want [%s]", i, back, tsList(got), tsList(before))
 		}
-		again, ch := Reinsert(slices.Clone(got), item, rapid.IntRange(-2, len(got)+2).Draw(t, "at"))
+		again, ch := Reinsert(slices.Clone(got), item)
 		if ch.Op != RowNone || !sameRows(again, before) {
 			t.Fatalf("reinsert of a present row: %v [%s]", ch, tsList(again))
+		}
+	})
+}
+
+// A removed row goes back in TS order however much history was loaded
+// in front of it or arrived after it in the meantime: the rows Slack
+// knows stay sorted, and nothing else moves.
+func TestReinsertKeepsTSOrderAfterPrependsAndAppends(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		rows := drawSortedRows(t)
+		item := MessageItem{TS: proptest.TS().Draw(t, "removed"), Text: "back"}
+		if FirstIndexOfTS(rows, item.TS) >= 0 {
+			return
+		}
+		got, ch := Reinsert(slices.Clone(rows), item)
+		if ch.Op != RowAdded || got[ch.Index].TS != item.TS || !realSorted(got) {
+			t.Fatalf("reinsert %s into [%s]: %v [%s]", item.TS, tsList(rows), ch, tsList(got))
+		}
+		if rest := slices.Delete(slices.Clone(got), ch.Index, ch.Index+1); !sameRows(rest, rows) {
+			t.Fatalf("other rows moved: [%s], want [%s]", tsList(rest), tsList(rows))
+		}
+	})
+}
+
+// CompareTS is the time order of Slack TSes: it agrees with comparing
+// seconds then microseconds, whatever the digit counts, and is
+// antisymmetric.
+func TestCompareTSIsTimeOrder(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		as, bs := rapid.Int64Range(0, 3_000_000_000).Draw(t, "as"), rapid.Int64Range(0, 3_000_000_000).Draw(t, "bs")
+		am, bm := rapid.IntRange(0, 999_999).Draw(t, "am"), rapid.IntRange(0, 999_999).Draw(t, "bm")
+		a, b := fmt.Sprintf("%d.%06d", as, am), fmt.Sprintf("%d.%06d", bs, bm)
+		want := cmp.Or(cmp.Compare(as, bs), cmp.Compare(am, bm))
+		if got := CompareTS(a, b); got != want || CompareTS(b, a) != -want {
+			t.Fatalf("CompareTS(%s, %s) = %d, want %d", a, b, got, want)
 		}
 	})
 }

@@ -1077,9 +1077,9 @@ func (m *Model) RemoveMessageByTS(ts string) bool {
 	return ok
 }
 
-// Remove takes out the first message with TS ts and returns it with its
-// index and whether it was selected, for Restore. A missing TS changes
-// nothing, the selection included.
+// Remove takes out the first message with TS ts and returns it with
+// whether it was selected and where the cursor was left, for Restore.
+// A missing TS changes nothing, the selection included.
 //
 // Unlike RemoveLocalSent it steps the selection back when the removed
 // row was the selected one (i <= selected), so deleting the selected
@@ -1090,7 +1090,7 @@ func (m *Model) Remove(ts string) (RemovedRow, bool) {
 	if i < 0 {
 		return RemovedRow{}, false
 	}
-	removed := RemovedRow{Item: m.messages[i], Index: i, Selected: i == m.selected}
+	removed := RemovedRow{Item: m.messages[i], Selected: i == m.selected}
 	m.messages, _ = RemoveAt(m.messages, i)
 	if i <= m.selected && m.selected > 0 {
 		m.selected--
@@ -1102,23 +1102,34 @@ func (m *Model) Remove(ts string) (RemovedRow, bool) {
 			m.selected = len(m.messages) - 1
 		}
 	}
+	removed.LeftOn = m.selectedTS()
 	m.dropCache()
 	m.dirty()
 	return removed, true
 }
 
-// Restore puts back a message Remove took out, at its old index
-// (Reinsert: clamped, and nothing when the message is shown again
-// already). A message that was selected is selected again; otherwise
-// the cursor stays on the message it is on.
+// selectedTS is the TS of the selected message, "" when there is none.
+func (m *Model) selectedTS() string {
+	if m.selected < 0 || m.selected >= len(m.messages) {
+		return ""
+	}
+	return m.messages[m.selected].TS
+}
+
+// Restore puts back a message Remove took out, where its TS belongs
+// (Reinsert; nothing when the message is shown again already). A
+// message that was selected is selected again if the cursor is still
+// where Remove left it; otherwise the cursor stays on the message it is
+// on.
 func (m *Model) Restore(r RemovedRow) {
-	rows, ch := Reinsert(m.messages, r.Item, r.Index)
+	cursorKept := m.selectedTS() == r.LeftOn
+	rows, ch := Reinsert(m.messages, r.Item)
 	if ch.Op == RowNone {
 		return
 	}
 	m.messages = rows
 	switch {
-	case r.Selected || len(m.messages) == 1:
+	case r.Selected && cursorKept || len(m.messages) == 1:
 		m.selected = ch.Index
 	case ch.Index <= m.selected:
 		m.selected++
