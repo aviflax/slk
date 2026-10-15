@@ -28,6 +28,7 @@
 - Slack-native sidebar sections, kept live; or glob-based config sections
 - Automatic auth from the Slack desktop app — no tokens to copy, no Slack App required
 - Vim-style modal keybindings, fuzzy channel finder, workspace picker
+- `slk open <permalink>` lets other apps show a Slack link in the running slk
 - 59 themes + drop-in custom themes, live theme switcher
 - OS desktop notifications on DMs, mentions, and configurable keywords
 

@@ -120,6 +120,32 @@ See [[Terminal Compatibility|Terminal-Compatibility]] for which protocol your te
 - `:marks` overlay — every mark with its channel and a preview of the message, rendered from a snapshot taken at mark time, so it works offline and immediately after a restart. Click a row (or press `Enter`) to jump to it, `Backspace` deletes a row, and `:delmarks abc` deletes by letter.
 - **Position-aware back/forward** (`Ctrl+h` / `Ctrl+l`) — retraces visited channels and restores the message you were reading when you left each one, rather than dumping you at the newest message.
 
+## Opening links from other apps
+
+`slk open <permalink>` shows a Slack message permalink in the slk that is
+already running, the same way `o` does:
+
+```sh
+slk open 'https://example-workspace.slack.com/archives/C054JFCBN69/p1779284733270139'
+```
+
+It talks to the running TUI over `slk.sock` in the data directory
+(`~/.local/share/slk/slk.sock`, or under `$XDG_DATA_HOME`), so a URL
+handler or script can try slk first and fall back to the browser:
+
+```sh
+slk open "$url" || open "$url"
+```
+
+- Exit status: `0` slk is showing the link; `1` slk declined it (a
+  workspace other than the active one, a channel slk does not know, or not
+  a permalink) and printed the reason; `2` usage error; `3` slk is not
+  running.
+- slk does not switch workspaces for these links, and does not raise its
+  terminal window.
+- Only one slk listens at a time. A second instance runs without the
+  socket. Not available on Windows.
+
 ## Notifications
 
 - OS-level desktop notifications via [beeep](https://github.com/gen2brain/beeep)
