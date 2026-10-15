@@ -1533,18 +1533,14 @@ func run() error {
 		p.Send(ui.ReadStateChangedMsg{WorkspaceID: teamID})
 	})
 
-	// Update hint: background, at most one request per 24h, never
-	// blocks the UI. Dev builds and [general].check_for_updates = false
-	// skip it (--demo never reaches run()).
+	// Update hint: background, at startup and hourly after, at most one
+	// request per updateCheckInterval, never blocks the UI. Dev builds
+	// and [general].check_for_updates = false skip it (--demo never
+	// reaches run()).
 	if cfg.EffectiveCheckForUpdates() && updateCheckableVersion(version) {
-		go func() {
-			latest, hint := checkForUpdate(context.Background(), version)
-			if hint == "" {
-				return
-			}
-			time.Sleep(updateToastDelay)
-			p.Send(ui.UpdateAvailableMsg{Version: latest, Hint: hint})
-		}()
+		go watchForUpdates(context.Background(), updateRecheckInterval, updateToastDelay,
+			func(ctx context.Context) (string, string) { return checkForUpdate(ctx, version) },
+			func(latest, hint string) { p.Send(ui.UpdateAvailableMsg{Version: latest, Hint: hint}) })
 	}
 
 	// Now that `p` exists, re-install the ImageContext with a real

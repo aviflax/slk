@@ -122,7 +122,7 @@ Last updated: 2026-10-15
 - [x] Self presence and DND/snooze controls (Ctrl+S menu, live status bar segment, notification suppression)
 ### Fork additions (kirahowe/slk, v0.27.0)
 - [x] `slk open <permalink>` shows a Slack permalink in the running slk over a unix socket
-- [x] Update hint: daily GitHub release check, status-bar toast and note (`[general] check_for_updates`)
+- [x] Update hint: GitHub release check (6h cache, rechecked hourly while running), status-bar toast and note (`[general] check_for_updates`)
 - [x] Sidebar auto-hides on narrow terminals; threads open side by side from 120 columns
 - [x] Grouped `?` help overlay; `:help`, `:quit`, `:qa`; `:q` quits on the last window
 - [x] `Ctrl+X` opens `$EDITOR`; `Ctrl+E` / `Ctrl+A` move within the line

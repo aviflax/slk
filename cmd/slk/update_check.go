@@ -13,15 +13,21 @@ import (
 	"time"
 )
 
-// Update check: once a day, in the background, ask GitHub for the latest
-// slk release and tell the user in the UI when it is newer than the
-// running binary. The answer is cached on disk so --version can report it
-// without a network call.
+// Update check: in the background, ask GitHub for the latest slk release
+// and tell the user in the UI when it is newer than the running binary.
+// The answer is cached on disk for updateCheckInterval, so --version can
+// report it without a network call and several running slk processes
+// share one request.
 
 const (
 	latestReleaseURL    = "https://api.github.com/repos/kirahowe/slk/releases/latest"
-	updateCheckInterval = 24 * time.Hour
-	updateCheckTimeout  = 5 * time.Second
+	updateCheckInterval = 6 * time.Hour
+	// updateRecheckInterval is how often a running slk consults the
+	// cache again. slk stays open for days, so a check at startup alone
+	// would miss every release after it; the cache still limits network
+	// requests to one per updateCheckInterval.
+	updateRecheckInterval = time.Hour
+	updateCheckTimeout    = 5 * time.Second
 	// updateToastDelay holds the toast back until the loading overlay is
 	// likely gone, so the hint is not shown behind it.
 	updateToastDelay = 4 * time.Second
@@ -218,7 +224,7 @@ func fetchLatestRelease(ctx context.Context, client *http.Client, url, current s
 }
 
 // latestVersion returns the latest known release. A cache younger than
-// 24h answers without the network. Otherwise fetch runs, and the attempt
+// updateCheckInterval answers without the network. Otherwise fetch runs, and the attempt
 // is recorded either way so an offline machine does not retry on every
 // launch; on failure the previous answer (possibly empty) is returned
 // alongside the error.
@@ -338,7 +344,7 @@ func versionUpdateLine() string {
 	return cachedUpdateHint(updateCachePath(), version, resolvedExecutable(), currentInstallEnv())
 }
 
-// checkForUpdate runs the daily check and returns the hint to show, or
+// checkForUpdate runs the cached check and returns the hint to show, or
 // "" when up to date or the check failed, plus the new version. Safe to
 // call from a goroutine.
 func checkForUpdate(ctx context.Context, current string) (latestVer, hint string) {
@@ -353,4 +359,38 @@ func checkForUpdate(ctx context.Context, current string) (latestVer, hint string
 	}
 	latest = strings.TrimPrefix(latest, "v")
 	return latest, updateHint(latest, detectInstallMethod(resolvedExecutable(), currentInstallEnv()))
+}
+
+// watchForUpdates runs check now and then every interval until ctx ends,
+// calling notify once for each newer version it finds. The first notify
+// waits firstDelay, so a hint found at startup is not drawn behind the
+// loading overlay.
+func watchForUpdates(ctx context.Context, interval, firstDelay time.Duration, check func(context.Context) (latest, hint string), notify func(latest, hint string)) {
+	var told string
+	delay := firstDelay
+	for {
+		if latest, hint := check(ctx); hint != "" && latest != told {
+			if !sleepCtx(ctx, delay) {
+				return
+			}
+			told = latest
+			notify(latest, hint)
+		}
+		delay = 0
+		if !sleepCtx(ctx, interval) {
+			return
+		}
+	}
+}
+
+// sleepCtx waits d, or returns false as soon as ctx ends.
+func sleepCtx(ctx context.Context, d time.Duration) bool {
+	t := time.NewTimer(d)
+	defer t.Stop()
+	select {
+	case <-ctx.Done():
+		return false
+	case <-t.C:
+		return true
+	}
 }

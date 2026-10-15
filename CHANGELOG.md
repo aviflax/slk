@@ -8,6 +8,12 @@ Earlier history, up to v0.26.2, is in [upstream's releases](https://github.com/g
 
 ## [Unreleased]
 
+### Fixed
+
+- The update hint now shows up within a few hours of a release. slk asked
+  GitHub at most once a day and only at startup, so a release published
+  after that check went unnoticed until the next day, or until a restart.
+
 ## [0.28.0] - 2026-10-15
 
 ### Added

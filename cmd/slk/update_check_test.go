@@ -98,8 +98,8 @@ func TestUpdateCacheFreshness(t *testing.T) {
 		want    bool
 	}{
 		{"just now", now, true},
-		{"23h ago", now.Add(-23 * time.Hour), true},
-		{"25h ago", now.Add(-25 * time.Hour), false},
+		{"5h ago", now.Add(-5 * time.Hour), true},
+		{"7h ago", now.Add(-7 * time.Hour), false},
 		{"zero", time.Time{}, false},
 		{"future (clock skew)", now.Add(48 * time.Hour), false},
 	} {
@@ -289,5 +289,34 @@ func TestCachedUpdateHint(t *testing.T) {
 	}
 	if got := cachedUpdateHint(path, "dev", exe, installEnv{}); got != "" {
 		t.Errorf("dev build: got %q", got)
+	}
+}
+
+// A running slk keeps checking, and tells the user once per new version:
+// not again for the version it already announced, and not for a check
+// that found nothing.
+func TestWatchForUpdatesNotifiesOncePerVersion(t *testing.T) {
+	answers := []string{"", "0.28.0", "0.28.0", "", "0.29.0", "0.29.0"}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	calls := 0
+	check := func(context.Context) (string, string) {
+		if calls == len(answers)-1 {
+			cancel()
+		}
+		v := answers[calls]
+		calls++
+		if v == "" {
+			return "", ""
+		}
+		return v, "slk " + v + " is available"
+	}
+	var told []string
+	watchForUpdates(ctx, time.Millisecond, 0, check, func(latest, _ string) { told = append(told, latest) })
+	if calls != len(answers) {
+		t.Errorf("checks = %d, want %d", calls, len(answers))
+	}
+	if strings.Join(told, ",") != "0.28.0,0.29.0" {
+		t.Errorf("notified %v, want [0.28.0 0.29.0]", told)
 	}
 }
