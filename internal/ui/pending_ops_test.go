@@ -83,37 +83,6 @@ func (l *rowLog) never(t *testing.T, text string) {
 	}
 }
 
-// drainMsgs runs cmd once, the members of a batch concurrently, and
-// returns every message delivered within d.
-func drainMsgs(cmd tea.Cmd, d time.Duration) []tea.Msg {
-	ch := make(chan tea.Msg, 64)
-	var run func(tea.Cmd)
-	run = func(c tea.Cmd) {
-		if c == nil {
-			return
-		}
-		m := c()
-		if b, ok := m.(tea.BatchMsg); ok {
-			for _, x := range b {
-				go run(x)
-			}
-			return
-		}
-		ch <- m
-	}
-	go run(cmd)
-	var out []tea.Msg
-	deadline := time.After(d)
-	for {
-		select {
-		case m := <-ch:
-			out = append(out, m)
-		case <-deadline:
-			return out
-		}
-	}
-}
-
 // sendFailed reports whether cmd delivers the send-failure toast.
 func sendFailed(t *testing.T, cmd tea.Cmd) bool {
 	t.Helper()
@@ -400,9 +369,7 @@ func TestPendingReply_EchoThenFailureShowsEcho(t *testing.T) {
 	if n := a.messagepane.Messages()[0].ReplyCount; n != 1 {
 		t.Errorf("parent reply count = %d, want 1", n)
 	}
-	// One run: a tick's timer starts when the tick is built, so a
-	// second run of the same command would never fire it.
-	got := drainMsgs(cmd, 500*time.Millisecond)
+	got := drainCmd(cmd)
 	if !slices.ContainsFunc(got, func(m tea.Msg) bool { _, ok := m.(statusbar.SendFailedMsg); return ok }) {
 		t.Errorf("failure not reported: %#v", got)
 	}

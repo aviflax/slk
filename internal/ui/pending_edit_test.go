@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"strings"
 	"testing"
-	"time"
 
 	tea "charm.land/bubbletea/v2"
 
@@ -125,7 +124,7 @@ func queueEdit(t *testing.T, a *App, panel Panel, ts, typed string) {
 func settleEdit(t *testing.T, a *App, res MessageEditedMsg) MessageEditedMsg {
 	t.Helper()
 	_, cmd := a.Update(res)
-	for _, m := range drainMsgs(cmd, 200*time.Millisecond) {
+	for _, m := range drainCmd(cmd) {
 		if next, ok := m.(MessageEditedMsg); ok {
 			return next
 		}
@@ -500,7 +499,7 @@ func TestPendingEdit_TimeoutAfterSlackStoredIt(t *testing.T) {
 	changed.IsEdited = true
 	a.Update(NewMessageMsg{ChannelID: "C1", Changed: true, Message: changed})
 	_, cmd := a.Update(res)
-	for _, m := range drainMsgs(cmd, 50*time.Millisecond) {
+	for _, m := range drainCmd(cmd) {
 		if f, ok := m.(statusbar.EditFailedMsg); ok {
 			t.Errorf("reported %+v for an edit Slack stored", f)
 		}

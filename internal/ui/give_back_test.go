@@ -5,11 +5,11 @@ import (
 	"fmt"
 	"strings"
 	"testing"
-	"time"
 
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/gammons/slk/internal/ui/messages"
+	"github.com/gammons/slk/internal/ui/statusbar"
 )
 
 // clipboardLog records what the App copies, in place of the terminal.
@@ -26,7 +26,12 @@ func clipboardLog(a *App) *[]string {
 // shows.
 func shownToast(t *testing.T, a *App, cmd tea.Cmd) string {
 	t.Helper()
-	for _, m := range drainMsgs(cmd, 50*time.Millisecond) {
+	for _, m := range drainCmd(cmd) {
+		// The toast's clear arrives seconds later in the app; this
+		// reads the toast while it is showing.
+		if _, ok := m.(statusbar.CopiedClearMsg); ok {
+			continue
+		}
 		a.Update(m)
 	}
 	return statusbarText(a)

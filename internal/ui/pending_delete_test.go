@@ -3,7 +3,6 @@ package ui
 import (
 	"errors"
 	"testing"
-	"time"
 
 	tea "charm.land/bubbletea/v2"
 
@@ -325,7 +324,7 @@ func TestPendingDelete_NotFoundIsDone(t *testing.T) {
 	res := deleteFrom(t, a, PanelMessages, "2.000000")
 	res.NotFound = true
 	_, cmd := a.Update(res)
-	for _, m := range drainMsgs(cmd, 50*time.Millisecond) {
+	for _, m := range drainCmd(cmd) {
 		if f, ok := m.(statusbar.DeleteFailedMsg); ok {
 			t.Errorf("reported %+v", f)
 		}

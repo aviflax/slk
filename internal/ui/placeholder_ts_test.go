@@ -3,7 +3,6 @@ package ui
 import (
 	"strings"
 	"testing"
-	"time"
 
 	tea "charm.land/bubbletea/v2"
 
@@ -197,7 +196,7 @@ func TestMessageServiceNeverGetsPlaceholder(t *testing.T) {
 		MarkUnreadMsg{ChannelID: "C1", BoundaryTS: "local:1"},
 	} {
 		_, cmd := a.Update(msg)
-		drainMsgs(cmd, 50*time.Millisecond)
+		drainCmd(cmd)
 	}
 	if len(calls) != 0 {
 		t.Fatalf("service calls %q, want none for a placeholder", calls)
