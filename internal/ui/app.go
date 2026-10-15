@@ -3409,6 +3409,12 @@ func (a *App) SetHelpFooter(s string) {
 	a.help.SetFooter(s)
 }
 
+// SetHelpFooterNote sets the fainter line under the help modal's
+// attribution (e.g. credit for earlier work). Pass "" to clear it.
+func (a *App) SetHelpFooterNote(s string) {
+	a.help.SetFooterNote(s)
+}
+
 // SetMouseWheelLines configures the number of lines the viewport scrolls per
 // mouse-wheel notch. Values < 1 are coerced to 1 to guarantee scroll progress.
 func (a *App) SetMouseWheelLines(n int) {

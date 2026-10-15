@@ -66,6 +66,7 @@ type Model struct {
 	visible   bool
 	searching bool   // true while typing in the / search input
 	footer    string // optional attribution line rendered above the controls footer
+	note      string // optional fainter line under footer (prior credit)
 }
 
 // New creates a new help overlay.
@@ -83,6 +84,12 @@ func (m *Model) SetEntries(entries []Entry) {
 // controls footer. Pass "" to clear it.
 func (m *Model) SetFooter(s string) {
 	m.footer = s
+}
+
+// SetFooterNote sets an optional line drawn under the attribution,
+// centered like it and fainter. Pass "" to clear it.
+func (m *Model) SetFooterNote(s string) {
+	m.note = s
 }
 
 // FromKeyMap derives Entries from any struct whose fields are key.Binding.
@@ -416,6 +423,9 @@ func (m Model) renderBox(termWidth, termHeight int) string {
 		// Attribution sits at the very bottom of the modal, centered
 		// across the inner width and below the controls line.
 		footer += "\n\n" + s.Footer.Width(innerWidth).Align(lipgloss.Center).Render(m.footer)
+		if m.note != "" {
+			footer += "\n" + s.Footer.Width(innerWidth).Align(lipgloss.Center).Faint(true).Italic(true).Render(m.note)
+		}
 	}
 
 	f := chrome.Frame{

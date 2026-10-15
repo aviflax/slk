@@ -21,6 +21,8 @@ Earlier history, up to v0.26.2, is in [upstream's releases](https://github.com/g
 
 ### Changed
 
+- The help overlay (`?`) credits this fork, made by Kira Howe, with a fainter
+  line under it crediting Grant Ammons, who wrote slk up to v0.26.
 - Channels in each sidebar section are listed alphabetically, ignoring case and
   accents. Channels pinned with a `:N` suffix in a config section still come
   first, and the Starred section still lists channels before people. slk can't

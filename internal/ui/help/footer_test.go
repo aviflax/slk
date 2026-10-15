@@ -80,3 +80,45 @@ func TestFooterIsCentered(t *testing.T) {
 		t.Errorf("expected centered footer indented more than left-aligned controls; attr@%d ctrl@%d", attrCol, ctrlCol)
 	}
 }
+
+// The note sits on the line right under the attribution, centered too,
+// and is drawn fainter than it.
+func TestFooterNoteRendersFaintUnderFooter(t *testing.T) {
+	m := New()
+	m.SetEntries(sampleEntries())
+	m.SetFooter("slk dev - attribution")
+	m.SetFooterNote("built on it")
+	m.Open()
+
+	out := m.ViewOverlay(100, 40, "")
+	lines := strings.Split(out, "\n")
+	at := -1
+	for i, raw := range lines {
+		if strings.Contains(ansi.Strip(raw), "attribution") {
+			at = i
+		}
+	}
+	if at < 0 || at+1 >= len(lines) {
+		t.Fatalf("attribution line not found in:\n%s", ansi.Strip(out))
+	}
+	note := lines[at+1]
+	if !strings.Contains(ansi.Strip(note), "built on it") {
+		t.Fatalf("note is not the line under the attribution: %q", ansi.Strip(note))
+	}
+	if !strings.Contains(note, "\x1b[2;") && !strings.Contains(note, ";2;3") && !strings.Contains(note, "\x1b[2m") {
+		t.Errorf("note not drawn faint: %q", note)
+	}
+	if strings.Index(ansi.Strip(note), "built") <= strings.Index(ansi.Strip(lines[at]), "slk") {
+		t.Errorf("note not centered under a longer attribution")
+	}
+}
+
+func TestFooterNoteAbsentWhenEmpty(t *testing.T) {
+	m := New()
+	m.SetEntries(sampleEntries())
+	m.SetFooter("slk dev - attribution")
+	m.Open()
+	if out := ansi.Strip(m.ViewOverlay(100, 40, "")); strings.Contains(out, "built on") {
+		t.Errorf("unexpected note in:\n%s", out)
+	}
+}

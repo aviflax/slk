@@ -27,6 +27,7 @@ type uiSettings struct {
 // that renders identically to messages arriving through the load path.
 func applyUISettings(app *ui.App, s uiSettings) {
 	app.SetHelpFooter(versionpkg.ModalFooter(version))
+	app.SetHelpFooterNote(versionpkg.UpstreamCredit())
 	app.SetNowTimestampFormatter(func() string {
 		return time.Now().Format(s.TimestampFormat)
 	})
