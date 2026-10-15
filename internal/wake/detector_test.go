@@ -2,6 +2,7 @@ package wake
 
 import (
 	"context"
+	"reflect"
 	"strings"
 	"sync"
 	"testing"
@@ -50,20 +51,12 @@ func TestNew_DefaultsToRealClock(t *testing.T) {
 	if d.now == nil {
 		t.Fatal("New should default now to a non-nil function")
 	}
-	t1 := d.now()
-	// This sleep is deliberately NOT replaced with a signal, and is not
-	// a wall-clock budget. The property under test is precisely that
-	// real time elapses between two d.now() calls — a fake clock cannot
-	// express it, because the whole point is that New wired d.now to
-	// the real one. time.Sleep guarantees *at least* 1ms passes and
-	// time.Now's resolution is sub-millisecond everywhere Go runs, so
-	// the bias is one-sided: an overlong sleep on a loaded machine only
-	// makes the assertion below more true. It can false-pass (if now
-	// were wired to some other advancing clock), never false-fail.
-	time.Sleep(time.Millisecond)
-	t2 := d.now()
-	if !t2.After(t1) {
-		t.Errorf("now() did not advance — not wired to real clock? t1=%v t2=%v", t1, t2)
+	// The property is that New wired now to the real clock, which a fake
+	// clock cannot express and a sleep would only sample. Compare the
+	// function itself: a func value is not comparable, but its code
+	// pointer is.
+	if got, want := reflect.ValueOf(d.now).Pointer(), reflect.ValueOf(time.Now).Pointer(); got != want {
+		t.Errorf("now is not time.Now (code pointers %#x vs %#x)", got, want)
 	}
 }
 

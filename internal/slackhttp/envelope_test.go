@@ -70,10 +70,14 @@ func TestEnvelope_RequestIDFormat(t *testing.T) {
 
 	// The timestamp must actually track the clock, not be frozen at
 	// construction — a constant _x_id would be its own signature.
-	first := e.RequestID()
-	time.Sleep(3 * time.Millisecond)
-	if second := e.RequestID(); first == second {
-		t.Errorf("RequestID() returned %q twice across a 3ms gap; timestamp is not advancing", first)
+	at := time.Unix(1785407067, 503*int64(time.Millisecond))
+	e.now = func() time.Time { return at }
+	if got, want := e.RequestID(), e.clientID+"-1785407067.503"; got != want {
+		t.Errorf("RequestID() = %q; want %q", got, want)
+	}
+	at = at.Add(3 * time.Millisecond)
+	if got, want := e.RequestID(), e.clientID+"-1785407067.506"; got != want {
+		t.Errorf("RequestID() = %q after the clock moved 3ms; want %q", got, want)
 	}
 }
 

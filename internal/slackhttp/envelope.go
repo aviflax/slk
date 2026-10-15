@@ -35,6 +35,10 @@ type Envelope struct {
 	sessionID string // 11 base64url chars, stable for the process
 	teamID    atomic.Value
 	versionTS atomic.Value
+
+	// now is the clock RequestID stamps with; nil means time.Now. Tests
+	// set it to move time by hand.
+	now func() time.Time
 }
 
 // NewEnvelope returns an Envelope in the pre-boot phase.
@@ -102,7 +106,11 @@ func (e *Envelope) RequestID() string {
 	if e.TeamID() != "" {
 		prefix = e.clientID
 	}
-	now := time.Now()
+	clock := time.Now
+	if e.now != nil {
+		clock = e.now
+	}
+	now := clock()
 	return fmt.Sprintf("%s-%d.%03d", prefix, now.Unix(), now.Nanosecond()/1e6)
 }
 
