@@ -276,7 +276,7 @@ func (b *typingBroadcaster) CanSend() bool {
 	if !b.tracker.Enabled() {
 		return false
 	}
-	return time.Since(b.lastSent) >= typingThrottle
+	return b.tracker.now().Sub(b.lastSent) >= typingThrottle
 }
 
 // MaybeSend dispatches a typing event for channelID via the configured
@@ -288,7 +288,7 @@ func (b *typingBroadcaster) MaybeSend(channelID string) bool {
 	if b.sendFn == nil || !b.CanSend() {
 		return false
 	}
-	b.lastSent = time.Now()
+	b.lastSent = b.tracker.now()
 	fn := b.sendFn
 	go fn(channelID)
 	return true

@@ -41,6 +41,19 @@ func deliveredMsgs[T any](t *testing.T, cmds ...tea.Cmd) []T {
 	return out
 }
 
+// receivedNow returns what is already waiting on ch, without blocking.
+// For a value a test's own synchronous calls must have produced: if it
+// is not there, nothing is going to deliver it later.
+func receivedNow[T any](ch <-chan T) (T, bool) {
+	select {
+	case v := <-ch:
+		return v, true
+	default:
+		var zero T
+		return zero, false
+	}
+}
+
 // deliverFirst runs cmd, starts each member of a batch on its own
 // goroutine, and sends the first message of type T on ch.
 func deliverFirst[T any](cmd tea.Cmd, ch chan T) {

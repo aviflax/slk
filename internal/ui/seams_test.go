@@ -13,7 +13,6 @@ import (
 	"reflect"
 	"strings"
 	"testing"
-	"time"
 
 	tea "charm.land/bubbletea/v2"
 
@@ -113,13 +112,10 @@ func TestSeam_TypingSendsForActiveChannel(t *testing.T) {
 
 	_ = dispatchModeKey(a, keyPress('h'))
 
-	select {
-	case got := <-sent:
-		if got != "C1" {
-			t.Errorf("typing sent for %q, want C1", got)
-		}
-	case <-time.After(2 * time.Second):
-		t.Fatal("no typing event sent")
+	// The sender runs on a goroutine; a send that never happens hangs
+	// until go test's -timeout.
+	if got := <-sent; got != "C1" {
+		t.Errorf("typing sent for %q, want C1", got)
 	}
 }
 
@@ -191,36 +187,9 @@ func TestSeam_UploadFromChannelCompose(t *testing.T) {
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("uploads = %+v, want %+v", got, want)
 	}
-	if !containsMsg(drainSkippingTimers(cmd), seamUploadDone{}) {
+	if !containsMsg(drainCmd(cmd), seamUploadDone{}) {
 		t.Error("the uploader's cmd was not part of the returned batch")
 	}
-}
-
-// drainSkippingTimers is drainCmd for batches that carry a long
-// tea.Tick: any cmd still blocked after a moment is skipped.
-func drainSkippingTimers(cmd tea.Cmd) []tea.Msg {
-	if cmd == nil {
-		return nil
-	}
-	done := make(chan tea.Msg, 1)
-	go func() { done <- cmd() }()
-	var msg tea.Msg
-	select {
-	case msg = <-done:
-	case <-time.After(200 * time.Millisecond):
-		return nil
-	}
-	if batch, ok := msg.(tea.BatchMsg); ok {
-		var out []tea.Msg
-		for _, c := range batch {
-			out = append(out, drainSkippingTimers(c)...)
-		}
-		return out
-	}
-	if msg == nil {
-		return nil
-	}
-	return []tea.Msg{msg}
 }
 
 func TestSeam_UploadFromThreadCompose(t *testing.T) {

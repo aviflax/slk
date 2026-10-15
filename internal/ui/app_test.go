@@ -209,6 +209,8 @@ func TestTypingThrottle(t *testing.T) {
 	app := NewApp()
 	app.typing.SetEnabled(true)
 	app.activeChannelID = "C1"
+	clock := time.Date(2026, 1, 1, 12, 0, 0, 0, time.UTC)
+	app.typing.now = func() time.Time { return clock }
 
 	// First call should allow sending
 	if !app.typingOut.CanSend() {
@@ -216,7 +218,7 @@ func TestTypingThrottle(t *testing.T) {
 	}
 
 	// Mark as just sent
-	app.typingOut.lastSent = time.Now()
+	app.typingOut.lastSent = clock
 
 	// Immediate second call should be throttled
 	if app.typingOut.CanSend() {
@@ -224,7 +226,7 @@ func TestTypingThrottle(t *testing.T) {
 	}
 
 	// After 3 seconds, should allow again
-	app.typingOut.lastSent = time.Now().Add(-4 * time.Second)
+	clock = clock.Add(4 * time.Second)
 	if !app.typingOut.CanSend() {
 		t.Error("expected typing send to be allowed after 3s")
 	}
@@ -970,9 +972,7 @@ func TestApp_NewThreadReplyTriggersDirtyMsg(t *testing.T) {
 			app.Update(m)
 		}
 	}
-	select {
-	case <-fetched:
-	case <-time.After(time.Second):
+	if _, ok := receivedNow(fetched); !ok {
 		t.Fatal("initial threads-list fetch did not fire")
 	}
 	// Drain any extra incidental fetches from openSelectedThreadCmd etc.
@@ -1002,13 +1002,10 @@ func TestApp_NewThreadReplyTriggersDirtyMsg(t *testing.T) {
 	// above.
 	feed(t, app, cmd, 0)
 
-	select {
-	case team := <-fetched:
-		if team != "T1" {
-			t.Errorf("re-fetch teamID = %q, want T1", team)
-		}
-	case <-time.After(500 * time.Millisecond):
+	if team, ok := receivedNow(fetched); !ok {
 		t.Fatal("expected re-fetch after thread reply, did not happen")
+	} else if team != "T1" {
+		t.Errorf("re-fetch teamID = %q, want T1", team)
 	}
 }
 
@@ -1032,22 +1029,13 @@ func TestApp_NewMessageWithoutThreadTSDoesNotTriggerDirty(t *testing.T) {
 			Text:   "hello",
 		},
 	})
-	for _, m := range drainBatch(cmd) {
-		if m != nil {
-			_, follow := app.Update(m)
-			for _, fm := range drainBatch(follow) {
-				if fm != nil {
-					app.Update(fm)
-				}
-			}
-		}
-	}
+	// Follow every hop, as the positive test does: the fetch is
+	// dispatched three steps after the message, so stopping earlier
+	// would pass whatever the reducer did.
+	feed(t, app, cmd, 0)
 
-	select {
-	case <-fetched:
+	if _, ok := receivedNow(fetched); ok {
 		t.Error("top-level message should not trigger threads-list fetch")
-	case <-time.After(50 * time.Millisecond):
-		// good
 	}
 }
 
@@ -1067,13 +1055,10 @@ func TestApp_WorkspaceReadyTriggersThreadsListFetch(t *testing.T) {
 	for _, m := range drainBatch(cmd) {
 		_ = m
 	}
-	select {
-	case team := <-fetched:
-		if team != "T1" {
-			t.Errorf("fetcher called with team=%q, want T1", team)
-		}
-	case <-time.After(100 * time.Millisecond):
+	if team, ok := receivedNow(fetched); !ok {
 		t.Fatal("WorkspaceReadyMsg did not trigger threads-list fetch")
+	} else if team != "T1" {
+		t.Errorf("fetcher called with team=%q, want T1", team)
 	}
 }
 
@@ -1180,13 +1165,10 @@ func TestApp_WorkspaceSwitchedTriggersThreadsListFetchAndSelectsThreadsRow(t *te
 	for _, m := range drainBatch(cmd) {
 		_ = m
 	}
-	select {
-	case team := <-fetched:
-		if team != "T2" {
-			t.Errorf("fetcher called with team=%q, want T2", team)
-		}
-	case <-time.After(100 * time.Millisecond):
+	if team, ok := receivedNow(fetched); !ok {
 		t.Fatal("WorkspaceSwitchedMsg did not trigger threads-list fetch")
+	} else if team != "T2" {
+		t.Errorf("fetcher called with team=%q, want T2", team)
 	}
 }
 
@@ -4538,11 +4520,9 @@ func TestChannelSelectedInvokesMembershipFetcher(t *testing.T) {
 
 	_, _ = app.Update(ChannelSelectedMsg{ID: "C42", Name: "general", Type: "channel"})
 
-	select {
-	case <-done:
-	case <-time.After(time.Second):
-		t.Fatal("fetcher was not invoked within 1s")
-	}
+	// The App calls the fetcher on a goroutine; wait for its signal. A
+	// fetcher that is never called hangs until go test's -timeout.
+	<-done
 
 	mu.Lock()
 	got := append([]string(nil), fetched...)
@@ -4722,13 +4702,12 @@ func TestChannelSelectedReturnsPromptlyEvenIfFetcherBlocks(t *testing.T) {
 		_, _ = app.Update(ChannelSelectedMsg{ID: "C42", Name: "general", Type: "channel"})
 		close(done)
 	}()
-	select {
-	case <-done:
-		// Update returned promptly — fetcher was not invoked
-		// synchronously on the caller's goroutine.
-	case <-time.After(100 * time.Millisecond):
-		t.Fatal("Update did not return within 100ms; fetcher is being called synchronously on the Update goroutine — risks bubbletea Send-from-Update deadlock")
-	}
+	// Update returning at all means the fetcher was not invoked
+	// synchronously on the caller's goroutine. If it were, Update would
+	// block on release and this wait would hang until go test's
+	// -timeout dumps the goroutine stuck in the fetcher, which is the
+	// bubbletea Send-from-Update deadlock this guards against.
+	<-done
 }
 
 func TestSeedNewMessagePicker_PopulatesUsersAndExcludesSelf(t *testing.T) {

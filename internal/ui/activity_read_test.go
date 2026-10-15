@@ -4,7 +4,6 @@ import (
 	"errors"
 	"strings"
 	"testing"
-	"time"
 
 	tea "charm.land/bubbletea/v2"
 
@@ -294,8 +293,8 @@ func TestActivityEnter_UnreadReminderMarksReadAndToasts(t *testing.T) {
 }
 
 // Enter on a reminder already read only explains; it must not call
-// Slack. The command is the toast's 3 s clear tick, so watch for a call
-// for a short while instead of waiting the tick out.
+// Slack. The command is only the toast's clear tick; run it and see
+// that no call was made.
 func TestActivityEnter_ReadReminderOnlyToasts(t *testing.T) {
 	a, calls := activityReadApp(t, nil, reminder(false))
 
@@ -303,11 +302,9 @@ func TestActivityEnter_ReadReminderOnlyToasts(t *testing.T) {
 	if got := statusbarText(a); !strings.Contains(got, "Reminder: open Slack to see it") {
 		t.Errorf("status bar = %q, want the reminder toast", got)
 	}
-	go deliverFirst(cmd, make(chan ActivityReadSetMsg, 1))
-	select {
-	case c := <-calls:
+	drainCmd(cmd)
+	if c, ok := receivedNow(calls); ok {
 		t.Errorf("Enter on a read reminder asked Slack for %+v", c)
-	case <-time.After(300 * time.Millisecond):
 	}
 }
 

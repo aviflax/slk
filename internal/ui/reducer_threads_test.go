@@ -3,7 +3,6 @@ package ui
 import (
 	"errors"
 	"testing"
-	"time"
 
 	tea "charm.land/bubbletea/v2"
 
@@ -40,13 +39,10 @@ func TestApp_WorkspaceReadyAndActivationBothEnsureSubscriptions(t *testing.T) {
 	for _, m := range drainBatch(cmd) {
 		_ = m
 	}
-	select {
-	case team := <-ensured:
-		if team != "T1" {
-			t.Errorf("workspace-ready ensured subscriptions for %q; want T1", team)
-		}
-	case <-time.After(100 * time.Millisecond):
+	if team, ok := receivedNow(ensured); !ok {
 		t.Fatal("workspace-ready did not ensure subscriptions; a workspace slk never opens the Threads view on stays stale for the whole session")
+	} else if team != "T1" {
+		t.Errorf("workspace-ready ensured subscriptions for %q; want T1", team)
 	}
 
 	app.activeTeamID = "T1"
@@ -54,13 +50,10 @@ func TestApp_WorkspaceReadyAndActivationBothEnsureSubscriptions(t *testing.T) {
 	for _, m := range drainBatch(cmd) {
 		_ = m
 	}
-	select {
-	case team := <-ensured:
-		if team != "T1" {
-			t.Errorf("activation ensured subscriptions for %q; want T1", team)
-		}
-	case <-time.After(100 * time.Millisecond):
+	if team, ok := receivedNow(ensured); !ok {
 		t.Fatal("opening the Threads view did not ensure subscriptions")
+	} else if team != "T1" {
+		t.Errorf("activation ensured subscriptions for %q; want T1", team)
 	}
 }
 
