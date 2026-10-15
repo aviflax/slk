@@ -22,7 +22,6 @@ import (
 	"github.com/gammons/slk/internal/emoji"
 	"github.com/gammons/slk/internal/ids"
 	imgpkg "github.com/gammons/slk/internal/image"
-	"github.com/gammons/slk/internal/slackurl"
 	"github.com/gammons/slk/internal/ui/activityview"
 	"github.com/gammons/slk/internal/ui/channelfinder"
 	"github.com/gammons/slk/internal/ui/channelpicker"
@@ -1558,18 +1557,15 @@ func (a *App) downloadFilesOfSelected() tea.Cmd {
 }
 
 // linkOpensInApp reports whether routeLink would navigate this URL
-// inside slk (used for the picker's "[slk]" badge). Mirrors the
-// guards at the top of routeLink.
+// inside slk (used for the picker's "[slk]" badge). It shares
+// permalinkLocation with routeLinkInApp and checks the channel the way
+// applyLocation does.
 func (a *App) linkOpensInApp(rawURL string) bool {
-	pl, ok := slackurl.Parse(rawURL)
-	if !ok {
+	loc, err := a.permalinkLocation(rawURL)
+	if err != nil {
 		return false
 	}
-	domain := a.activeWorkspaceDomain()
-	if domain == "" || pl.Subdomain != domain {
-		return false
-	}
-	_, _, found := a.channels.Lookup(pl.ChannelID)
+	_, _, found := a.channels.Lookup(loc.ChannelID)
 	return found
 }
 

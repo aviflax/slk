@@ -629,6 +629,17 @@ type MessageDeletedMsg struct {
 // picker modal.
 type OpenLinkMsg struct{ URL string }
 
+// OpenPermalinkMsg asks slk to show a permalink sent from outside the
+// TUI (the `slk open` socket, wired in cmd/slk). reduceLinks routes it
+// like OpenLinkMsg except that it never opens the browser: Reply gets
+// nil when slk navigates, or an error saying why it will not, so the
+// sender can fall back. Reply should have a buffer of one; the reducer
+// drops the reply rather than block on it.
+type OpenPermalinkMsg struct {
+	URL   string
+	Reply chan<- error
+}
+
 // DownloadFileMsg requests download + OS-open of a file attachment.
 // Dispatched by the `d` keybinding (directly for single-file messages)
 // and by the picker modal for multi-file messages. Handled by

@@ -10,11 +10,17 @@
 //     the target ts, or open the thread panel for thread_ts links).
 //   - Everything else opens in the OS browser (a.browserOpener).
 //
+// OpenPermalinkMsg (a link sent to the `slk open` socket) takes the same
+// in-app path but never opens the browser: it replies with the reason
+// slk declined, and the sender decides what to do.
+//
 // Completion hooks live in reducer_channels.go (ChannelSelectedMsg
 // and MessagesLoadedMsg arms call completePendingLinkNav).
 package ui
 
 import (
+	"errors"
+	"fmt"
 	"time"
 
 	tea "charm.land/bubbletea/v2"
@@ -65,33 +71,67 @@ func (p *pendingLinkNav) wrapThreadLoad(cmd tea.Cmd, authoritative bool, loads i
 }
 
 var reduceLinks reducerFunc = func(a *App, msg tea.Msg) (tea.Cmd, bool) {
-	m, ok := msg.(OpenLinkMsg)
-	if !ok {
-		return nil, false
+	switch m := msg.(type) {
+	case OpenLinkMsg:
+		return a.routeLink(m.URL), true
+	case OpenPermalinkMsg:
+		cmd, err := a.routeLinkInApp(m.URL)
+		if m.Reply != nil {
+			select {
+			case m.Reply <- err:
+			default:
+				// The sender gave up or did not buffer; never block
+				// the Update goroutine on it.
+			}
+		}
+		return cmd, true
 	}
-	return a.routeLink(m.URL), true
+	return nil, false
 }
 
 // routeLink decides between in-app navigation and the browser.
 func (a *App) routeLink(rawURL string) tea.Cmd {
+	if cmd, err := a.routeLinkInApp(rawURL); err == nil {
+		return cmd
+	}
+	return a.browserOpener(rawURL)
+}
+
+// routeLinkInApp starts in-app navigation to rawURL. A non-nil error
+// says why slk will not show it; routeLink then opens the browser, and
+// OpenPermalinkMsg passes the error back to its sender.
+func (a *App) routeLinkInApp(rawURL string) (tea.Cmd, error) {
+	loc, err := a.permalinkLocation(rawURL)
+	if err != nil {
+		return nil, err
+	}
+	cmd, ok := a.applyLocation(loc, false)
+	if !ok {
+		return nil, fmt.Errorf("channel %s is not one slk knows", loc.ChannelID)
+	}
+	return cmd, nil
+}
+
+// permalinkLocation parses rawURL as a permalink in the active
+// workspace. It does not check the channel; applyLocation does.
+func (a *App) permalinkLocation(rawURL string) (Location, error) {
 	pl, ok := slackurl.Parse(rawURL)
 	if !ok {
-		return a.browserOpener(rawURL)
+		return Location{}, errors.New("not a Slack message permalink")
 	}
 	domain := a.activeWorkspaceDomain()
-	if domain == "" || pl.Subdomain != domain {
-		return a.browserOpener(rawURL)
+	if domain == "" {
+		return Location{}, errors.New("no workspace is active yet")
 	}
-	cmd, ok := a.applyLocation(Location{
+	if pl.Subdomain != domain {
+		return Location{}, fmt.Errorf("the link is for workspace %q, not the active one", pl.Subdomain)
+	}
+	return Location{
 		TeamID:    ids.TeamID(a.activeTeamID),
 		ChannelID: pl.ChannelID,
 		MessageTS: pl.MessageTS,
 		ThreadTS:  pl.ThreadTS,
-	}, false)
-	if ok {
-		return cmd
-	}
-	return a.browserOpener(rawURL)
+	}, nil
 }
 
 // applyLocation is the single applier every in-app jump flows through
