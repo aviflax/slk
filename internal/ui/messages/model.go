@@ -671,8 +671,9 @@ func (m *Model) InsertLocal(msg MessageItem) { m.AppendMessage(msg) }
 // Settle lands the sent message (messages.Settle on this pane's rows).
 // The placeholder localTS is replaced by msg in place, so the order
 // matches what the user saw at Enter. When a row with msg.TS is already
-// here (the echo got in first), that row takes msg and the placeholder
-// is removed, so the message shows once. With no placeholder in this
+// here (a history load brought it in first), that row takes msg and the
+// placeholder is removed, so the message shows once; a selected
+// placeholder hands the cursor to that row. With no placeholder in this
 // pane (the user left the channel and came back before the post
 // returned, or an earlier Settle already replaced it), msg is upserted
 // by its TS.
@@ -694,8 +695,22 @@ func (m *Model) Settle(localTS string, msg MessageItem) {
 	// in UpsertSelfSent's replace branch.
 	m.list.ResetSnap()
 	if ch.Op == RowRemoved {
-		m.afterLocalRemoved(ch.Index)
+		m.afterSettleRemoved(ch.Index, msg.TS)
 	}
+}
+
+// afterSettleRemoved fixes the selection after Settle dropped the
+// placeholder at index i because the row with settledTS already showed
+// the message. A selected placeholder hands the cursor to that row;
+// otherwise the cursor stays on its message (afterLocalRemoved).
+func (m *Model) afterSettleRemoved(i int, settledTS string) {
+	if i == m.selected {
+		if j := IndexOfTS(m.messages, settledTS); j >= 0 {
+			m.selected = j
+			return
+		}
+	}
+	m.afterLocalRemoved(i)
 }
 
 // RemoveLocal rolls back the placeholder localTS after a failed send.

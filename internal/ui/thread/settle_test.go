@@ -31,3 +31,22 @@ func TestSettleAfterEchoShowsReplyOnce(t *testing.T) {
 		t.Fatalf("selected = %d, want 1 (the same reply)", m.selected)
 	}
 }
+
+// A selected placeholder whose reply is already shown further down hands
+// the cursor to that reply, not to whatever row slides into its index.
+func TestSettleSelectedPlaceholderSelectsSettledReply(t *testing.T) {
+	m := New()
+	m.SetThread(messages.MessageItem{TS: "100.000000", Text: "parent"}, []messages.MessageItem{
+		{TS: "101.000001", Text: "earlier"},
+		{TS: "local:1", Text: "pending"},
+		{TS: "101.000003", Text: "from someone"},
+		{TS: "101.000002", Text: "echo"},
+	}, "C1", "100.000000")
+	m.selected = 1 // the placeholder
+
+	m.Settle("local:1", messages.MessageItem{TS: "101.000002", Text: "sent"})
+
+	if r := m.SelectedReply(); r == nil || r.TS != "101.000002" {
+		t.Fatalf("selected %+v, want the settled reply 101.000002", r)
+	}
+}

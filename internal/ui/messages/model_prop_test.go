@@ -186,8 +186,12 @@ func TestModelListOperations(t *testing.T) {
 				if len(reals) > 0 && rapid.Bool().Draw(t, "echoFirst") {
 					real := rapid.SampledFrom(reals).Draw(t, "echoed")
 					s.m.Settle(local, MessageItem{TS: real, Text: "settled"})
+					// The placeholder goes and the row that already
+					// showed the message takes its place under the
+					// cursor: a selected placeholder hands the
+					// selection to it.
 					if s.remove(i) {
-						s.selected = ""
+						s.selected = real
 					}
 					if j := s.index(real); j >= len(s.m.Messages()) || s.m.Messages()[j].Text != "settled" {
 						t.Fatalf("echoed row %s was not settled: %+v", real, s.m.Messages())

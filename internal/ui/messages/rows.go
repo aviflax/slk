@@ -181,8 +181,8 @@ func Upsert(rows []MessageItem, item MessageItem) ([]MessageItem, RowChange) {
 
 // Settle replaces the placeholder row localTS with item, the
 // authoritative message, and reports RowReplaced at the placeholder's
-// index. When another row already carries item.TS (the echo got there
-// first), that row takes item and the placeholder is removed instead,
+// index. When another row already carries item.TS (a history load
+// brought it in first), that row takes item and the placeholder is removed instead,
 // reported as RowRemoved at the placeholder's old index, so the message
 // never appears twice. A missing placeholder is a no-op (RowNone).
 // Matching is literal, item.TS "" included.

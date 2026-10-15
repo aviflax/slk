@@ -396,9 +396,10 @@ func (m *Model) InsertLocal(msg messages.MessageItem) { m.AddReply(msg) }
 
 // Settle lands the sent reply (messages.Settle on this pane's
 // replies): the placeholder localTS is replaced by msg in place, or,
-// when a reply with msg.TS is already here (the echo got in first),
-// that reply takes msg and the placeholder is removed, so the reply
-// shows once. With no placeholder in this pane, msg is upserted by its
+// when a reply with msg.TS is already here (a fetch brought it in
+// first), that reply takes msg and the placeholder is removed, so the
+// reply shows once, with the cursor on it if it was on the
+// placeholder. With no placeholder in this pane, msg is upserted by its
 // TS. Unlike the channel pane it has never reset a snap anchor;
 // InvalidateCache is all it does.
 func (m *Model) Settle(localTS string, msg messages.MessageItem) {
@@ -414,8 +415,22 @@ func (m *Model) Settle(localTS string, msg messages.MessageItem) {
 	m.replies = rows
 	m.InvalidateCache()
 	if ch.Op == messages.RowRemoved {
-		m.afterLocalRemoved(ch.Index)
+		m.afterSettleRemoved(ch.Index, msg.TS)
 	}
+}
+
+// afterSettleRemoved fixes the selection after Settle dropped the
+// placeholder at index i because the reply with settledTS already
+// showed the message. A selected placeholder hands the cursor to that
+// reply; otherwise the cursor stays on its message (afterLocalRemoved).
+func (m *Model) afterSettleRemoved(i int, settledTS string) {
+	if i == m.selected {
+		if j := messages.IndexOfTS(m.replies, settledTS); j >= 0 {
+			m.selected = j
+			return
+		}
+	}
+	m.afterLocalRemoved(i)
 }
 
 // RemoveLocal rolls back the placeholder localTS after a failed send.
