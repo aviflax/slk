@@ -1963,7 +1963,7 @@ func (a *App) maybeFetchOlderHistory(atTop bool) tea.Cmd {
 		}),
 		failNil(func() tea.Msg {
 			return channels.FetchOlder(chID, oldestTS)
-		}, OlderMessagesLoadedMsg{ChannelID: string(chID), AnchorTS: string(oldestTS)}),
+		}, OlderMessagesLoadedMsg{ChannelID: string(chID), AnchorTS: string(oldestTS), Err: errNoWorkspace}),
 	)
 }
 

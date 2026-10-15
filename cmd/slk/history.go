@@ -17,7 +17,7 @@ import (
 	"github.com/slack-go/slack"
 )
 
-func fetchOlderMessages(client *slackclient.Client, channelID, latestTS string, db *cache.DB, userNames *userNameStore, tsFormat string, router *workspaceRouter) []messages.MessageItem {
+func fetchOlderMessages(client *slackclient.Client, channelID, latestTS string, db *cache.DB, userNames *userNameStore, tsFormat string, router *workspaceRouter) ([]messages.MessageItem, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), requestTimeout)
 	defer cancel()
 	debuglog.Cache("fetchOlderMessages: channel=%s latest_ts=%s entry", channelID, latestTS)
@@ -26,14 +26,14 @@ func fetchOlderMessages(client *slackclient.Client, channelID, latestTS string, 
 	if err != nil {
 		debuglog.Cache("fetchOlderMessages: GetOlderHistory %s: %v dur_ms=%d (returning nil → keep cache)",
 			channelID, err, time.Since(start).Milliseconds())
-		return nil
+		return nil, err
 	}
 
 	msgItems := convertAndCacheHistory(client, channelID, history, db, userNames, tsFormat, router)
 
 	debuglog.Cache("fetchOlderMessages: channel=%s latest_ts=%s result %s dur_ms=%d (older history backfill)",
 		channelID, latestTS, summarizeMessages(msgItems), time.Since(start).Milliseconds())
-	return msgItems
+	return msgItems, nil
 }
 
 // fetchMessagesAround fetches a history window centered on targetTS

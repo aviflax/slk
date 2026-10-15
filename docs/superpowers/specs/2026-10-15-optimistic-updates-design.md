@@ -180,7 +180,11 @@ the operation's failure: the `cmd/slk` closures return nil when no
 workspace is active, which used to leave a pending send open for good.
 `failNil` does the same for the other actions the user starts (mark
 unread, older history, fetch-around, join, upload), so their in-flight
-flags, spinners and upload state clear and a toast says why. `Send` and
+flags, spinners and upload state clear and a toast says why. The join
+and older-history failures toast too (`ChannelJoinFailedMsg`,
+`OlderMessagesLoadedMsg.Err`, which `cmd/slk` sets when the fetch
+fails, so an empty page at the start of a channel stays silent); until
+phase 6 they only logged or cleared the spinner. `Send` and
 `SendReply` in `cmd/slk` also time out after 30s (`sendTimeout`): a
 send must always end, because echoes are held until it does. The
 timeout works because `SlackAPI` declares only slack-go's `*Context`

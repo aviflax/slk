@@ -95,6 +95,9 @@ type (
 		// unrelated older block onto the new window.
 		AnchorTS string
 		Messages []messages.MessageItem
+		// Err is set when the page could not be fetched; nil
+		// Messages with no Err is the start of the channel.
+		Err error
 	}
 	// MessagesAroundLoadedMsg delivers a history window fetched around
 	// TargetTS (jump-to-message navigation: search matches, search

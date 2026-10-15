@@ -185,6 +185,11 @@ var reduceChannels reducerFunc = func(a *App, msg tea.Msg) (tea.Cmd, bool) {
 			}
 			mm.PrependMessages(cloneMessageItems(m.Messages))
 		}
+		if m.Err != nil {
+			// The spinner is gone; without this the user would take
+			// the missing page for the start of the channel.
+			return toastWithClear(a, "Could not load older messages: "+truncateReason(m.Err.Error(), 40), 4*time.Second), true
+		}
 		return nil, true
 
 	case MessagesAroundLoadedMsg:
@@ -262,10 +267,13 @@ var reduceChannels reducerFunc = func(a *App, msg tea.Msg) (tea.Cmd, bool) {
 		}, true
 
 	case ChannelJoinFailedMsg:
-		// Nothing fancy yet -- could surface a status-bar toast
-		// in future.
+		// The user chose the channel and it did not open: say why.
 		log.Printf("warning: failed to join channel %s: %v", m.Name, m.Err)
-		return nil, true
+		reason := "unknown error"
+		if m.Err != nil {
+			reason = m.Err.Error()
+		}
+		return toastWithClear(a, "Could not join #"+m.Name+": "+truncateReason(reason, 40), 4*time.Second), true
 
 	case channelSearchDebounceMsg:
 		// The typing has stopped. Anything older than the current

@@ -893,11 +893,12 @@ func run() error {
 				if wctx == nil {
 					return nil
 				}
-				msgItems := fetchOlderMessages(wctx.Client, chIDStr, string(oldestTS), db, wctx.UserNames, tsFormat, router)
+				msgItems, err := fetchOlderMessages(wctx.Client, chIDStr, string(oldestTS), db, wctx.UserNames, tsFormat, router)
 				return ui.OlderMessagesLoadedMsg{
 					ChannelID: chIDStr,
 					AnchorTS:  string(oldestTS),
 					Messages:  msgItems,
+					Err:       err,
 				}
 			},
 			FetchAround: func(channelID ids.ChannelID, ts ids.MessageTS) core.Msg {
