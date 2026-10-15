@@ -264,8 +264,8 @@ func TestUpdateHint(t *testing.T) {
 		want string
 	}{
 		{installBrew, "brew upgrade --cask slk"},
-		{installGo, "go install github.com/gammons/slk/cmd/slk@latest"},
-		{installOther, "https://github.com/gammons/slk/releases/latest"},
+		{installGo, "https://github.com/kirahowe/slk/releases/latest"},
+		{installOther, "https://github.com/kirahowe/slk/releases/latest"},
 	} {
 		got := updateHint("0.26.2", tc.m)
 		if !strings.Contains(got, "0.26.2") || !strings.Contains(got, tc.want) {

@@ -39,22 +39,16 @@ Full feature breakdown: **[Features](https://github.com/gammons/slk/wiki/Feature
 **Homebrew** (macOS and Linux):
 
 ```bash
-brew install --cask gammons/tap/slk
+brew install --cask kirahowe/tap/slk
 ```
 
-**Arch Linux** (community-maintained [AUR package](https://aur.archlinux.org/packages/slk)):
+This is a fork of [gammons/slk](https://github.com/gammons/slk); the cask above installs this fork's releases. To build from source instead:
 
 ```bash
-yay -S slk
+go build -ldflags="-s -w" -trimpath -o ~/.local/bin/slk ./cmd/slk
 ```
 
-**Go:**
-
-```bash
-go install -ldflags="-s -w" -trimpath github.com/gammons/slk/cmd/slk@latest
-```
-
-For tarballs, `.deb` / `.rpm` / `.apk` packages, Windows, build-from-source, and the Homebrew formula→cask migration note, see the [Installation wiki page](https://github.com/gammons/slk/wiki/Installation).
+Tarballs and `.deb` / `.rpm` / `.apk` packages are attached to each [release](https://github.com/kirahowe/slk/releases).
 
 ## Setup
 

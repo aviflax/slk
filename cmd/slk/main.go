@@ -210,7 +210,7 @@ Config:  ~/.config/slk/config.toml
 Data:    ~/.local/share/slk/
 Cache:   ~/.cache/slk/
 
-Docs:    https://github.com/gammons/slk
+Docs:    https://github.com/kirahowe/slk
 `, version)
 }
 

@@ -122,8 +122,8 @@ nfpms:
   - id: slk
     package_name: slk
     vendor: Grant Ammons
-    homepage: https://github.com/gammons/slk
-    maintainer: Grant Ammons <grant@grant.dev>
+    homepage: https://github.com/kirahowe/slk
+    maintainer: Kira Howe <email@kirahowe.com>
     description: |-
       A blazingly fast Slack TUI.
       Keyboard-driven, beautifully themed terminal client for Slack.
@@ -142,7 +142,7 @@ nfpms:
 
 release:
   github:
-    owner: gammons
+    owner: kirahowe
     name: slk
   draft: false
   prerelease: auto
@@ -166,12 +166,10 @@ release:
   footer: |
     ---
     {{- if .Prerelease }}
-    **This is a pre-release.** It is not published to the Homebrew tap, and
-    `go install ...@latest` will not resolve to it. Both are deliberate:
+    **This is a pre-release.** It is not published to the Homebrew tap. That is deliberate:
     pre-releases are opt-in only, and nothing you already have installed
     will move to this by itself.
 
-    - **Go:** `go install github.com/gammons/slk/cmd/slk@{{ .Tag }}`
     - **Linux/macOS:** download the `.tar.gz`, extract, and place `slk` in your `$PATH`
     - **Windows:** download the `.zip`, extract `slk.exe`, add to `PATH`
 
@@ -192,7 +190,7 @@ release:
     ```
 
     Please report anything you find at
-    https://github.com/gammons/slk/issues -- including "it seemed fine",
+    https://github.com/kirahowe/slk/issues -- including "it seemed fine",
     which is genuinely useful and almost never gets sent.
     {{- else }}
     **Install**
@@ -202,7 +200,6 @@ release:
     - **Fedora/RHEL:** `sudo rpm -i slk_*.rpm`
     - **Alpine:** `sudo apk add --allow-untrusted slk_*.apk`
     - **Windows:** download the `.zip`, extract `slk.exe`, add to `PATH`
-    - **Go:** `go install github.com/gammons/slk/cmd/slk@{{ .Tag }}`
 
     Verify downloads with `checksums.txt`.
     {{- end }}
@@ -213,7 +210,7 @@ release:
 # historical formula was a hack for installing pre-compiled binaries.
 # Users still install with:
 #
-#     brew install gammons/tap/slk
+#     brew install --cask kirahowe/tap/slk
 #
 # Two consequences of the move worth knowing:
 #
@@ -230,19 +227,19 @@ release:
 homebrew_casks:
   - name: slk
     repository:
-      owner: gammons
+      owner: kirahowe
       name: homebrew-tap
       branch: main
       token: "{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}"
     commit_author:
       name: goreleaser
-      email: goreleaser@gammons.dev
+      email: email@kirahowe.com
     commit_msg_template: "slk: brew cask update for {{ .ProjectName }} version {{ .Tag }}"
-    homepage: https://github.com/gammons/slk
+    homepage: https://github.com/kirahowe/slk
     description: A blazingly fast, keyboard-driven Slack TUI
     # Helps `brew audit` when the homepage and the download domain differ.
     url:
-      verified: github.com/gammons/slk
+      verified: github.com/kirahowe/slk
     # Skip the prerelease tags goreleaser auto-flags so the tap only
     # tracks stable releases.
     skip_upload: auto

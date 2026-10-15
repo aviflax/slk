@@ -19,7 +19,7 @@ import (
 // without a network call.
 
 const (
-	latestReleaseURL    = "https://api.github.com/repos/gammons/slk/releases/latest"
+	latestReleaseURL    = "https://api.github.com/repos/kirahowe/slk/releases/latest"
 	updateCheckInterval = 24 * time.Hour
 	updateCheckTimeout  = 5 * time.Second
 	// updateToastDelay holds the toast back until the loading overlay is
@@ -194,7 +194,7 @@ func fetchLatestRelease(ctx context.Context, client *http.Client, url, current s
 	if err != nil {
 		return "", err
 	}
-	req.Header.Set("User-Agent", "slk/"+current+" (+https://github.com/gammons/slk)")
+	req.Header.Set("User-Agent", "slk/"+current+" (+https://github.com/kirahowe/slk)")
 	req.Header.Set("Accept", "application/vnd.github+json")
 	resp, err := client.Do(req)
 	if err != nil {
@@ -314,10 +314,10 @@ func updateHint(latest string, m installMethod) string {
 	switch m {
 	case installBrew:
 		return prefix + "Run: brew upgrade --cask slk"
-	case installGo:
-		return prefix + "Run: go install github.com/gammons/slk/cmd/slk@latest"
 	}
-	return prefix + "Get it at https://github.com/gammons/slk/releases/latest"
+	// No go install hint: the module path is still github.com/gammons/slk,
+	// so @latest would install upstream rather than this fork's release.
+	return prefix + "Get it at https://github.com/kirahowe/slk/releases/latest"
 }
 
 // cachedUpdateHint builds the hint from the cache alone (no network),
