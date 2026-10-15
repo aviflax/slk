@@ -2,6 +2,7 @@ package image
 
 import (
 	"bytes"
+	"io"
 	"os"
 	"strings"
 	"testing"
@@ -10,9 +11,9 @@ import (
 
 func TestProbeKittyGraphics_TimeoutFails(t *testing.T) {
 	t.Setenv("TMUX", "")
-	r := blockingReader{}
+	r := newBlockingReader(t)
 	var w bytes.Buffer
-	ok := ProbeKittyGraphics(&w, r, 50*time.Millisecond)
+	ok := ProbeKittyGraphics(&w, r, time.Millisecond)
 	if ok {
 		t.Error("expected probe to fail on timeout")
 	}
@@ -23,9 +24,9 @@ func TestProbeKittyGraphics_TimeoutFails(t *testing.T) {
 
 func TestProbeKittyGraphics_WrapsProbeInTmux(t *testing.T) {
 	t.Setenv("TMUX", "/tmp/tmux")
-	r := blockingReader{}
+	r := newBlockingReader(t)
 	var w bytes.Buffer
-	ok := ProbeKittyGraphics(&w, r, 50*time.Millisecond)
+	ok := ProbeKittyGraphics(&w, r, time.Millisecond)
 	if ok {
 		t.Error("expected probe to fail on timeout")
 	}
@@ -56,23 +57,18 @@ func TestProbeKittyGraphics_NoStdinTheftAfterTimeout(t *testing.T) {
 	defer pw.Close()
 
 	var wbuf bytes.Buffer
-	ok := ProbeKittyGraphics(&wbuf, pr, 50*time.Millisecond)
+	ok := ProbeKittyGraphics(&wbuf, pr, time.Millisecond)
 	if ok {
 		t.Fatal("expected probe to fail on timeout (pipe never replies)")
 	}
 
 	// Write a byte AFTER the probe has timed out. If a leaked
 	// goroutine is still reading from pr, it will consume this byte
-	// and the Read below will block until the test's deadline.
+	// and the Read below will block until go test's own timeout.
 	if _, err := pw.Write([]byte{'X'}); err != nil {
 		t.Fatalf("pipe write: %v", err)
 	}
 
-	// Bound the read so the test fails fast on regression instead of
-	// hanging.
-	if err := pr.SetReadDeadline(time.Now().Add(500 * time.Millisecond)); err != nil {
-		t.Fatalf("SetReadDeadline: %v", err)
-	}
 	buf := make([]byte, 1)
 	n, err := pr.Read(buf)
 	if err != nil || n != 1 || buf[0] != 'X' {
@@ -114,7 +110,7 @@ func TestScanForSixelDA(t *testing.T) {
 
 func TestProbeSixel_SendsDA1AndFailsOnTimeout(t *testing.T) {
 	var w bytes.Buffer
-	if ok := ProbeSixel(&w, blockingReader{}, 50*time.Millisecond); ok {
+	if ok := ProbeSixel(&w, newBlockingReader(t), time.Millisecond); ok {
 		t.Error("expected probe to fail on timeout")
 	}
 	if w.String() != "\x1b[c" {
@@ -134,7 +130,7 @@ func TestProbeSixel_ReadsReply(t *testing.T) {
 		t.Run(tc.reply, func(t *testing.T) {
 			var w bytes.Buffer
 			r := strings.NewReader(tc.reply)
-			if got := ProbeSixel(&w, r, time.Second); got != tc.want {
+			if got := ProbeSixel(&w, r, time.Hour); got != tc.want {
 				t.Errorf("ProbeSixel with reply %q = %v, want %v", tc.reply, got, tc.want)
 			}
 		})
@@ -156,15 +152,12 @@ func TestProbeSixel_PollPathOnRealPipe(t *testing.T) {
 		t.Fatalf("pipe write: %v", err)
 	}
 	var w bytes.Buffer
-	if ok := ProbeSixel(&w, pr, time.Second); !ok {
+	if ok := ProbeSixel(&w, pr, time.Hour); !ok {
 		t.Fatal("expected sixel-capable DA1 reply to be recognized")
 	}
 
 	if _, err := pw.Write([]byte{'X'}); err != nil {
 		t.Fatalf("pipe write: %v", err)
-	}
-	if err := pr.SetReadDeadline(time.Now().Add(500 * time.Millisecond)); err != nil {
-		t.Fatalf("SetReadDeadline: %v", err)
 	}
 	buf := make([]byte, 1)
 	n, err := pr.Read(buf)
@@ -174,9 +167,19 @@ func TestProbeSixel_PollPathOnRealPipe(t *testing.T) {
 	}
 }
 
-type blockingReader struct{}
+// blockingReader never returns data until the test ends, standing in for
+// a terminal that swallowed the probe. It is released at cleanup so the
+// probe's fallback goroutine does not outlive the test.
+type blockingReader struct{ release <-chan struct{} }
 
-func (blockingReader) Read(p []byte) (int, error) {
-	time.Sleep(time.Hour)
-	return 0, nil
+func newBlockingReader(t *testing.T) blockingReader {
+	t.Helper()
+	release := make(chan struct{})
+	t.Cleanup(func() { close(release) })
+	return blockingReader{release}
+}
+
+func (r blockingReader) Read(p []byte) (int, error) {
+	<-r.release
+	return 0, io.EOF
 }
