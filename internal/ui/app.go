@@ -470,6 +470,10 @@ type App struct {
 	reactionPicker *reactionpicker.Model
 	reactionsView  *reactionsview.Model
 	confirmPrompt  confirmprompt.Model
+	// confirmApply is the open yes/no prompt's action when it must run
+	// in the Update of the key that confirms (openConfirmPromptNow);
+	// nil otherwise.
+	confirmApply func() tea.Cmd
 	// shownPrompt is the ephemeral message whose buttons the confirm
 	// prompt is showing; nil when it shows anything else, or nothing.
 	shownPrompt *actionPromptRef
@@ -4202,13 +4206,9 @@ func (a *App) beginDeleteOfSelected() tea.Cmd {
 		preview = string(runes[:maxPreview]) + "…"
 	}
 
-	a.openConfirmPrompt(
-		"Delete message?",
-		preview,
-		func() tea.Msg {
-			return DeleteMessageMsg{ChannelID: channelID, TS: ts}
-		},
-	)
+	a.openConfirmPromptNow("Delete message?", preview, func() tea.Cmd {
+		return a.beginDelete(channelID, ts)
+	})
 	return nil
 }
 
@@ -4325,9 +4325,10 @@ func (a *App) openImagePreviewOfSelected() tea.Cmd {
 	return nil
 }
 
-// submitEdit emits an EditMessageMsg if the edit text is non-empty and
-// closes the editor, as a send leaves insert mode: the edit shows at
-// once, and a failure reopens it with rawValue (reopenEdit). Empty
+// submitEdit begins the edit (beginEdit) if the edit text is non-empty
+// and closes the editor, as a send leaves insert mode: the edit shows
+// before it returns, so the next key sees it, and a failure reopens it
+// with rawValue (reopenEdit). Empty
 // text refuses with an inline toast and keeps edit mode open.
 func (a *App) submitEdit(rawValue, translated string) tea.Cmd {
 	if strings.TrimSpace(rawValue) == "" {
@@ -4335,7 +4336,7 @@ func (a *App) submitEdit(rawValue, translated string) tea.Cmd {
 			return editEmptyToastMsg{}
 		}
 	}
-	edit := EditMessageMsg{
+	edit := editRequest{
 		ChannelID: a.editing.ChannelID(),
 		TS:        a.editing.TS(),
 		NewText:   translated,
@@ -4347,7 +4348,7 @@ func (a *App) submitEdit(rawValue, translated string) tea.Cmd {
 		edit.ThreadTS = a.threadPanel.ThreadTS()
 	}
 	a.cancelEdit()
-	return func() tea.Msg { return edit }
+	return a.beginEdit(edit)
 }
 
 // reopenEdit reopens a failed edit on its message, with the text as

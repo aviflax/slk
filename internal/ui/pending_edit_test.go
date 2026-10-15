@@ -98,9 +98,7 @@ func typeEdit(t *testing.T, a *App, panel Panel, ts, typed string) tea.Cmd {
 		c = &a.threadCompose
 	}
 	c.SetValue(typed)
-	edit := deliveredMsgs[EditMessageMsg](t, pressEnter(a))[0]
-	_, cmd := a.Update(edit)
-	return cmd
+	return pressEnter(a)
 }
 
 // editFrom is typeEdit for an edit sent at once, and returns the
@@ -275,7 +273,7 @@ func TestPendingEdit_FailureAfterMovingOnGivesDraft(t *testing.T) {
 				case "deleted elsewhere":
 					a.Update(WSMessageDeletedMsg{ChannelID: "C1", TS: "1.000000"})
 				case "delete pending":
-					a.Update(DeleteMessageMsg{ChannelID: "C1", TS: "1.000000"})
+					a.beginDelete("C1", "1.000000")
 				case "not found":
 					res.NotFound = true
 				}

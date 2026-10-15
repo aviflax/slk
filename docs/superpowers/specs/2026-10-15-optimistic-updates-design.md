@@ -283,11 +283,13 @@ func (a *App) giveTextBack(o commandOrigin) (copyCmd tea.Cmd, inComposer, onClip
 
 The flow for a send or reply:
 
-- **Begin** (`reduceSendMessage`, `SendThreadReplyMsg`): mint the id,
+- **Begin** (`beginSend`, `beginReply`): mint the id,
   `BeginInsert` (always, even when no pane shows the placeholder),
   `InsertLocal` into the sinks, and wrap the service call in
-  `stampLocalTS`. `SendMessageMsg` / `SendThreadReplyMsg` carry `TeamID`
-  and `Typed`, set by the composer's Enter paths.
+  `stampLocalTS`. The composer's Enter calls them directly, in the
+  Update of that key, with a `sendRequest` / `replyRequest` carrying
+  `TeamID` and `Typed`; they return only the service command. See
+  "Same Update as the key" below.
 - **Echo** (`reduceNewMessage`, after the edit-echo branch and the
   `IsSelfSent` drop): nothing in an echo says which send it belongs to.
   The user may have two sends in flight in one conversation (their
@@ -362,9 +364,10 @@ the rows a pending delete holds.
 
 The flow for an edit:
 
-- **Begin** (`reduceEditMessage`): `submitEdit` closes the editor at
+- **Begin** (`beginEdit`): `submitEdit` closes the editor at
   Enter (restoring the stashed draft, as a send leaves insert mode) and
-  puts `Typed`, `TeamID`, `Panel` and `ThreadTS` on `EditMessageMsg`.
+  calls `beginEdit` with an `editRequest` carrying `Typed`, `TeamID`,
+  `Panel` and `ThreadTS`.
   The edit's body is shown (`showBody`) and `BeginEdit` records it.
 - **One in flight**: per message, at most one chat.update is in flight.
   `BeginEdit` sends the edit at once when none is; otherwise it waits,
@@ -433,7 +436,7 @@ model below, by name.
 
 The flow for a delete:
 
-- **Begin** (`DeleteMessageMsg`, after the confirm prompt): `removeFrom`
+- **Begin** (`beginDelete`, run by the confirm prompt's yes): `removeFrom`
   takes the row out of `shownSinks`, and `BeginDelete` keeps what each
   pane removed, with where it left the cursor.
 - **Meanwhile**: `showBody` writes edits and echoes of the message into
@@ -475,6 +478,30 @@ Kept pessimistic: the thread panel of a deleted parent closes only once
 Slack confirms, since a closed panel cannot be put back as it was; and
 parent reply counts do not change on a reply's delete, neither
 optimistically nor on the echo, as before.
+
+### Same Update as the key
+
+A user's optimistic action is applied in the Update of the key that
+starts it, not through a message sent back by a command. Between a
+command's message and the key before it, the runtime may process
+other keys: when Enter returned a `SendMessageMsg` for the reducer to
+apply later, `Enter D` opened "Delete message?" on the message selected
+before the send, and `Enter E` edited it. So:
+
+- Enter in the channel and thread composers calls `beginSend` /
+  `beginReply`, and `submitEdit` calls `beginEdit`, before returning.
+  The placeholder (selected, since a pane follows its newest row) or
+  the edited body is on screen when the next key is read.
+- The delete prompt is opened with `openConfirmPromptNow`: its action
+  runs in the Update of the key or click that confirms
+  (`confirmprompt.Model.Confirmed`, checked in `afterConfirmPrompt`),
+  so the row is gone before the next key.
+- Reaction toggles (keys, picker, pill clicks) already patched the row
+  synchronously. Mark unread and forward show nothing before Slack
+  answers, so they have no gap.
+
+`same_tick_test.go` presses Enter then D, E or r, and y then D, back to
+back through Update with no command run in between.
 
 ### Reloads (`pending_view.go`)
 
@@ -532,9 +559,9 @@ history or a link. The guards:
   clicks), the reaction picker's result, `copyPermalinkOfSelected`,
   `beginForwardOfSelected`, `saveThreadToFile` (while any reply is
   sending), `setMark`, `openThreadForSelectedMessage` (Enter and
-  click), and the `EditMessageMsg`, `DeleteMessageMsg` and
+  click), `beginEdit`, `beginDelete` and the
   `MarkUnreadMsg` reducer arms. A pane's append ends reaction
-  navigation, which runs before the key guard. The `EditMessageMsg`
+  navigation, which runs before the key guard. The `beginEdit`
   refusal gives the text back (`giveTextBack`) and reports it as a
   failed edit, "the message is still sending", with the clipboard note
   when the text went there.

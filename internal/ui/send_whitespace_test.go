@@ -40,12 +40,7 @@ func TestComposerWhitespaceReachesSendUnchanged(t *testing.T) {
 		t.Fatalf("compose = %q, want %q", got, want)
 	}
 
-	sent := deliveredMsgs[SendMessageMsg](t, pressEnter(a))[0]
-	if sent.Text != want {
-		t.Errorf("SendMessageMsg.Text = %q, want %q", sent.Text, want)
-	}
-	_, cmd := a.Update(sent)
-	got := deliveredMsgs[whitespaceSentMsg](t, cmd)[0]
+	got := deliveredMsgs[whitespaceSentMsg](t, pressEnter(a))[0]
 	if got.text != want {
 		t.Errorf("MessageService.Send text = %q, want %q", got.text, want)
 	}

@@ -40,7 +40,7 @@ func arriveAndFlush(t *testing.T, app *App, m any) {
 func TestReadFloor_ReleasedEchoNeverMarksBackward(t *testing.T) {
 	t.Run("channel", func(t *testing.T) {
 		app, calls := floorApp(t)
-		app.Update(SendMessageMsg{ChannelID: "C1", Text: "mine"})
+		app.beginSend(sendRequest{ChannelID: "C1", Text: "mine"})
 		rows := app.messagepane.Messages()
 		local := rows[len(rows)-1].TS
 		arriveAndFlush(t, app, echo("C1", "100.000000", "", "from my phone"))
@@ -56,7 +56,7 @@ func TestReadFloor_ReleasedEchoNeverMarksBackward(t *testing.T) {
 	})
 	t.Run("thread", func(t *testing.T) {
 		app, calls := floorApp(t)
-		app.Update(SendThreadReplyMsg{ChannelID: "C1", ThreadTS: "5.000000", Text: "mine"})
+		app.beginReply(replyRequest{ChannelID: "C1", ThreadTS: "5.000000", Text: "mine"})
 		local := app.threadPanel.Replies()[0].TS
 		arriveAndFlush(t, app, echo("C1", "100.000000", "5.000000", "from my phone"))
 		arriveAndFlush(t, app, NewMessageMsg{ChannelID: "C1", Message: messages.MessageItem{TS: "102.000000", ThreadTS: "5.000000", UserID: "UOTHER", Text: "other"}})

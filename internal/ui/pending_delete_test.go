@@ -57,11 +57,10 @@ func deleteFrom(t *testing.T, a *App, panel Panel, ts string) MessageDeletedMsg 
 		a.messagepane.SelectByTS(ts)
 	}
 	_ = a.beginDeleteOfSelected()
-	del := deliveredMsgs[DeleteMessageMsg](t, a.handleConfirmMode(tea.KeyPressMsg{Code: 'y', Text: "y"}))[0]
-	if del.TS != ts {
-		t.Fatalf("setup: deleting %s, want %s", del.TS, ts)
+	cmd := a.handleConfirmMode(tea.KeyPressMsg{Code: 'y', Text: "y"})
+	if !a.pendingOps.DeletePending("C1", ts) {
+		t.Fatalf("setup: no delete of %s began", ts)
 	}
-	_, cmd := a.Update(del)
 	return deliveredMsgs[MessageDeletedMsg](t, cmd)[0]
 }
 

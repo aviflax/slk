@@ -47,9 +47,20 @@ func (a *App) prepareConfirmPrompt() {
 
 // openConfirmPrompt raises the prompt and switches to ModeConfirm.
 func (a *App) openConfirmPrompt(title, body string, onConfirm confirmprompt.ConfirmFunc) {
+	a.confirmApply = nil
 	a.prepareConfirmPrompt()
 	a.confirmPrompt.Open(title, body, onConfirm)
 	a.SetMode(ModeConfirm)
+}
+
+// openConfirmPromptNow raises a yes/no prompt whose confirmation runs
+// apply in the Update of the key or click that confirms, not as a
+// command the runtime runs later: a key pressed straight after the
+// confirmation then sees what apply did. A delete uses it, so the next
+// key cannot act on the message being deleted.
+func (a *App) openConfirmPromptNow(title, body string, apply func() tea.Cmd) {
+	a.openConfirmPrompt(title, body, nil)
+	a.confirmApply = apply
 }
 
 // confirmPromptOverlay composites the prompt over background, clamped to

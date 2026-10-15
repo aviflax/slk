@@ -44,7 +44,7 @@ func TestFailedTextGoesToClipboardWhenComposerIsTaken(t *testing.T) {
 	t.Run("send", func(t *testing.T) {
 		a := typedApp(t)
 		copied := clipboardLog(a)
-		_, _, local := sendFromComposer(t, a, PanelMessages, "first")
+		_, local := sendFromComposer(t, a, PanelMessages, "first")
 		a.compose.SetValue("second")
 		_, cmd := a.Update(MessageSendFailedMsg{ChannelID: "C1", LocalTS: local, Reason: "boom"})
 		if toast := shownToast(t, a, cmd); !strings.Contains(toast, "Send failed: boom") || !strings.Contains(toast, "clipboard") {
@@ -57,7 +57,7 @@ func TestFailedTextGoesToClipboardWhenComposerIsTaken(t *testing.T) {
 	t.Run("reply", func(t *testing.T) {
 		a := typedApp(t)
 		copied := clipboardLog(a)
-		_, _, local := sendFromComposer(t, a, PanelThread, "first")
+		_, local := sendFromComposer(t, a, PanelThread, "first")
 		a.threadCompose.SetValue("second")
 		_, cmd := a.Update(ThreadReplySendFailedMsg{ChannelID: "C1", ThreadTS: "5.000000", LocalTS: local, Reason: "boom"})
 		if toast := shownToast(t, a, cmd); !strings.Contains(toast, "clipboard") {
@@ -90,7 +90,7 @@ func TestFailedTextGoesToClipboardWhenComposerIsTaken(t *testing.T) {
 func TestFailedTextGivenBackSkipsClipboard(t *testing.T) {
 	a := typedApp(t)
 	copied := clipboardLog(a)
-	_, _, local := sendFromComposer(t, a, PanelMessages, "first")
+	_, local := sendFromComposer(t, a, PanelMessages, "first")
 	_, cmd := a.Update(MessageSendFailedMsg{ChannelID: "C1", LocalTS: local, Reason: "boom"})
 	if toast := shownToast(t, a, cmd); strings.Contains(toast, "clipboard") {
 		t.Errorf("toast = %q, want no clipboard mention", toast)
@@ -105,8 +105,8 @@ func TestFailedTextGivenBackSkipsClipboard(t *testing.T) {
 func TestFailedBroadcastReplyRestoresToggle(t *testing.T) {
 	a := typedApp(t)
 	a.threadCompose.SetBroadcast(true)
-	_, sent, local := sendFromComposer(t, a, PanelThread, "to everyone")
-	if !sent.Broadcast {
+	sent, local := sendFromComposer(t, a, PanelThread, "to everyone")
+	if !sent.broadcast {
 		t.Fatal("setup: the reply was not a broadcast")
 	}
 	a.threadCompose.SetBroadcast(false)
@@ -123,7 +123,7 @@ func failSends(t *testing.T, a *App, texts ...string) string {
 	t.Helper()
 	locals := make([]string, len(texts))
 	for i, text := range texts {
-		_, _, locals[i] = sendFromComposer(t, a, PanelMessages, text)
+		_, locals[i] = sendFromComposer(t, a, PanelMessages, text)
 	}
 	toast := ""
 	for _, local := range locals {
@@ -158,9 +158,9 @@ func TestUnsentTextLeavesWhenSentAgain(t *testing.T) {
 	copied := clipboardLog(a)
 	failSends(t, a, "one", "two", "three")
 	a.compose.SetValue("")
-	_, _, local := sendFromComposer(t, a, PanelMessages, "two")
+	_, local := sendFromComposer(t, a, PanelMessages, "two")
 	a.Update(MessageSentMsg{ChannelID: "C1", LocalTS: local, Message: messages.MessageItem{TS: "20.000000", UserID: "USELF", Text: "two"}})
-	_, _, local = sendFromComposer(t, a, PanelMessages, "four")
+	_, local = sendFromComposer(t, a, PanelMessages, "four")
 	a.compose.SetValue("busy")
 	_, cmd := a.Update(MessageSendFailedMsg{ChannelID: "C1", LocalTS: local, Reason: "boom"})
 	toast := shownToast(t, a, cmd)
@@ -182,9 +182,9 @@ func TestUnsentTextLeavesWhenASentMessageContainsIt(t *testing.T) {
 	failSends(t, a, "one", "two", "three")
 	a.compose.SetValue("")
 	bundle := "two\n\nthree"
-	_, _, local := sendFromComposer(t, a, PanelMessages, "fyi: "+bundle)
+	_, local := sendFromComposer(t, a, PanelMessages, "fyi: "+bundle)
 	a.Update(MessageSentMsg{ChannelID: "C1", LocalTS: local, Message: messages.MessageItem{TS: "20.000000", UserID: "USELF", Text: bundle}})
-	_, _, local = sendFromComposer(t, a, PanelMessages, "four")
+	_, local = sendFromComposer(t, a, PanelMessages, "four")
 	a.compose.SetValue("busy")
 	_, cmd := a.Update(MessageSendFailedMsg{ChannelID: "C1", LocalTS: local, Reason: "boom"})
 	toast := shownToast(t, a, cmd)
@@ -223,7 +223,7 @@ func TestPlaceholderEditRefusalSaysWhereTheTextWent(t *testing.T) {
 	a := typedApp(t)
 	copied := clipboardLog(a)
 	a.compose.SetValue("newer draft")
-	_, cmd := a.Update(EditMessageMsg{ChannelID: "C1", TS: "local:1", NewText: "edited", Typed: "edited", TeamID: "T1"})
+	cmd := a.beginEdit(editRequest{ChannelID: "C1", TS: "local:1", NewText: "edited", Typed: "edited", TeamID: "T1"})
 	toast := shownToast(t, a, cmd)
 	if len(*copied) != 1 || (*copied)[0] != "edited" {
 		t.Fatalf("clipboard = %q, want the edit's text", *copied)

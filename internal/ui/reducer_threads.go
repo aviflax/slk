@@ -37,8 +37,8 @@
 //	                              one.
 //	threadsListFetchMsg         - that window closing: run the refresh
 //	                              fetch the window's messages asked for.
-//	SendThreadReplyMsg          - user sent a reply: optimistic
-//	                              placeholder + chat.postMessage call.
+//	(the reply itself begins in the Update of the Enter that sends it,
+//	beginReply, so the next key already sees its placeholder)
 //	ThreadReplySentMsg          - reply landed: swap placeholder for
 //	                              authoritative message, bump parent
 //	                              reply count, mark threads list dirty.
@@ -325,49 +325,10 @@ var reduceThreads reducerFunc = func(a *App, msg tea.Msg) (tea.Cmd, bool) {
 		team := ids.TeamID(a.activeTeamID)
 		return func() tea.Msg { return threads.ListFetch(team) }, true
 
-	case SendThreadReplyMsg:
-		// Instant-display: append an optimistic placeholder to the
-		// thread panel immediately, before the chat.postMessage HTTP
-		// round-trip. Mirrors the SendMessageMsg path; see there for
-		// the LocalTS / swap-or-remove contract and the
-		// mrkdwn.Convert rationale.
-		localTS := a.pendingOps.NextLocalTS()
-		ins := pendingInsert{
-			localTS: localTS, channelID: m.ChannelID, threadTS: m.ThreadTS, broadcast: m.Broadcast,
-			body:     messages.TypedBody(m.Text),
-			postTeam: a.activeTeamID, teamID: m.TeamID, typed: m.Typed,
-		}
-		ins.row, ins.begun = a.localRow(localTS, ins.body, m.ThreadTS, ""), a.now()
-		a.pendingOps.BeginInsert(ins)
-		sinks := a.replySinksFor(m.ChannelID, m.ThreadTS, m.Broadcast)
-		if sinks.thread != nil {
-			sinks.thread.InsertLocal(cloneMessageItem(ins.row))
-		}
-		// Broadcast ("Also send to #channel"): the reply will also
-		// land in the parent channel feed as a thread_broadcast row.
-		// The echo is held while the reply is pending and dropped
-		// once ThreadReplySentMsg records its TS (pendingOps), so the only way the feed
-		// shows the row promptly is this optimistic add + the swap
-		// in ThreadReplySentMsg below.
-		// sinks.channel is empty unless m.Broadcast.
-		for _, s := range sinks.channel {
-			row := cloneMessageItem(ins.row)
-			row.Subtype = "thread_broadcast"
-			s.InsertLocal(row)
-		}
-		threads := a.threads
-		chID := ids.ChannelID(m.ChannelID)
-		ts := ids.ThreadTS(m.ThreadTS)
-		text := m.Text
-		broadcast := m.Broadcast
-		return stampLocalTS(ins, func() tea.Msg {
-			return threads.SendReply(chID, ts, text, broadcast)
-		}), true
-
 	case ThreadReplySentMsg:
 		// chat.postMessage for the thread reply landed. If a
 		// "local:..." placeholder is in the thread panel from the
-		// instant-display path (SendThreadReplyMsg above), swap it
+		// instant-display path (beginReply), swap it
 		// for the authoritative message (rowSink.Settle); otherwise
 		// it is upserted. Echoes held while the reply was pending
 		// are released after it.
@@ -399,7 +360,7 @@ var reduceThreads reducerFunc = func(a *App, msg tea.Msg) (tea.Cmd, bool) {
 		//
 		// Broadcast: also land the authoritative message in the
 		// channel feed, swapping the optimistic thread_broadcast
-		// placeholder added in SendThreadReplyMsg. Mirrors
+		// placeholder added in beginReply. Mirrors
 		// MessageSentMsg's swap-or-upsert contract.
 		if ok {
 			a.delivered(ins.typed)
@@ -505,4 +466,62 @@ func (a *App) markOpenThreadRead(channelID, threadTS string, replies []messages.
 		a.sidebar.SetThreadsUnreadCount(a.threadsView.UnreadCount())
 	}
 	return cmd
+}
+
+// replyRequest is a thread reply the user sent from the thread composer.
+type replyRequest struct {
+	ChannelID string
+	ThreadTS  string
+	Text      string // mentions translated to wire form
+	// Broadcast is Slack's "Also send to #channel": the reply is
+	// additionally posted to the parent channel feed
+	// (reply_broadcast=true; Slack echoes it with the
+	// thread_broadcast subtype).
+	Broadcast bool
+	// TeamID and Typed are as in sendRequest.
+	TeamID string
+	Typed  string
+}
+
+// beginReply starts the reply m, as beginSend starts a send: the
+// placeholder shows before it returns, and the command it returns is
+// the chat.postMessage call, whose result is ThreadReplySentMsg or
+// ThreadReplySendFailedMsg.
+func (a *App) beginReply(m replyRequest) tea.Cmd {
+	// Instant-display: append an optimistic placeholder to the
+	// thread panel immediately, before the chat.postMessage HTTP
+	// round-trip. Mirrors beginSend; see there for the LocalTS /
+	// swap-or-remove contract and the mrkdwn.Convert rationale.
+	localTS := a.pendingOps.NextLocalTS()
+	ins := pendingInsert{
+		localTS: localTS, channelID: m.ChannelID, threadTS: m.ThreadTS, broadcast: m.Broadcast,
+		body:     messages.TypedBody(m.Text),
+		postTeam: a.activeTeamID, teamID: m.TeamID, typed: m.Typed,
+	}
+	ins.row, ins.begun = a.localRow(localTS, ins.body, m.ThreadTS, ""), a.now()
+	a.pendingOps.BeginInsert(ins)
+	sinks := a.replySinksFor(m.ChannelID, m.ThreadTS, m.Broadcast)
+	if sinks.thread != nil {
+		sinks.thread.InsertLocal(cloneMessageItem(ins.row))
+	}
+	// Broadcast ("Also send to #channel"): the reply will also
+	// land in the parent channel feed as a thread_broadcast row.
+	// The echo is held while the reply is pending and dropped
+	// once ThreadReplySentMsg records its TS (pendingOps), so the only way the feed
+	// shows the row promptly is this optimistic add + the swap
+	// in ThreadReplySentMsg.
+	// sinks.channel is empty unless m.Broadcast.
+	for _, s := range sinks.channel {
+		row := cloneMessageItem(ins.row)
+		row.Subtype = "thread_broadcast"
+		s.InsertLocal(row)
+	}
+	threads := a.threads
+	chID := ids.ChannelID(m.ChannelID)
+	ts := ids.ThreadTS(m.ThreadTS)
+	text := m.Text
+	broadcast := m.Broadcast
+	return stampLocalTS(ins, func() tea.Msg {
+		return threads.SendReply(chID, ts, text, broadcast)
+	})
 }

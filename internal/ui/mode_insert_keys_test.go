@@ -48,7 +48,7 @@ import (
 // ---------------------------------------------------------------------
 
 // insertOpts is the shared bundle. An active channel is required by the
-// send path (SendMessageMsg carries it) and by typingOut.
+// send path (sendRequest carries it) and by typingOut.
 func insertOpts() []testOpt {
 	return []testOpt{
 		withChannels(
@@ -919,10 +919,8 @@ func TestInsertModeKeys(t *testing.T) {
 				if a.compose.IsMentionActive() {
 					t.Error("mention picker still active after enter")
 				}
-				if cmd != nil {
-					if _, ok := cmd().(SendMessageMsg); ok {
-						t.Error("enter sent a message while the mention picker was open")
-					}
+				if n := len(a.pendingOps.inserts); n != 0 {
+					t.Error("enter sent a message while the mention picker was open")
 				}
 			},
 		},
@@ -944,10 +942,8 @@ func TestInsertModeKeys(t *testing.T) {
 				if got := a.threadCompose.Value(); got != "@alice " {
 					t.Errorf("thread compose value = %q, want %q", got, "@alice ")
 				}
-				if cmd != nil {
-					if _, ok := cmd().(SendThreadReplyMsg); ok {
-						t.Error("enter sent a thread reply while the mention picker was open")
-					}
+				if n := len(a.pendingOps.inserts); n != 0 {
+					t.Error("enter sent a thread reply while the mention picker was open")
 				}
 			},
 		},
@@ -1054,14 +1050,10 @@ func TestInsertModeKeys(t *testing.T) {
 			wantMode: ModeNormal,
 			assert: func(t *testing.T, a *App, cmd tea.Cmd) {
 				if cmd == nil {
-					t.Fatal("cmd = nil, want SendMessageMsg: alt+enter sends today")
+					t.Fatal("cmd = nil, want the send: alt+enter sends today")
 				}
-				sent, ok := cmd().(SendMessageMsg)
-				if !ok {
-					t.Fatalf("cmd() = %T, want SendMessageMsg", cmd())
-				}
-				if sent.ChannelID != "C1" || sent.Text != "hello" {
-					t.Errorf("SendMessageMsg = %+v, want {ChannelID:C1 Text:hello}", sent)
+				if sent := lastInsert(t, a); sent.channelID != "C1" || sent.threadTS != "" || sent.typed != "hello" {
+					t.Errorf("send begun = %+v, want hello to C1", sent)
 				}
 				// No "\n" anywhere: the compose was Reset by the send
 				// path, not extended by a newline.
@@ -1089,14 +1081,10 @@ func TestInsertModeKeys(t *testing.T) {
 			wantMode: ModeNormal,
 			assert: func(t *testing.T, a *App, cmd tea.Cmd) {
 				if cmd == nil {
-					t.Fatal("cmd = nil, want SendThreadReplyMsg: alt+enter sends today")
+					t.Fatal("cmd = nil, want the reply: alt+enter sends today")
 				}
-				reply, ok := cmd().(SendThreadReplyMsg)
-				if !ok {
-					t.Fatalf("cmd() = %T, want SendThreadReplyMsg", cmd())
-				}
-				if reply.ChannelID != "C1" || reply.ThreadTS != "10.0" || reply.Text != "reply" {
-					t.Errorf("SendThreadReplyMsg = %+v, want {ChannelID:C1 ThreadTS:10.0 Text:reply}", reply)
+				if reply := lastInsert(t, a); reply.channelID != "C1" || reply.threadTS != "10.0" || reply.typed != "reply" {
+					t.Errorf("reply begun = %+v, want reply to thread 10.0 of C1", reply)
 				}
 				if got := a.threadCompose.Value(); got != "" {
 					t.Errorf("thread compose value = %q, want empty (sent and reset, not a newline)", got)
@@ -1132,14 +1120,10 @@ func TestInsertModeKeys(t *testing.T) {
 			wantMode: ModeNormal,
 			assert: func(t *testing.T, a *App, cmd tea.Cmd) {
 				if cmd == nil {
-					t.Fatal("cmd = nil, want EditMessageMsg")
+					t.Fatal("cmd = nil, want the edit's chat.update")
 				}
-				edit, ok := cmd().(EditMessageMsg)
-				if !ok {
-					t.Fatalf("cmd() = %T, want EditMessageMsg", cmd())
-				}
-				if edit.ChannelID != "C1" || edit.TS != "2.0" || edit.NewText != "edited reply" {
-					t.Errorf("EditMessageMsg = %+v, want {ChannelID:C1 TS:2.0 NewText:\"edited reply\"}", edit)
+				if !a.pendingOps.EditPending("C1", "2.0") {
+					t.Error("no edit of 2.0 pending, want it begun at Enter")
 				}
 				// The edit shows at once, so the editor closes on
 				// submit and the stashed draft (empty here) is back.

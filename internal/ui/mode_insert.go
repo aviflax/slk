@@ -228,16 +228,16 @@ func handleInsertMode(a *App, msg tea.KeyMsg) tea.Cmd {
 				channelID := a.threadPanel.ChannelID()
 				teamID := a.activeTeamID
 				a.exitInsertAfterSend()
-				send := func() tea.Msg {
-					return SendThreadReplyMsg{
-						ChannelID: channelID,
-						ThreadTS:  threadTS,
-						Text:      text,
-						Broadcast: broadcast,
-						TeamID:    teamID,
-						Typed:     typed,
-					}
-				}
+				// Begun here, not through a message: the placeholder
+				// is selected before the next key is read.
+				send := a.beginReply(replyRequest{
+					ChannelID: channelID,
+					ThreadTS:  threadTS,
+					Text:      text,
+					Broadcast: broadcast,
+					TeamID:    teamID,
+					Typed:     typed,
+				})
 				return tea.Batch(send, a.tryOpenActionPrompt())
 			}
 			return nil
@@ -279,20 +279,19 @@ func handleInsertMode(a *App, msg tea.KeyMsg) tea.Cmd {
 		typed := a.compose.Value()
 		if typed != "" {
 			text := a.compose.TranslateMentionsForSend(typed)
-			// Capture the target conversation before the reset/closure:
-			// a.activeChannelID may mutate before the deferred cmd
-			// runs, so the send must use this local snapshot.
 			channelID, teamID := a.activeChannelID, a.activeTeamID
 			a.compose.Reset()
 			a.exitInsertAfterSend()
-			send := func() tea.Msg {
-				return SendMessageMsg{
-					ChannelID: channelID,
-					Text:      text,
-					TeamID:    teamID,
-					Typed:     typed,
-				}
-			}
+			// Begun here, not through a message: the placeholder is
+			// selected before the next key is read, so a key pressed
+			// straight after Enter cannot act on the message selected
+			// before it.
+			send := a.beginSend(sendRequest{
+				ChannelID: channelID,
+				Text:      text,
+				TeamID:    teamID,
+				Typed:     typed,
+			})
 			return tea.Batch(send, a.tryOpenActionPrompt())
 		}
 		return nil

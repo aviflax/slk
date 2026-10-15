@@ -152,7 +152,7 @@ func TestForwardMessageCompletionReconcilesSuppressedEcho(t *testing.T) {
 			completion := messageForwardedMsg{teamID: "T1", channelID: "C1", destination: "#general", message: item}
 			var local string
 			if order == "echo held by a pending send" {
-				a.Update(SendMessageMsg{ChannelID: "C1", Text: "concurrent"})
+				a.beginSend(sendRequest{ChannelID: "C1", Text: "concurrent"})
 				local = a.messagepane.Messages()[0].TS
 			}
 			if order == "different workspace" {

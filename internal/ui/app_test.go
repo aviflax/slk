@@ -242,13 +242,9 @@ func TestHandleInsertMode_ShiftEnterInsertsNewline(t *testing.T) {
 
 	cmd := app.handleInsertMode(tea.KeyPressMsg{Code: tea.KeyEnter, Mod: tea.ModShift})
 
-	if cmd != nil {
-		// Anything non-nil here likely means a SendMessageMsg was queued.
-		if msg := cmd(); msg != nil {
-			if _, ok := msg.(SendMessageMsg); ok {
-				t.Fatalf("Shift+Enter should not send the message")
-			}
-		}
+	_ = cmd
+	if n := len(app.pendingOps.inserts); n != 0 {
+		t.Fatalf("Shift+Enter began %d sends, want none", n)
 	}
 	val := app.compose.Value()
 	if val == "" {
@@ -295,9 +291,8 @@ func TestHandleInsertMode_PlainEnterSends(t *testing.T) {
 	if cmd == nil {
 		t.Fatalf("plain Enter with text should return a send cmd")
 	}
-	msg := cmd()
-	if _, ok := msg.(SendMessageMsg); !ok {
-		t.Fatalf("expected SendMessageMsg, got %T", msg)
+	if ins := app.pendingOps.inserts; len(ins) != 1 || ins[0].channelID != "C1" || ins[0].typed != "hello" {
+		t.Fatalf("pending sends = %+v, want the send of hello to C1 begun at Enter", ins)
 	}
 	if app.compose.Value() != "" {
 		t.Fatalf("expected compose to be reset after send, got %q", app.compose.Value())
@@ -338,8 +333,8 @@ func TestHandleInsertMode_ThreadReplyEnterReturnsToNormalMode(t *testing.T) {
 	if cmd == nil {
 		t.Fatalf("plain Enter with text should return a send cmd")
 	}
-	if _, ok := cmd().(SendThreadReplyMsg); !ok {
-		t.Fatalf("expected SendThreadReplyMsg, got %T", cmd())
+	if ins := app.pendingOps.inserts; len(ins) != 1 || ins[0].threadTS != "P1" {
+		t.Fatalf("pending sends = %+v, want the reply to P1 begun at Enter", ins)
 	}
 	if app.mode != ModeNormal {
 		t.Errorf("after thread reply, mode = %v, want ModeNormal", app.mode)
@@ -416,8 +411,8 @@ func TestHandleInsertMode_EditSubmitLeavesInsert(t *testing.T) {
 	if cmd == nil {
 		t.Fatal("expected submitEdit cmd")
 	}
-	if _, ok := cmd().(EditMessageMsg); !ok {
-		t.Fatalf("expected EditMessageMsg, got %T", cmd())
+	if !app.pendingOps.EditPending("C1", "1.0") {
+		t.Fatal("no edit of 1.0 pending after Enter, want it begun at Enter")
 	}
 	if app.mode != ModeNormal || app.editing.IsActive() {
 		t.Errorf("after edit submit mode=%v editing=%v, want ModeNormal and the editor closed", app.mode, app.editing.IsActive())
@@ -1201,8 +1196,8 @@ func TestApp_ThreadReplySentOptimisticallyAddsToThreadPanel(t *testing.T) {
 }
 
 // TestSendThreadReply_InstantDisplay asserts that a thread reply
-// appears in the thread panel the moment SendThreadReplyMsg is
-// dispatched, before any HTTP round-trip. The placeholder is
+// appears in the thread panel the moment the reply begins (beginReply), before
+// any HTTP round-trip. The placeholder is
 // swapped in place when ThreadReplySentMsg lands.
 func TestSendThreadReply_InstantDisplay(t *testing.T) {
 	app := NewApp()
@@ -1212,7 +1207,7 @@ func TestSendThreadReply_InstantDisplay(t *testing.T) {
 	app.threadPanel.SetThread(parent, nil, "C1", "1700000000.000100")
 	app.threadVisible = true
 
-	app.Update(SendThreadReplyMsg{
+	app.beginReply(replyRequest{
 		ChannelID: "C1",
 		ThreadTS:  "1700000000.000100",
 		Text:      "instant reply",
@@ -1695,24 +1690,32 @@ func TestSubmitEdit_EmptyText_ReturnsEmptyToast(t *testing.T) {
 	}
 }
 
-func TestSubmitEdit_NonEmptyText_EmitsEditMessageMsg(t *testing.T) {
+// submitEdit begins the edit before it returns: the edit is pending
+// and its command is the chat.update call.
+func TestSubmitEdit_NonEmptyText_BeginsEdit(t *testing.T) {
 	app := NewApp()
 	app.editing.active = true
 	app.editing.channelID = "C1"
 	app.editing.ts = "1.0"
 	app.editing.panel = PanelMessages
+	var edited []string
+	app.SetMessageService(core.NewMessageService(core.MessageServiceFuncs{
+		Edit: func(ch ids.ChannelID, ts ids.MessageTS, text string) core.Msg {
+			edited = append(edited, string(ch)+"/"+string(ts)+"/"+text)
+			return MessageEditedMsg{ChannelID: string(ch), TS: string(ts)}
+		},
+	}))
 
 	cmd := app.submitEdit("hello", "hello")
 	if cmd == nil {
 		t.Fatal("expected non-nil cmd")
 	}
-	res := cmd()
-	em, ok := res.(EditMessageMsg)
-	if !ok {
-		t.Fatalf("expected EditMessageMsg, got %T", res)
+	if !app.pendingOps.EditPending("C1", "1.0") {
+		t.Error("no edit of 1.0 pending after submitEdit")
 	}
-	if em.ChannelID != "C1" || em.TS != "1.0" || em.NewText != "hello" {
-		t.Errorf("unexpected edit msg: %+v", em)
+	cmd()
+	if len(edited) != 1 || edited[0] != "C1/1.0/hello" {
+		t.Errorf("chat.update calls = %q, want [C1/1.0/hello]", edited)
 	}
 }
 
@@ -1786,24 +1789,18 @@ func TestMessageEditedMsg_StaleResultDoesNotClobberCurrentEdit(t *testing.T) {
 	}
 }
 
-func TestSubmitEdit_ThreadPanel_EmitsEditMessageMsg(t *testing.T) {
+func TestSubmitEdit_ThreadPanel_BeginsEdit(t *testing.T) {
 	app := NewApp()
 	app.editing.active = true
 	app.editing.channelID = "C1"
 	app.editing.ts = "R1"
 	app.editing.panel = PanelThread
 
-	cmd := app.submitEdit("hello thread", "hello thread")
-	if cmd == nil {
+	if cmd := app.submitEdit("hello thread", "hello thread"); cmd == nil {
 		t.Fatal("expected non-nil cmd")
 	}
-	res := cmd()
-	em, ok := res.(EditMessageMsg)
-	if !ok {
-		t.Fatalf("expected EditMessageMsg, got %T", res)
-	}
-	if em.ChannelID != "C1" || em.TS != "R1" || em.NewText != "hello thread" {
-		t.Errorf("unexpected edit msg: %+v", em)
+	if !app.pendingOps.EditPending("C1", "R1") {
+		t.Error("no edit of R1 pending after submitEdit")
 	}
 }
 
@@ -1850,7 +1847,9 @@ func TestBeginDeleteOfSelected_Own_OpensPrompt(t *testing.T) {
 	}
 }
 
-func TestBeginDeleteOfSelected_ConfirmEmitsDeleteMessageMsg(t *testing.T) {
+// Confirming begins the delete in the same call: the row is gone and
+// the delete pending before the confirm's command runs.
+func TestBeginDeleteOfSelected_ConfirmBeginsDelete(t *testing.T) {
 	app := NewApp()
 	app.activeChannelID = "C1"
 	app.SetCurrentUserID("U_ME")
@@ -1865,13 +1864,11 @@ func TestBeginDeleteOfSelected_ConfirmEmitsDeleteMessageMsg(t *testing.T) {
 	if cmd == nil {
 		t.Fatal("expected non-nil cmd from confirm")
 	}
-	res := cmd()
-	dm, ok := res.(DeleteMessageMsg)
-	if !ok {
-		t.Fatalf("expected DeleteMessageMsg, got %T", res)
+	if !app.pendingOps.DeletePending("C1", "1.0") {
+		t.Error("no delete of 1.0 pending after y")
 	}
-	if dm.ChannelID != "C1" || dm.TS != "1.0" {
-		t.Errorf("unexpected delete msg: %+v", dm)
+	if n := len(app.messagepane.Messages()); n != 0 {
+		t.Errorf("%d rows left after y, want the deleted one gone", n)
 	}
 	if app.confirmPrompt.IsVisible() {
 		t.Error("prompt should be closed after confirm")
@@ -3377,14 +3374,14 @@ func TestSelfSendInFlight_HoldsEarlyWSEcho(t *testing.T) {
 	app.SetCurrentUserID("USELF")
 	app.activeChannelID = "C1"
 
-	// User submits a slk-originated send. SendMessageMsg appends an
+	// User submits a slk-originated send. beginSend appends an
 	// optimistic placeholder (instant-display) AND records the
 	// pending send.
-	app.Update(SendMessageMsg{ChannelID: "C1", Text: "Hello\nWorld"})
+	app.beginSend(sendRequest{ChannelID: "C1", Text: "Hello\nWorld"})
 
 	// Instant-display placeholder is in the pane immediately.
 	if got := len(app.messagepane.Messages()); got != 1 {
-		t.Fatalf("expected 1 optimistic placeholder after SendMessageMsg, got %d", got)
+		t.Fatalf("expected 1 optimistic placeholder after beginSend, got %d", got)
 	}
 	if got := app.messagepane.Messages()[0].Text; got != "Hello\nWorld" {
 		t.Errorf("placeholder Text = %q, want %q", got, "Hello\nWorld")
@@ -3407,7 +3404,7 @@ func TestSelfSendInFlight_HoldsEarlyWSEcho(t *testing.T) {
 	}
 
 	// MessageSentMsg arrives with the converted-mrkdwn text. The
-	// LocalTS field — assigned in the SendMessageMsg handler and
+	// LocalTS field — assigned in beginSend and
 	// threaded through the sender closure — lets the handler swap the
 	// placeholder for the authoritative message in place. The
 	// test simulates that wiring with the placeholder's TS read above.
@@ -3433,7 +3430,7 @@ func TestSelfSendInFlight_HoldsEarlyWSEcho(t *testing.T) {
 
 // TestSendMessage_InstantDisplay asserts the quality-of-life
 // guarantee: the user's message must appear in the active channel
-// pane the moment SendMessageMsg is dispatched — before any HTTP
+// pane the moment beginSend runs — before any HTTP
 // round-trip. The placeholder is replaced in place when MessageSentMsg
 // lands; its position in the list is preserved.
 func TestSendMessage_InstantDisplay(t *testing.T) {
@@ -3442,11 +3439,11 @@ func TestSendMessage_InstantDisplay(t *testing.T) {
 	app.activeChannelID = "C1"
 	app.userNames = map[string]string{"USELF": "you"}
 
-	app.Update(SendMessageMsg{ChannelID: "C1", Text: "hello"})
+	app.beginSend(sendRequest{ChannelID: "C1", Text: "hello"})
 
 	msgs := app.messagepane.Messages()
 	if len(msgs) != 1 {
-		t.Fatalf("instant-display: expected 1 message after SendMessageMsg, got %d", len(msgs))
+		t.Fatalf("instant-display: expected 1 message after beginSend, got %d", len(msgs))
 	}
 	if msgs[0].Text != "hello" {
 		t.Errorf("placeholder Text = %q, want %q", msgs[0].Text, "hello")
@@ -3495,7 +3492,7 @@ func TestSendMessage_InstantDisplayConvertsCommonMarkToSlackMrkdwn(t *testing.T)
 	app.SetCurrentUserID("USELF")
 	app.activeChannelID = "C1"
 
-	app.Update(SendMessageMsg{ChannelID: "C1", Text: "**bold** and _italic_"})
+	app.beginSend(sendRequest{ChannelID: "C1", Text: "**bold** and _italic_"})
 
 	msgs := app.messagepane.Messages()
 	if len(msgs) != 1 {
@@ -3515,7 +3512,7 @@ func TestSendMessage_FailureRollsBackPlaceholder(t *testing.T) {
 	app.SetCurrentUserID("USELF")
 	app.activeChannelID = "C1"
 
-	app.Update(SendMessageMsg{ChannelID: "C1", Text: "oops"})
+	app.beginSend(sendRequest{ChannelID: "C1", Text: "oops"})
 	if got := len(app.messagepane.Messages()); got != 1 {
 		t.Fatalf("setup: expected 1 placeholder, got %d", got)
 	}
@@ -3541,7 +3538,7 @@ func TestSelfSendInFlight_PassesThroughCrossSession(t *testing.T) {
 	app.SetCurrentUserID("USELF")
 	app.activeChannelID = "C1"
 
-	// No SendMessageMsg dispatched here, so no send is pending. A WS
+	// No send begun here, so no send is pending. A WS
 	// echo from the user (e.g., they sent via the official Slack web
 	// client) must still render.
 	app.Update(NewMessageMsg{

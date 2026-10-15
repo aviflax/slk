@@ -60,9 +60,8 @@ func TestStampLocalTS_NilIsFailure(t *testing.T) {
 	a.mode = ModeInsert
 	a.focusedPanel = PanelMessages
 	a.compose.SetValue("hi")
-	send := deliveredMsgs[SendMessageMsg](t, pressEnter(a))[0]
-	_, cmd := a.Update(send)
-	a.Update(cmd())
+	cmd := pressEnter(a)
+	a.Update(deliveredMsgs[MessageSendFailedMsg](t, cmd)[0])
 	wantRows(t, "channel", a.messagepane.Messages(), "1.0=msg-1", "2.0=msg-2", "3.0=msg-3")
 	if got := a.compose.Value(); got != "hi" {
 		t.Errorf("composer = %q, want the typed text back", got)

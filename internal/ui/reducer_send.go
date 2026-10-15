@@ -2,9 +2,12 @@
 //
 // Message-lifecycle reducer for App.Update (Phase 4i).
 //
-// Owns the eleven Update arms that cover the inbound and outbound
-// message lifecycle for channel messages (thread-reply lifecycle
-// lives in reducer_threads.go):
+// Owns the Update arms that cover the inbound and outbound message
+// lifecycle for channel messages (thread-reply lifecycle lives in
+// reducer_threads.go). The user's own sends, edits and deletes begin
+// outside the chain, in the Update of the key that starts them
+// (beginSend, beginEdit, beginDelete), so the next key already sees
+// their effect; only their results arrive here:
 //
 //	NewMessageMsg            - inbound WS event for any channel:
 //	                           edit-echo update, self-send echo
@@ -14,25 +17,16 @@
 //	                           focus-gated read-cursor advance or
 //	                           surfacing the unread dot, and
 //	                           threads-list dirty-bump for replies.
-//	SendMessageMsg           - user send: optimistic placeholder +
-//	                           chat.postMessage call.
 //	MessageSentMsg           - send landed: swap placeholder for
 //	                           authoritative message.
 //	MessageSendFailedMsg     - send failed: roll back placeholder,
 //	                           give the typed text back + fire
 //	                           SendFailed toast.
-//	EditMessageMsg           - user edit: show the new body at
-//	                           once, record a pending edit, and
-//	                           send its chat.update unless one
-//	                           for the message is in flight.
 //	MessageEditedMsg         - edit result: show Slack's state as
 //	                           best known, send the edit waiting
 //	                           behind it, and on a real failure
 //	                           reopen the edit (or give its text
 //	                           back) + fire EditFailed toast.
-//	DeleteMessageMsg         - user delete: remove the message
-//	                           from every pane at once, record a
-//	                           pending delete, chat.delete call.
 //	MessageDeletedMsg        - delete result: on success (or
 //	                           message_not_found) apply it as the
 //	                           echo does; on failure put
@@ -77,9 +71,6 @@ var reduceSend reducerFunc = func(a *App, msg tea.Msg) (tea.Cmd, bool) {
 	case NewMessageMsg:
 		return reduceNewMessage(a, m), true
 
-	case SendMessageMsg:
-		return reduceSendMessage(a, m), true
-
 	case messageForwardedMsg:
 		if m.teamID != a.activeTeamID {
 			return nil, true
@@ -97,7 +88,7 @@ var reduceSend reducerFunc = func(a *App, msg tea.Msg) (tea.Cmd, bool) {
 	case MessageSentMsg:
 		// The chat.postMessage HTTP response landed. Settle (see
 		// rowSink) swaps the "local:..." placeholder from the
-		// instant-display path (SendMessageMsg above) for the
+		// instant-display path (beginSend) for the
 		// authoritative message. With no placeholder (test paths
 		// firing MessageSentMsg directly, or the user navigated
 		// away and back between Enter and the HTTP response) the
@@ -145,30 +136,8 @@ var reduceSend reducerFunc = func(a *App, msg tea.Msg) (tea.Cmd, bool) {
 			return statusbar.SendFailedMsg{Reason: reason, OnClipboard: onClipboard}
 		}, a.releaseHeld(release)), true
 
-	case EditMessageMsg:
-		return reduceEditMessage(a, m), true
-
 	case MessageEditedMsg:
 		return reduceMessageEdited(a, m), true
-
-	case DeleteMessageMsg:
-		if cmd, blocked := a.sendingGuard(m.TS); blocked {
-			return cmd, true
-		}
-		// The message leaves every pane that shows it at once; the
-		// rows are kept to put back if the delete fails. A deleted
-		// thread parent's panel closes only once Slack confirms
-		// (applyMessageDeleted), since a closed panel cannot be put
-		// back as it was.
-		a.pendingOps.BeginDelete(pendingDelete{
-			channelID: m.ChannelID, ts: m.TS,
-			removed: a.removeFrom(a.shownSinks(m.ChannelID), m.TS),
-		})
-		messageSvc := a.messageSvc
-		chID, ts := ids.ChannelID(m.ChannelID), ids.MessageTS(m.TS)
-		return failNilDelete(m.ChannelID, m.TS, func() tea.Msg {
-			return messageSvc.Delete(chID, ts)
-		}), true
 
 	case MarkUnreadMsg:
 		if cmd, blocked := a.sendingGuard(m.BoundaryTS); blocked {
@@ -454,10 +423,25 @@ func showNewMessage(a *App, m NewMessageMsg) tea.Cmd {
 	return tea.Batch(cmds...)
 }
 
-// reduceSendMessage handles SendMessageMsg. Extracted to keep the
-// reduceSend dispatch switch readable -- this arm does optimistic
-// placeholder + async chat.postMessage + LocalTS attachment.
-func reduceSendMessage(a *App, m SendMessageMsg) tea.Cmd {
+// sendRequest is a channel message the user sent from a composer.
+type sendRequest struct {
+	ChannelID string
+	Text      string // mentions translated to wire form
+	// TeamID and Typed say where the text was typed and how: the
+	// composer text before mentions were translated for sending.
+	// A failed send gives Typed back to that conversation's
+	// composer; empty means there is nothing to give back.
+	TeamID string
+	Typed  string
+}
+
+// beginSend starts the send m: the placeholder shows, selected, before
+// it returns, and the command it returns is the chat.postMessage call,
+// whose result is MessageSentMsg or MessageSendFailedMsg. The composer's
+// Enter calls it in the Update of that key, so a key pressed straight
+// after acts on the placeholder (refused as still sending), never on
+// the message selected before it.
+func (a *App) beginSend(m sendRequest) tea.Cmd {
 	// Instant-display: append an optimistic placeholder for the
 	// active channel immediately, before the chat.postMessage HTTP
 	// round-trip. The placeholder carries a "local:<n>" TS so the
@@ -502,14 +486,30 @@ func editedBody(wire string) messages.Body {
 	return b
 }
 
-// reduceEditMessage handles EditMessageMsg: the new body shows at once,
+// editRequest is an edit the user submitted.
+type editRequest struct {
+	ChannelID string
+	TS        string
+	NewText   string // mentions translated to wire form
+	// Typed, TeamID, Panel and ThreadTS say where the edit was typed
+	// and what, so a failed edit can be reopened there, or its text
+	// given back as a draft. ThreadTS is the open thread for a
+	// PanelThread edit, "" otherwise.
+	Typed    string
+	TeamID   string
+	Panel    Panel
+	ThreadTS string
+}
+
+// beginEdit starts the edit m (submitEdit calls it in the Update of the
+// Enter that submits it): the new body shows at once,
 // converted as chat.update converts it (editedBody: the mrkdwn
 // and the rich_text block the pane draws) and marked edited, wherever
 // the message is (showBody), and the edit is recorded in pendingOps. Its
 // chat.update goes now, or, when an edit of the message is in flight,
 // once that one ends (reduceMessageEdited), so Slack applies the edits
 // in the order they were made.
-func reduceEditMessage(a *App, m EditMessageMsg) tea.Cmd {
+func (a *App) beginEdit(m editRequest) tea.Cmd {
 	if messages.IsLocalTS(m.TS) {
 		// The message is still sending, so it cannot be edited yet.
 		// The text is given back like a failed edit's, and the
@@ -524,10 +524,36 @@ func reduceEditMessage(a *App, m EditMessageMsg) tea.Cmd {
 		panel: m.Panel, threadTS: m.ThreadTS, teamID: m.TeamID, typed: m.Typed,
 	}, prior, shown)
 	if !send {
-		debuglog.Cache("EditMessageMsg: channel=%s ts=%s decision=queued_behind_edit_in_flight", m.ChannelID, m.TS)
+		debuglog.Cache("beginEdit: channel=%s ts=%s decision=queued_behind_edit_in_flight", m.ChannelID, m.TS)
 		return nil
 	}
 	return a.sendEdit(e)
+}
+
+// beginDelete starts the delete of message ts in channelID, confirmed
+// by the user: the message leaves every pane that shows it before it
+// returns, and the command it returns is the chat.delete call, whose
+// result is MessageDeletedMsg. The confirm prompt runs it in the
+// Update of the key that confirms, so the next key never acts on the
+// message being deleted.
+func (a *App) beginDelete(channelID, ts string) tea.Cmd {
+	if cmd, blocked := a.sendingGuard(ts); blocked {
+		return cmd
+	}
+	// The message leaves every pane that shows it at once; the
+	// rows are kept to put back if the delete fails. A deleted
+	// thread parent's panel closes only once Slack confirms
+	// (applyMessageDeleted), since a closed panel cannot be put
+	// back as it was.
+	a.pendingOps.BeginDelete(pendingDelete{
+		channelID: channelID, ts: ts,
+		removed: a.removeFrom(a.shownSinks(channelID), ts),
+	})
+	messageSvc := a.messageSvc
+	chID, msgTS := ids.ChannelID(channelID), ids.MessageTS(ts)
+	return failNilDelete(channelID, ts, func() tea.Msg {
+		return messageSvc.Delete(chID, msgTS)
+	})
 }
 
 // sendEdit is e's chat.update, its result stamped with e's id. An edit

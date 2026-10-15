@@ -11,7 +11,7 @@
 //
 // When active, the channel-pane or thread-pane compose box is
 // repurposed: its existing draft is stashed, the message text is
-// seeded, and Enter submits an EditMessageMsg instead of sending.
+// seeded, and Enter submits the edit (submitEdit) instead of sending.
 // Cancellation (Esc, channel switch, panel switch, MessageDeletedMsg
 // for the edited message, etc.) restores the stashed draft.
 package ui

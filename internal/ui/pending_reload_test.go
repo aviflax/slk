@@ -114,7 +114,7 @@ func TestPendingSend_SurvivesAReload(t *testing.T) {
 	})
 	t.Run("thread reply", func(t *testing.T) {
 		a := editApp(t, nil)
-		a.Update(SendThreadReplyMsg{ChannelID: "C1", ThreadTS: "5.000000", Text: "re"})
+		a.beginReply(replyRequest{ChannelID: "C1", ThreadTS: "5.000000", Text: "re"})
 		replies := a.threadPanel.Replies()
 		local := replies[len(replies)-1].TS
 		reloadThread(a, slackThread())
@@ -122,7 +122,7 @@ func TestPendingSend_SurvivesAReload(t *testing.T) {
 	})
 	t.Run("broadcast reply in the channel", func(t *testing.T) {
 		a := editApp(t, nil)
-		a.Update(SendThreadReplyMsg{ChannelID: "C1", ThreadTS: "5.000000", Text: "all", Broadcast: true})
+		a.beginReply(replyRequest{ChannelID: "C1", ThreadTS: "5.000000", Text: "all", Broadcast: true})
 		replies := a.threadPanel.Replies()
 		local := replies[len(replies)-1].TS
 		reloadChannel(a, slackChannel())

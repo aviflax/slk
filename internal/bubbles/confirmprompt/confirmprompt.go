@@ -27,6 +27,7 @@ type Model struct {
 	choice    Choice
 	preset    bool // opened with Open: keys and labels follow KeyMap
 	highlight int  // highlighted button; -1 = none
+	confirmed bool // the last press was the yes/no preset's Confirm
 }
 
 var _ chrome.Dialog = (*Model)(nil)
@@ -90,6 +91,7 @@ func (m *Model) open(c Choice) {
 
 // Close hides the prompt and clears its state.
 func (m *Model) Close() {
+	m.confirmed = false
 	m.visible = false
 	m.choice = Choice{}
 	m.preset = false
@@ -102,6 +104,12 @@ func (m *Model) Highlight(i int) {
 		m.highlight = i
 	}
 }
+
+// Confirmed reports whether the Update or PressHighlighted that just
+// ran pressed Confirm in the yes/no preset. A host that must apply the
+// confirmed action before the next key is read checks it after the
+// call, instead of waiting for the returned command to run.
+func (m Model) Confirmed() bool { return m.confirmed }
 
 // Highlighted returns the highlighted button, or -1.
 func (m Model) Highlighted() int { return m.highlight }

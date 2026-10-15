@@ -160,6 +160,7 @@ func TestDraftSafety_SendTargetsCaptureChannel(t *testing.T) {
 	a.SetInitialChannel("C1", "alpha", nil)
 	a.Update(ChannelSelectedMsg{ID: "C1", Name: "alpha", Type: "channel"})
 
+	sent := recordSends(a)
 	a.compose.SetValue("send me")
 	a.SetMode(ModeInsert)
 	cmd := a.handleInsertMode(keyCode(tea.KeyEnter))
@@ -170,15 +171,9 @@ func TestDraftSafety_SendTargetsCaptureChannel(t *testing.T) {
 	// The channel changes before the send command is executed.
 	a.Update(ChannelSelectedMsg{ID: "C2", Name: "beta", Type: "channel"})
 
-	msg, ok := cmd().(SendMessageMsg)
-	if !ok {
-		t.Fatalf("send command returned %T, want SendMessageMsg", cmd())
-	}
-	if msg.ChannelID != "C1" {
-		t.Errorf("send target = %q, want %q (composed-in channel)", msg.ChannelID, "C1")
-	}
-	if msg.Text != "send me" {
-		t.Errorf("send text = %q, want %q", msg.Text, "send me")
+	deliveredMsgs[MessageSendFailedMsg](t, cmd)
+	if len(*sent) != 1 || (*sent)[0] != "C1/send me" {
+		t.Errorf("chat.postMessage calls = %q, want [C1/send me] (the composed-in channel)", *sent)
 	}
 
 	// Back on C1 the composer is empty: the send consumed the draft.

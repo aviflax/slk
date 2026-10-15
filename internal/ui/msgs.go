@@ -144,16 +144,6 @@ type (
 		Changed bool
 		Message messages.MessageItem
 	}
-	SendMessageMsg struct {
-		ChannelID string
-		Text      string
-		// TeamID and Typed say where the text was typed and how: the
-		// composer text before mentions were translated for sending.
-		// A failed send gives Typed back to that conversation's
-		// composer; empty means there is nothing to give back.
-		TeamID string
-		Typed  string
-	}
 	ThreadOpenedMsg struct {
 		ChannelID string
 		ThreadTS  string
@@ -169,25 +159,12 @@ type (
 		// zero value is the fetched result, which alone marks.
 		FromCache bool
 	}
-	SendThreadReplyMsg struct {
-		ChannelID string
-		ThreadTS  string
-		Text      string
-		// Broadcast is Slack's "Also send to #channel": the reply is
-		// additionally posted to the parent channel feed
-		// (reply_broadcast=true; Slack echoes it with the
-		// thread_broadcast subtype).
-		Broadcast bool
-		// TeamID and Typed are as in SendMessageMsg.
-		TeamID string
-		Typed  string
-	}
 	ThreadReplySentMsg struct {
 		ChannelID string
 		ThreadTS  string
 		LocalTS   string // optimistic-placeholder id; see MessageSentMsg.LocalTS
 		Message   messages.MessageItem
-		// Broadcast mirrors SendThreadReplyMsg.Broadcast; when true the
+		// Broadcast mirrors replyRequest.Broadcast; when true the
 		// reducer also lands the message in the channel pane as a
 		// thread_broadcast row.
 		Broadcast bool
@@ -199,7 +176,7 @@ type (
 		ThreadTS  string
 		LocalTS   string
 		Reason    string
-		// Broadcast mirrors SendThreadReplyMsg.Broadcast so the failure
+		// Broadcast mirrors replyRequest.Broadcast so the failure
 		// handler can also roll back the optimistic thread_broadcast
 		// row in the channel feed.
 		Broadcast bool
@@ -604,7 +581,7 @@ type threadsListFetchMsg struct {
 // when the user pressed Enter. The handler uses it to swap the
 // placeholder for the authoritative Message in place. LocalTS may be
 // empty for legacy/test callers that fire this message without a
-// preceding SendMessageMsg.
+// preceding send (App.beginSend).
 type MessageSentMsg struct {
 	ChannelID string
 	LocalTS   string
@@ -618,29 +595,6 @@ type MessageSendFailedMsg struct {
 	ChannelID string
 	LocalTS   string
 	Reason    string
-}
-
-// EditMessageMsg is emitted when the user submits an edit. App.Update
-// shows the new text at once, records the edit in pendingOps and
-// invokes the message service, whose result is MessageEditedMsg.
-type EditMessageMsg struct {
-	ChannelID string
-	TS        string
-	NewText   string // mentions translated to wire form
-	// Typed, TeamID, Panel and ThreadTS say where the edit was typed
-	// and what, so a failed edit can be reopened there, or its text
-	// given back as a draft. ThreadTS is the open thread for a
-	// PanelThread edit, "" otherwise.
-	Typed    string
-	TeamID   string
-	Panel    Panel
-	ThreadTS string
-}
-
-// DeleteMessageMsg is emitted when the user confirms a delete.
-type DeleteMessageMsg struct {
-	ChannelID string
-	TS        string
 }
 
 // MessageEditedMsg carries the result of the chat.update API call.

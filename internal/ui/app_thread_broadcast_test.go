@@ -34,7 +34,7 @@ func newThreadBroadcastApp(t *testing.T) *App {
 
 // TestHandleInsertMode_CtrlOTogglesThreadBroadcast pins the ctrl+o
 // toggle: it flips the thread compose's broadcast flag on and off, and
-// the next Enter dispatches SendThreadReplyMsg with Broadcast=true.
+// the next Enter begins a broadcast reply.
 func TestHandleInsertMode_CtrlOTogglesThreadBroadcast(t *testing.T) {
 	app := newThreadBroadcastApp(t)
 
@@ -61,13 +61,8 @@ func TestHandleInsertMode_CtrlOTogglesThreadBroadcast(t *testing.T) {
 	if cmd == nil {
 		t.Fatal("Enter in insert mode should produce a send command")
 	}
-	msg := cmd()
-	sendMsg, ok := msg.(SendThreadReplyMsg)
-	if !ok {
-		t.Fatalf("expected SendThreadReplyMsg, got %T", msg)
-	}
-	if !sendMsg.Broadcast {
-		t.Errorf("SendThreadReplyMsg.Broadcast = false, want true")
+	if !lastInsert(t, app).broadcast {
+		t.Errorf("the reply begun is not a broadcast, want one")
 	}
 }
 
@@ -118,12 +113,8 @@ func TestHandleInsertMode_AltEnterSendsThreadBroadcast(t *testing.T) {
 	if cmd == nil {
 		t.Fatal("Alt+Enter with text should return a send cmd")
 	}
-	msg, ok := cmd().(SendThreadReplyMsg)
-	if !ok {
-		t.Fatalf("expected SendThreadReplyMsg, got %T", msg)
-	}
-	if !msg.Broadcast {
-		t.Error("SendThreadReplyMsg.Broadcast = false, want true after Alt+Enter")
+	if !lastInsert(t, app).broadcast {
+		t.Error("the reply begun is not a broadcast, want one after Alt+Enter")
 	}
 	if app.threadCompose.Broadcast() {
 		t.Error("broadcast toggle should be false after Alt+Enter send")
@@ -152,7 +143,7 @@ func TestHandleInsertMode_CtrlOInactiveOnChannelCompose(t *testing.T) {
 func TestSendThreadReply_BroadcastOptimisticChannelRowAndSwap(t *testing.T) {
 	app := newThreadBroadcastApp(t)
 
-	app.Update(SendThreadReplyMsg{
+	app.beginReply(replyRequest{
 		ChannelID: "C1",
 		ThreadTS:  "1700000000.000100",
 		Text:      "heads up",
@@ -180,7 +171,7 @@ func TestSendThreadReply_BroadcastOptimisticChannelRowAndSwap(t *testing.T) {
 	}
 
 	// Non-broadcast send must NOT touch the channel feed.
-	app.Update(SendThreadReplyMsg{
+	app.beginReply(replyRequest{
 		ChannelID: "C1",
 		ThreadTS:  "1700000000.000100",
 		Text:      "quiet reply",
@@ -219,7 +210,7 @@ func TestSendThreadReply_BroadcastOptimisticChannelRowAndSwap(t *testing.T) {
 func TestSendThreadReply_BroadcastFailureRollsBackChannelRow(t *testing.T) {
 	app := newThreadBroadcastApp(t)
 
-	app.Update(SendThreadReplyMsg{
+	app.beginReply(replyRequest{
 		ChannelID: "C1",
 		ThreadTS:  "1700000000.000100",
 		Text:      "heads up",

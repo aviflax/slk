@@ -325,3 +325,47 @@ func TestNewDefaultsWithoutOptions(t *testing.T) {
 		t.Error("default key map should drive the help text")
 	}
 }
+
+// Confirmed reports a Confirm press of the yes/no preset in the call
+// that made it, and only then: a cancel, the next key, a click on
+// Cancel and a choice's buttons all leave it false.
+func TestConfirmedReportsThePressJustMade(t *testing.T) {
+	m := opened(t, nil)
+	if m.Confirmed() {
+		t.Fatal("Confirmed before any key")
+	}
+	m, _ = m.Update(keyPress('y'))
+	if !m.Confirmed() {
+		t.Fatal("y did not report Confirmed")
+	}
+	m, _ = m.Update(keyPress('y'))
+	if m.Confirmed() {
+		t.Error("Confirmed still set by the next Update on a closed prompt")
+	}
+
+	m = opened(t, nil)
+	m, _ = m.Update(keyPress('n'))
+	if m.Confirmed() {
+		t.Error("n reported Confirmed")
+	}
+
+	m = opened(t, nil)
+	m.Highlight(presetCancel)
+	m, _ = m.PressHighlighted()
+	if m.Confirmed() {
+		t.Error("a click on Cancel reported Confirmed")
+	}
+	m = opened(t, nil)
+	m.Highlight(presetConfirm)
+	m, _ = m.PressHighlighted()
+	if !m.Confirmed() {
+		t.Error("a click on Confirm did not report Confirmed")
+	}
+
+	c := New(WithWidth(80))
+	c.OpenChoice(Choice{Buttons: []Button{{Label: "A", Keys: key.NewBinding(key.WithKeys("1"))}}})
+	c, _ = c.Update(keyPress('1'))
+	if c.Confirmed() {
+		t.Error("a choice's first button reported Confirmed")
+	}
+}

@@ -69,7 +69,7 @@ func TestEphemeralFromSelf_ShownWhileSendPending(t *testing.T) {
 	app, _ := markCapture(t)
 	app.activeChannelID = "C1"
 	app.currentUserID = "USELF"
-	app.Update(SendMessageMsg{ChannelID: "C1", Text: "pending"})
+	app.beginSend(sendRequest{ChannelID: "C1", Text: "pending"})
 
 	_, _ = app.Update(NewMessageMsg{
 		ChannelID: "C1",

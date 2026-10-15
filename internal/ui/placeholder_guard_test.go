@@ -20,14 +20,14 @@ func placeholderApp(t *testing.T, panel Panel) *App {
 	a.SetCurrentUserID("USELF")
 	if panel == PanelThread {
 		openThread(a, "1.000000")
-		a.Update(SendThreadReplyMsg{ChannelID: "C1", ThreadTS: "1.000000", Text: "pending"})
+		a.beginReply(replyRequest{ChannelID: "C1", ThreadTS: "1.000000", Text: "pending"})
 		a.focusedPanel = PanelThread
 		if r, ok := a.threadPanel.SelectedMessage(); !ok || !messages.IsLocalTS(r.TS) {
 			t.Fatalf("selected reply = %+v, want the placeholder", r)
 		}
 		return a
 	}
-	a.Update(SendMessageMsg{ChannelID: "C1", Text: "pending"})
+	a.beginSend(sendRequest{ChannelID: "C1", Text: "pending"})
 	a.focusedPanel = PanelMessages
 	if m, ok := a.messagepane.SelectedMessage(); !ok || !messages.IsLocalTS(m.TS) {
 		t.Fatalf("selected message = %+v, want the placeholder", m)
@@ -91,7 +91,7 @@ func TestSetMarkRefusesPlaceholder(t *testing.T) {
 func TestOpenThreadClickRefusesPlaceholder(t *testing.T) {
 	a := newTestApp(t, withSize(120, 30), withActiveChannel("C1"))
 	a.SetCurrentUserID("USELF")
-	a.Update(SendMessageMsg{ChannelID: "C1", Text: "pending"})
+	a.beginSend(sendRequest{ChannelID: "C1", Text: "pending"})
 	a.View() // lay out the pane so the click lands on the placeholder's row
 	fetched := 0
 	a.setThreadFetcherForTest(func(ids.ChannelID, ids.ThreadTS) core.Msg {

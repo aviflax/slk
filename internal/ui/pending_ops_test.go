@@ -10,6 +10,8 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
+	"github.com/gammons/slk/internal/core"
+	"github.com/gammons/slk/internal/ids"
 	"github.com/gammons/slk/internal/ui/mentionpicker"
 	"github.com/gammons/slk/internal/ui/messages"
 	"github.com/gammons/slk/internal/ui/statusbar"
@@ -33,7 +35,7 @@ func openThread(a *App, threadTS string) {
 // sendTop sends text to C1 and returns the placeholder's TS.
 func sendTop(t *testing.T, a *App, text string) string {
 	t.Helper()
-	a.Update(SendMessageMsg{ChannelID: "C1", Text: text})
+	a.beginSend(sendRequest{ChannelID: "C1", Text: text})
 	rows := a.messagepane.Messages()
 	if len(rows) == 0 || !strings.HasPrefix(rows[len(rows)-1].TS, "local:") {
 		t.Fatalf("no placeholder after send: %+v", rows)
@@ -142,7 +144,7 @@ func TestPendingSend_SelfMessageElsewhereRenders(t *testing.T) {
 	t.Run("top-level echo while a reply is pending", func(t *testing.T) {
 		a := pendingApp(t)
 		openThread(a, "5.000000")
-		a.Update(SendThreadReplyMsg{ChannelID: "C1", ThreadTS: "5.000000", Text: "reply"})
+		a.beginReply(replyRequest{ChannelID: "C1", ThreadTS: "5.000000", Text: "reply"})
 		a.Update(echo("C1", "10.000003", "", "from my phone"))
 		wantRows(t, "channel", a.messagepane.Messages(), "10.000003=from my phone")
 		if r := a.threadPanel.Replies(); len(r) != 1 || !strings.HasPrefix(r[0].TS, "local:") {
@@ -152,14 +154,14 @@ func TestPendingSend_SelfMessageElsewhereRenders(t *testing.T) {
 	t.Run("reply in another thread", func(t *testing.T) {
 		a := pendingApp(t)
 		openThread(a, "5.000000")
-		a.Update(SendThreadReplyMsg{ChannelID: "C1", ThreadTS: "5.000000", Text: "reply"})
+		a.beginReply(replyRequest{ChannelID: "C1", ThreadTS: "5.000000", Text: "reply"})
 		a.threadPanel.SetThread(messages.MessageItem{TS: "6.000000"}, nil, "C1", "6.000000")
 		a.Update(echo("C1", "10.000004", "6.000000", "other thread"))
 		wantRows(t, "thread 6", a.threadPanel.Replies(), "10.000004=other thread")
 	})
 	t.Run("another channel", func(t *testing.T) {
 		a := pendingApp(t)
-		a.Update(SendMessageMsg{ChannelID: "C2", Text: "elsewhere pending"})
+		a.beginSend(sendRequest{ChannelID: "C2", Text: "elsewhere pending"})
 		a.Update(echo("C1", "10.000005", "", "here"))
 		wantRows(t, "C1", a.messagepane.Messages(), "10.000005=here")
 	})
@@ -181,7 +183,7 @@ func TestPendingSend_SelfMessageSameConversationRendersAfterResult(t *testing.T)
 		a := pendingApp(t)
 		a.messagepane.SetMessages([]messages.MessageItem{{TS: "5.000000", Text: "parent"}})
 		openThread(a, "5.000000")
-		a.Update(SendThreadReplyMsg{ChannelID: "C1", ThreadTS: "5.000000", Text: "reply"})
+		a.beginReply(replyRequest{ChannelID: "C1", ThreadTS: "5.000000", Text: "reply"})
 		local := a.threadPanel.Replies()[0].TS
 		a.Update(echo("C1", "10.000002", "5.000000", "from my phone"))
 		wantRows(t, "while pending", a.threadPanel.Replies(), local+"=reply")
@@ -213,8 +215,8 @@ func TestPendingSend_TwoSendsEveryInterleaving(t *testing.T) {
 				a := typedApp(t)
 				a.messagepane.SetMessages(nil)
 				var log rowLog
-				a.Update(SendMessageMsg{ChannelID: "C1", Text: "one", TeamID: "T1", Typed: "one typed"})
-				a.Update(SendMessageMsg{ChannelID: "C1", Text: "two", TeamID: "T1", Typed: "two typed"})
+				a.beginSend(sendRequest{ChannelID: "C1", Text: "one", TeamID: "T1", Typed: "one typed"})
+				a.beginSend(sendRequest{ChannelID: "C1", Text: "two", TeamID: "T1", Typed: "two typed"})
 				rows := a.messagepane.Messages()
 				locals := []string{rows[0].TS, rows[1].TS}
 				reals := []string{"10.000001", "10.000002"}
@@ -329,7 +331,7 @@ func TestPendingSend_ReleasedEchoLandsInTSOrder(t *testing.T) {
 		a := pendingApp(t)
 		a.messagepane.SetMessages([]messages.MessageItem{{TS: "5.000000", Text: "parent"}})
 		openThread(a, "5.000000")
-		a.Update(SendThreadReplyMsg{ChannelID: "C1", ThreadTS: "5.000000", Text: "mine"})
+		a.beginReply(replyRequest{ChannelID: "C1", ThreadTS: "5.000000", Text: "mine"})
 		local := a.threadPanel.Replies()[0].TS
 		a.Update(echo("C1", "100.000000", "5.000000", "from my phone"))
 		a.Update(NewMessageMsg{ChannelID: "C1", Message: messages.MessageItem{TS: "102.000000", ThreadTS: "5.000000", UserID: "UOTHER", Text: "other"}})
@@ -366,7 +368,7 @@ func TestPendingReply_EchoThenFailureShowsEcho(t *testing.T) {
 	a := typedApp(t)
 	a.threadsDirtyDebounce = time.Millisecond
 	a.messagepane.SetMessages([]messages.MessageItem{{TS: "5.000000", Text: "parent"}})
-	_, _, local := sendFromComposer(t, a, PanelThread, "hi")
+	_, local := sendFromComposer(t, a, PanelThread, "hi")
 	a.Update(echo("C1", "10.000001", "5.000000", "hi"))
 	wantRows(t, "while pending", a.threadPanel.Replies(), local+"=hi")
 	_, cmd := a.Update(ThreadReplySendFailedMsg{ChannelID: "C1", ThreadTS: "5.000000", LocalTS: local, Reason: "timeout"})
@@ -391,7 +393,7 @@ func TestPendingReply_EchoThenFailureShowsEcho(t *testing.T) {
 func TestPendingReply_BroadcastEchoHeldInEveryPane(t *testing.T) {
 	a := pendingApp(t)
 	openThread(a, "5.000000")
-	a.Update(SendThreadReplyMsg{ChannelID: "C1", ThreadTS: "5.000000", Text: "reply", Broadcast: true})
+	a.beginReply(replyRequest{ChannelID: "C1", ThreadTS: "5.000000", Text: "reply", Broadcast: true})
 	local := a.threadPanel.Replies()[0].TS
 	e := echo("C1", "10.000009", "5.000000", "reply (echo)")
 	e.Message.Subtype = "thread_broadcast"
@@ -417,7 +419,7 @@ func TestPendingSend_EmptyTSResult(t *testing.T) {
 	t.Run("broadcast reply", func(t *testing.T) {
 		a := pendingApp(t)
 		openThread(a, "5.000000")
-		a.Update(SendThreadReplyMsg{ChannelID: "C1", ThreadTS: "5.000000", Text: "reply", Broadcast: true})
+		a.beginReply(replyRequest{ChannelID: "C1", ThreadTS: "5.000000", Text: "reply", Broadcast: true})
 		local := a.threadPanel.Replies()[0].TS
 		a.Update(ThreadReplySentMsg{ChannelID: "C1", ThreadTS: "5.000000", LocalTS: local, Broadcast: true})
 		wantRows(t, "thread", a.threadPanel.Replies())
@@ -448,23 +450,45 @@ func TestPendingSend_HeldEchoEditedOrDeleted(t *testing.T) {
 }
 
 // sendFromComposer types text into the composer of panel (the channel
-// composer for C1, or the thread composer for thread 5.000000 of C1),
-// presses Enter and applies the send it produces. It returns the
-// placeholder id.
-func sendFromComposer(t *testing.T, a *App, panel Panel, text string) (SendMessageMsg, SendThreadReplyMsg, string) {
+// composer for C1, or the thread composer for thread 5.000000 of C1)
+// and presses Enter, which begins the send. It returns the pending
+// send and the placeholder id.
+func sendFromComposer(t *testing.T, a *App, panel Panel, text string) (pendingInsert, string) {
 	t.Helper()
 	a.mode = ModeInsert
 	a.focusedPanel = panel
 	if panel == PanelThread {
 		a.threadCompose.SetValue(text)
-		got := deliveredMsgs[SendThreadReplyMsg](t, pressEnter(a))[0]
-		a.Update(got)
-		return SendMessageMsg{}, got, a.threadPanel.Replies()[len(a.threadPanel.Replies())-1].TS
+	} else {
+		a.compose.SetValue(text)
 	}
-	a.compose.SetValue(text)
-	got := deliveredMsgs[SendMessageMsg](t, pressEnter(a))[0]
-	a.Update(got)
-	return got, SendThreadReplyMsg{}, a.messagepane.Messages()[len(a.messagepane.Messages())-1].TS
+	pressEnter(a)
+	ins := lastInsert(t, a)
+	return ins, ins.localTS
+}
+
+// recordSends makes a's message service record each chat.postMessage
+// as "channel/text" and answer it with a failure, which removes the
+// placeholder when a test applies it.
+func recordSends(a *App) *[]string {
+	sent := &[]string{}
+	a.SetMessageService(core.NewMessageService(core.MessageServiceFuncs{
+		Send: func(ch ids.ChannelID, text string) core.Msg {
+			*sent = append(*sent, string(ch)+"/"+text)
+			return MessageSendFailedMsg{ChannelID: string(ch), Reason: "recorded"}
+		},
+	}))
+	return sent
+}
+
+// lastInsert is the send begun last, failing the test when none is
+// pending: what an Enter that sends leaves in the ledger.
+func lastInsert(t *testing.T, a *App) pendingInsert {
+	t.Helper()
+	if len(a.pendingOps.inserts) == 0 {
+		t.Fatal("no send pending, want one begun at Enter")
+	}
+	return a.pendingOps.inserts[len(a.pendingOps.inserts)-1]
 }
 
 // typedApp is a slashApp whose composers know user alice (U9), with
@@ -487,8 +511,8 @@ func typedApp(t *testing.T) *App {
 func TestPendingSend_FailureGivesTypedTextBack(t *testing.T) {
 	t.Run("channel", func(t *testing.T) {
 		a := typedApp(t)
-		sent, _, local := sendFromComposer(t, a, PanelMessages, "hi @alice")
-		if sent.Typed != "hi @alice" || sent.TeamID != "T1" || !strings.Contains(sent.Text, "<@U9>") {
+		sent, local := sendFromComposer(t, a, PanelMessages, "hi @alice")
+		if sent.typed != "hi @alice" || sent.teamID != "T1" || !strings.Contains(sent.body.Text, "<@U9>") {
 			t.Fatalf("send = %+v, want Typed as typed, TeamID T1 and the mention translated in Text", sent)
 		}
 		if a.compose.Value() != "" {
@@ -504,8 +528,8 @@ func TestPendingSend_FailureGivesTypedTextBack(t *testing.T) {
 	})
 	t.Run("thread", func(t *testing.T) {
 		a := typedApp(t)
-		_, sent, local := sendFromComposer(t, a, PanelThread, "hi @alice")
-		if sent.Typed != "hi @alice" || sent.TeamID != "T1" {
+		sent, local := sendFromComposer(t, a, PanelThread, "hi @alice")
+		if sent.typed != "hi @alice" || sent.teamID != "T1" {
 			t.Fatalf("reply = %+v, want Typed and TeamID", sent)
 		}
 		_, cmd := a.Update(ThreadReplySendFailedMsg{ChannelID: "C1", ThreadTS: "5.000000", LocalTS: local, Reason: "boom"})
@@ -521,7 +545,7 @@ func TestPendingSend_FailureGivesTypedTextBack(t *testing.T) {
 	})
 	t.Run("newer draft wins", func(t *testing.T) {
 		a := typedApp(t)
-		_, _, local := sendFromComposer(t, a, PanelMessages, "first")
+		_, local := sendFromComposer(t, a, PanelMessages, "first")
 		a.compose.SetValue("second")
 		a.Update(MessageSendFailedMsg{ChannelID: "C1", LocalTS: local, Reason: "boom"})
 		if got := a.compose.Value(); got != "second" {
@@ -531,7 +555,7 @@ func TestPendingSend_FailureGivesTypedTextBack(t *testing.T) {
 	t.Run("echo held, then failure", func(t *testing.T) {
 		a := typedApp(t)
 		a.messagepane.SetMessages(nil)
-		_, _, local := sendFromComposer(t, a, PanelMessages, "posted")
+		_, local := sendFromComposer(t, a, PanelMessages, "posted")
 		a.Update(echo("C1", "10.000001", "", "posted"))
 		a.Update(MessageSendFailedMsg{ChannelID: "C1", LocalTS: local, Reason: "timeout"})
 		if got := a.compose.Value(); got != "posted" {
@@ -598,7 +622,7 @@ func TestPendingSend_PlaceholderAndResultDrawTheTypedBody(t *testing.T) {
 		a := pendingApp(t)
 		a.messagepane.SetMessages([]messages.MessageItem{{TS: "5.000000", Text: "parent"}})
 		openThread(a, "5.000000")
-		a.Update(SendThreadReplyMsg{ChannelID: "C1", ThreadTS: "5.000000", Text: text, Broadcast: true})
+		a.beginReply(replyRequest{ChannelID: "C1", ThreadTS: "5.000000", Text: text, Broadcast: true})
 		local := a.threadPanel.Replies()[0].TS
 		check("thread placeholder", a.threadPanel.Replies()[0])
 		check("channel placeholder", a.messagepane.Messages()[1])

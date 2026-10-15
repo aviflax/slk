@@ -219,11 +219,11 @@ func TestEditsAndDeletesEndOnSlacksState(t *testing.T) {
 				}
 				words++
 				text := fmt.Sprintf("w%d", words)
-				msg := EditMessageMsg{ChannelID: "C1", TS: ts, NewText: text, Typed: text, TeamID: "T1", Panel: PanelMessages}
+				msg := editRequest{ChannelID: "C1", TS: ts, NewText: text, Typed: text, TeamID: "T1", Panel: PanelMessages}
 				if ts == "6.000000" {
 					msg.Panel, msg.ThreadTS = PanelThread, "5.000000"
 				}
-				_, cmd := a.Update(msg)
+				cmd := a.beginEdit(msg)
 				typedOrder[ts] = append(typedOrder[ts], text)
 				if _, out := inFlight[ts]; out {
 					waiting[ts] = text // replaces any older waiting edit
@@ -310,7 +310,7 @@ func TestEditsAndDeletesEndOnSlacksState(t *testing.T) {
 				if _, pending := deleteRes[ts]; pending || !shown(ts) {
 					return
 				}
-				_, cmd := a.Update(DeleteMessageMsg{ChannelID: "C1", TS: ts})
+				cmd := a.beginDelete("C1", ts)
 				deleteRes[ts] = deliveredMsgs[MessageDeletedMsg](t, cmd)[0]
 			case "deleteResult":
 				ts := rapid.SampledFrom([]string{"1.000000", "6.000000"}).Draw(rt, "deleteResultTS")

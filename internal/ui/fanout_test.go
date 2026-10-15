@@ -173,12 +173,12 @@ func modelHasTS(m *messages.Model, ts string) bool {
 }
 
 // TestFanout_OptimisticSendSwapsInSiblingWindow pins the optimistic-
-// send lifecycle across same-channel siblings: SendMessageMsg renders
+// send lifecycle across same-channel siblings: beginSend renders
 // the placeholder in BOTH windows, and the MessageSentMsg swap
 // replaces it with the authoritative message in BOTH.
 func TestFanout_OptimisticSendSwapsInSiblingWindow(t *testing.T) {
 	a, w1, w2 := sameChannelApp(t)
-	_, _ = a.Update(SendMessageMsg{ChannelID: "C1", Text: "hello"})
+	_ = a.beginSend(sendRequest{ChannelID: "C1", Text: "hello"})
 	ts1 := localPlaceholderTS(t, a.winModels[w1])
 	ts2 := localPlaceholderTS(t, a.winModels[w2])
 	if ts1 != ts2 {
@@ -201,7 +201,7 @@ func TestFanout_OptimisticSendSwapsInSiblingWindow(t *testing.T) {
 // removes the optimistic placeholder from BOTH same-channel windows.
 func TestFanout_FailedSendRollsBackInSiblingWindow(t *testing.T) {
 	a, w1, w2 := sameChannelApp(t)
-	_, _ = a.Update(SendMessageMsg{ChannelID: "C1", Text: "hello"})
+	_ = a.beginSend(sendRequest{ChannelID: "C1", Text: "hello"})
 	ts := localPlaceholderTS(t, a.winModels[w1])
 	_, _ = a.Update(MessageSendFailedMsg{ChannelID: "C1", LocalTS: ts, Reason: "boom"})
 	for _, w := range []wintree.LeafID{w1, w2} {

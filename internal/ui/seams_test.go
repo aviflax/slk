@@ -656,7 +656,7 @@ func sendVia(t *testing.T, result tea.Msg) ([]seamSent, []tea.Msg) {
 		calls = append(calls, seamSent{channelID, text})
 		return result
 	})
-	_, cmd := a.Update(SendMessageMsg{ChannelID: "C1", Text: "ship it"})
+	cmd := a.beginSend(sendRequest{ChannelID: "C1", Text: "ship it"})
 	return calls, drainCmd(cmd)
 }
 

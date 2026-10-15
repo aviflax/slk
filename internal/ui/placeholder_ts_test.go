@@ -4,8 +4,6 @@ import (
 	"strings"
 	"testing"
 
-	tea "charm.land/bubbletea/v2"
-
 	"github.com/gammons/slk/internal/core"
 	"github.com/gammons/slk/internal/ids"
 	"github.com/gammons/slk/internal/ui/messages"
@@ -25,7 +23,7 @@ func TestNavBackAfterSendNeverFetchesPlaceholder(t *testing.T) {
 	})
 	app.SetCurrentUserID("USELF")
 	app.Update(ChannelSelectedMsg{ID: "C1", Name: "one", Type: "channel"})
-	app.Update(SendMessageMsg{ChannelID: "C1", Text: "pending"})
+	app.beginSend(sendRequest{ChannelID: "C1", Text: "pending"})
 	app.Update(ChannelSelectedMsg{ID: "C2", Name: "two", Type: "channel"})
 
 	selected, _ := walkToCompletion(t, app, app.navigateBack())
@@ -153,7 +151,7 @@ func TestReactionsNeverTargetPlaceholder(t *testing.T) {
 	if !a.messagepane.ReactionNavActive() {
 		t.Fatal("reaction nav did not start")
 	}
-	a.Update(SendMessageMsg{ChannelID: "C1", Text: "pending"})
+	a.beginSend(sendRequest{ChannelID: "C1", Text: "pending"})
 	if a.messagepane.ReactionNavActive() {
 		t.Error("reaction nav still active after the selection moved to the new row")
 	}
@@ -190,14 +188,10 @@ func TestMessageServiceNeverGetsPlaceholder(t *testing.T) {
 			return nil
 		},
 	}))
-	for _, msg := range []tea.Msg{
-		EditMessageMsg{ChannelID: "C1", TS: "local:1", NewText: "x"},
-		DeleteMessageMsg{ChannelID: "C1", TS: "local:1"},
-		MarkUnreadMsg{ChannelID: "C1", BoundaryTS: "local:1"},
-	} {
-		_, cmd := a.Update(msg)
-		drainCmd(cmd)
-	}
+	drainCmd(a.beginEdit(editRequest{ChannelID: "C1", TS: "local:1", NewText: "x"}))
+	drainCmd(a.beginDelete("C1", "local:1"))
+	_, cmd := a.Update(MarkUnreadMsg{ChannelID: "C1", BoundaryTS: "local:1"})
+	drainCmd(cmd)
 	if len(calls) != 0 {
 		t.Fatalf("service calls %q, want none for a placeholder", calls)
 	}

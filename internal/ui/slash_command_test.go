@@ -155,10 +155,11 @@ func TestSlashCommand_TrailingSpacesMeanNoArgs(t *testing.T) {
 
 func TestSlashCommand_LeadingSpaceSendsAsMessage(t *testing.T) {
 	a, calls := slashApp(t, nil)
+	sent := recordSends(a)
 	a.compose.SetValue(" /giphy cats")
-	sent := deliveredMsgs[SendMessageMsg](t, pressEnter(a))
-	if len(sent) != 1 || sent[0].Text != " /giphy cats" {
-		t.Fatalf("SendMessageMsg = %+v, want the literal text", sent)
+	deliveredMsgs[MessageSendFailedMsg](t, pressEnter(a))
+	if len(*sent) != 1 || (*sent)[0] != "C1/ /giphy cats" {
+		t.Fatalf("chat.postMessage calls = %q, want the literal text", *sent)
 	}
 	if len(*calls) != 0 {
 		t.Errorf("Run called %d times, want 0", len(*calls))
@@ -167,10 +168,11 @@ func TestSlashCommand_LeadingSpaceSendsAsMessage(t *testing.T) {
 
 func TestSlashCommand_PathLikeTextSendsAsMessage(t *testing.T) {
 	a, calls := slashApp(t, nil)
+	sent := recordSends(a)
 	a.compose.SetValue("/tmp/foo is full")
-	sent := deliveredMsgs[SendMessageMsg](t, pressEnter(a))
-	if len(sent) != 1 {
-		t.Fatalf("SendMessageMsg delivered %d times, want 1", len(sent))
+	deliveredMsgs[MessageSendFailedMsg](t, pressEnter(a))
+	if len(*sent) != 1 {
+		t.Fatalf("chat.postMessage called %d times, want 1", len(*sent))
 	}
 	if len(*calls) != 0 {
 		t.Errorf("Run called %d times, want 0", len(*calls))
@@ -180,10 +182,17 @@ func TestSlashCommand_PathLikeTextSendsAsMessage(t *testing.T) {
 func TestSlashCommand_EditModeSavesLiterally(t *testing.T) {
 	a, calls := slashApp(t, nil)
 	a.editing.Begin("C1", "1.0", PanelMessages, "")
+	var edits []string
+	a.SetMessageService(core.NewMessageService(core.MessageServiceFuncs{
+		Edit: func(_ ids.ChannelID, _ ids.MessageTS, text string) core.Msg {
+			edits = append(edits, text)
+			return MessageEditedMsg{ChannelID: "C1", TS: "1.0"}
+		},
+	}))
 	a.compose.SetValue("/giphy cats")
-	edits := deliveredMsgs[EditMessageMsg](t, pressEnter(a))
-	if len(edits) != 1 || edits[0].NewText != "/giphy cats" {
-		t.Fatalf("EditMessageMsg = %+v, want the literal edit", edits)
+	deliveredMsgs[MessageEditedMsg](t, pressEnter(a))
+	if len(edits) != 1 || edits[0] != "/giphy cats" {
+		t.Fatalf("chat.update texts = %q, want the literal edit", edits)
 	}
 	if len(*calls) != 0 {
 		t.Errorf("Run called %d times, want 0", len(*calls))

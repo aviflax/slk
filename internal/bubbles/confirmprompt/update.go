@@ -14,6 +14,7 @@ import (
 // choice cancels on other keys, which keeps the yes/no preset exactly as it
 // was: its keys are y/Y/Enter, n/N/Esc, and everything else cancels.
 func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
+	m.confirmed = false
 	press, ok := msg.(tea.KeyPressMsg)
 	if !ok || !m.visible {
 		return m, nil
@@ -46,6 +47,7 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 // PressHighlighted presses the highlighted button, or does nothing when
 // none is. Hosts use it for a mouse click after Highlight.
 func (m Model) PressHighlighted() (Model, tea.Cmd) {
+	m.confirmed = false
 	if !m.visible || m.highlight < 0 {
 		return m, nil
 	}
@@ -59,11 +61,13 @@ func (m Model) press(i int) (Model, tea.Cmd) {
 		fn := b.Action
 		cmd = func() tea.Msg { return fn() }
 	}
+	confirmed := m.preset && i == presetConfirm
 	if b.Then != nil {
 		m.OpenChoice(*b.Then)
 	} else {
 		m.Close()
 	}
+	m.confirmed = confirmed
 	return m, cmd
 }
 
