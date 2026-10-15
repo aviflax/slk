@@ -81,6 +81,12 @@ func TestOpenCommandExitCodes(t *testing.T) {
 }
 
 func TestPermalinkHandlerRelaysUIReply(t *testing.T) {
+	// On the bubble's fake clock the one second timeout never fires
+	// while the reply is still on its way, however loaded the machine is.
+	synctest.Test(t, testPermalinkHandlerRelaysUIReply)
+}
+
+func testPermalinkHandlerRelaysUIReply(t *testing.T) {
 	var got ui.OpenPermalinkMsg
 	h := permalinkHandler(func(m tea.Msg) {
 		got = m.(ui.OpenPermalinkMsg)
