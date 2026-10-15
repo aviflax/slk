@@ -664,6 +664,10 @@ are out of scope.
    Slack accepts a mark, are keyed by the workspace a mark was staged
    in, and do not hold back the marks of opening a thread or entering
    a channel.
+   The suite's time under `-race` is back below where it was before
+   this work: the time zone children run at once, the 360 two-send
+   interleavings and the slowest per-case render loops run as parallel
+   subtests, and App timers fire at once in tests (`tick`).
 
 ## Out of scope
 
