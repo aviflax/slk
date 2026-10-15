@@ -1013,6 +1013,13 @@ func (m *Model) closePickers() {
 	m.emojiPicker.Close()
 }
 
+// ClosePickers closes any open mention, channel or emoji picker, as
+// leaving the composer from outside (not through Esc) must.
+func (m *Model) ClosePickers() {
+	m.closePickers()
+	m.dirty()
+}
+
 // SetChannelMembership records the member set for a channel and, if
 // that channel is active, rebuilds the picker's user list. Membership
 // for non-active channels is still stored so a rapid A→B→A switch

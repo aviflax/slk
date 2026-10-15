@@ -79,6 +79,21 @@ to the browser; `OpenPermalinkMsg` replies with the reason and leaves the
 browser to the caller. `linkOpensInApp` uses the same guard, so the
 picker badge, `o` and the socket cannot drift apart.
 
+Unlike `o`, which is a normal-mode key, a socket link can arrive in any
+mode. Over a dialog (any `IsModalOverlay` mode), a `:` command or search
+being typed, the image preview, or a message edit, slk declines with
+`slk is busy: <what>` and changes nothing. While composing in insert
+mode it leaves insert mode as Esc does (the draft stays with its
+conversation) and navigates, but only after checking that the link
+would open, so a declined link never pulls the user out of the
+composer. During an upload it declines with "an upload is in progress".
+
+The handler and the reducer share one claim (a compare-and-swap). When
+the event loop is blocked past the timeout, for example by a Ctrl+X
+`$EDITOR` session, the handler claims first and answers "did not
+respond", and the reducer drops the message when it finally arrives
+instead of navigating then.
+
 ### `slk open`
 
 `slk open <url>` dials the socket, sends the URL and prints the reply.

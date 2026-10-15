@@ -21,6 +21,7 @@ package ui
 import (
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	tea "charm.land/bubbletea/v2"
@@ -81,7 +82,7 @@ var reduceLinks reducerFunc = func(a *App, msg tea.Msg) (tea.Cmd, bool) {
 			// would surprise the user long after the request.
 			return nil, true
 		}
-		cmd, err := a.routeLinkInApp(m.URL)
+		cmd, err := a.openExternalPermalink(m.URL)
 		if m.Reply != nil {
 			select {
 			case m.Reply <- err:
@@ -93,6 +94,60 @@ var reduceLinks reducerFunc = func(a *App, msg tea.Msg) (tea.Cmd, bool) {
 		return cmd, true
 	}
 	return nil, false
+}
+
+// openExternalPermalink is routeLinkInApp for a link that arrived from
+// outside the TUI, in whatever mode the user is in. `o` never needs
+// this: it is a normal-mode key. The policy:
+//
+//   - a dialog, a ':' command or search being typed, an image preview,
+//     or a message edit: decline ("slk is busy: ..."), change nothing;
+//   - composing in insert mode: leave it as Esc would (the draft stays
+//     in its conversation's draft context) and navigate. A link slk
+//     would decline anyway is declined first, so the user is not taken
+//     out of the composer for nothing.
+func (a *App) openExternalPermalink(rawURL string) (tea.Cmd, error) {
+	if busy := a.externalLinkBusy(); busy != "" {
+		return nil, fmt.Errorf("slk is busy: %s", busy)
+	}
+	if a.mode != ModeInsert {
+		return a.routeLinkInApp(rawURL)
+	}
+	if a.compose.Uploading() || a.threadCompose.Uploading() {
+		return nil, errUploadInProgress
+	}
+	if !a.linkOpensInApp(rawURL) {
+		// routeLinkInApp fails before touching anything here, and
+		// returns the reason.
+		return a.routeLinkInApp(rawURL)
+	}
+	a.compose.ClosePickers()
+	a.threadCompose.ClosePickers()
+	a.exitInsertMode()
+	cmd, err := a.routeLinkInApp(rawURL)
+	// The action-prompt re-check Esc runs, after the navigation so a
+	// dialog does not open over the conversation being left.
+	return tea.Batch(cmd, a.tryOpenActionPrompt()), err
+}
+
+// externalLinkBusy names what the user is in the middle of that a link
+// from outside must not interrupt, or "" when nothing is. It mirrors
+// the "busy" test tryOpenActionPrompt uses, plus edits and the image
+// preview.
+func (a *App) externalLinkBusy() string {
+	switch {
+	case a.editing.IsActive():
+		return "editing a message"
+	case a.preview.Active():
+		return "an image preview is open"
+	case a.mode.IsModalOverlay():
+		return "a dialog is open (" + strings.ToLower(a.mode.String()) + ")"
+	case a.mode == ModeCommand:
+		return "typing a command"
+	case a.mode == ModeSearch:
+		return "typing a search"
+	}
+	return ""
 }
 
 // routeLink decides between in-app navigation and the browser.

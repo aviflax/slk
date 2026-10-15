@@ -146,6 +146,92 @@ func TestOpenPermalink_ClaimedIsRouted(t *testing.T) {
 	}
 }
 
+// A socket link can arrive in any mode. Over a dialog, a ':' command or
+// search being typed, an image preview, or a message edit, slk declines
+// rather than yank the user out of it; nothing about the state changes.
+func TestOpenPermalink_BusyDeclines(t *testing.T) {
+	const url = "https://myteam.slack.com/archives/C054JFCBN69/p1779284733270139"
+	for _, tc := range []struct {
+		name  string
+		setup func(a *App)
+		want  string
+	}{
+		{"channel finder", func(a *App) { a.SetMode(ModeChannelFinder) }, "dialog"},
+		{"confirm prompt", func(a *App) { a.SetMode(ModeConfirm) }, "dialog"},
+		{"help", func(a *App) { a.SetMode(ModeHelp) }, "dialog"},
+		{"link picker", func(a *App) { a.SetMode(ModeLinkPicker) }, "dialog"},
+		{"command line", func(a *App) { a.SetMode(ModeCommand) }, "command"},
+		{"search", func(a *App) { a.SetMode(ModeSearch) }, "search"},
+		{"editing", func(a *App) {
+			a.SetMode(ModeInsert)
+			a.editing.Begin("CELSEWHERE", "1779284000.000100", PanelMessages, "")
+		}, "editing a message"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			app, opened := linkTestApp(t)
+			app.activeChannelID = "CELSEWHERE"
+			tc.setup(app)
+			mode := app.mode
+			msgs, err := sendPermalink(t, app, url)
+			if err == nil || !strings.HasPrefix(err.Error(), "slk is busy: ") || !strings.Contains(err.Error(), tc.want) {
+				t.Errorf("reply = %v, want \"slk is busy: ...%s...\"", err, tc.want)
+			}
+			if app.mode != mode || len(msgs) != 0 || app.pendingLinkNav != nil || *opened != "" {
+				t.Errorf("busy decline acted: mode %v->%v msgs=%#v pending=%+v browser=%q",
+					mode, app.mode, msgs, app.pendingLinkNav, *opened)
+			}
+			if tc.name == "editing" && !app.editing.IsActive() {
+				t.Error("the edit was cancelled")
+			}
+		})
+	}
+}
+
+// Composing (not editing) is left the way Esc leaves it, and the draft
+// survives the channel switch through the composer's draft context.
+func TestOpenPermalink_InsertModeLeavesAndKeepsDraft(t *testing.T) {
+	app, _ := linkTestApp(t)
+	app.activeChannelID = "CELSEWHERE"
+	app.compose.SetDraftContext("T1", "CELSEWHERE", "")
+	app.SetMode(ModeInsert)
+	app.focusedPanel = PanelMessages
+	app.compose.Focus()
+	app.compose.SetValue("half a thought")
+
+	msgs, err := sendPermalink(t, app, "https://myteam.slack.com/archives/C054JFCBN69/p1779284733270139")
+	if err != nil {
+		t.Fatalf("reply = %v", err)
+	}
+	if app.mode != ModeNormal {
+		t.Errorf("mode = %v, want normal", app.mode)
+	}
+	for _, m := range msgs {
+		app.Update(m)
+	}
+	if app.mode != ModeNormal || app.focusedPanel != PanelMessages {
+		t.Errorf("after the switch: mode %v, panel %v; want normal, messages", app.mode, app.focusedPanel)
+	}
+	if app.activeChannelID != "C054JFCBN69" {
+		t.Errorf("active channel = %q", app.activeChannelID)
+	}
+	if got := draftIn(app, "CELSEWHERE"); got != "half a thought" {
+		t.Errorf("draft = %q, want it kept", got)
+	}
+}
+
+// A link slk declines anyway leaves insert mode alone: the user is not
+// pulled out of their composer for nothing.
+func TestOpenPermalink_InsertModeDeclinedStaysInInsert(t *testing.T) {
+	app, _ := linkTestApp(t)
+	app.SetMode(ModeInsert)
+	if _, err := sendPermalink(t, app, "https://otherteam.slack.com/archives/C054JFCBN69/p1779284733270139"); err == nil {
+		t.Fatal("foreign link accepted")
+	}
+	if app.mode != ModeInsert {
+		t.Errorf("mode = %v, want insert", app.mode)
+	}
+}
+
 // applyLocation refuses during an upload and shows a toast; the socket
 // sender must hear that as a refusal, not "ok".
 func TestOpenPermalink_DuringUpload_Declines(t *testing.T) {

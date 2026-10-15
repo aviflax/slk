@@ -42,6 +42,22 @@ import (
 	tea "charm.land/bubbletea/v2"
 )
 
+// leaveInsertMode is what Esc does once no picker is open: back to
+// normal mode with both composers blurred (their drafts stay where they
+// are), then a re-check for a queued action prompt.
+func (a *App) leaveInsertMode() tea.Cmd {
+	a.exitInsertMode()
+	return a.tryOpenActionPrompt()
+}
+
+// exitInsertMode is leaveInsertMode without the action-prompt re-check,
+// for a caller that has more to do before a dialog may open.
+func (a *App) exitInsertMode() {
+	a.SetMode(ModeNormal)
+	a.compose.Blur()
+	a.threadCompose.Blur()
+}
+
 func handleInsertMode(a *App, msg tea.KeyMsg) tea.Cmd {
 	if a.compose.Uploading() || a.threadCompose.Uploading() {
 		// An upload is in flight: no insert-mode key may mutate the
@@ -112,10 +128,7 @@ func handleInsertMode(a *App, msg tea.KeyMsg) tea.Cmd {
 				return nil
 			}
 		}
-		a.SetMode(ModeNormal)
-		a.compose.Blur()
-		a.threadCompose.Blur()
-		return a.tryOpenActionPrompt()
+		return a.leaveInsertMode()
 	}
 
 	code := msg.Key().Code
