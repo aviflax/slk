@@ -2,7 +2,6 @@ package cache
 
 import (
 	"testing"
-	"time"
 )
 
 func TestRecordAndGetChannelVisit(t *testing.T) {
@@ -44,8 +43,12 @@ func TestRecordChannelVisitLastWriteWins(t *testing.T) {
 	first, _ := db.GetChannelVisits("T1")
 	firstTS := first["C1"]
 
-	// Sleep just over a second so the unix-second timestamp definitely advances.
-	time.Sleep(1100 * time.Millisecond)
+	// Move the first visit into the past instead of waiting for the
+	// unix-second clock to tick.
+	if _, err := db.conn.Exec(`UPDATE channel_visits SET last_visited = last_visited - 100`); err != nil {
+		t.Fatalf("backdating: %v", err)
+	}
+	firstTS -= 100
 
 	if err := db.RecordChannelVisit("T1", "C1"); err != nil {
 		t.Fatalf("record: %v", err)
