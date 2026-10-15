@@ -7,7 +7,6 @@ import (
 	"io"
 	"sync"
 	"testing"
-	"time"
 
 	imgpkg "github.com/gammons/slk/internal/image"
 )
@@ -92,32 +91,26 @@ func (f *fakeFetcher) fetchCallsSnapshot() []imgpkg.FetchRequest {
 // awaitInflightCleared blocks until spawnEmojiFetch's goroutine has
 // removed key from the process-global inflightEmoji map.
 //
-// This is the one place in this file that polls rather than receiving,
-// and it is deliberate: the delete runs in a *deferred* func that
-// executes after SendMsg, so SendMsg is not a barrier for it and there
-// is no later signal to receive. The map is the only observation point.
+// SendMsg is not a barrier for it: the delete runs in a *deferred* func
+// that executes after SendMsg. The fetch goroutine broadcasts on
+// inflightEmojiCleared when it releases the entry, and this waits on
+// that, with no deadline. A genuinely leaked entry hangs, and `go
+// test`'s own timeout dumps the goroutine that still holds it.
 //
 // It matters because inflightEmoji is process-global and several tests
 // below reuse the same URL (hence the same cache key). A test that
 // returns while its fetch goroutine still holds the entry makes the
 // next test's Place calls silently no-op: the next test then sees zero
-// fetches and no EmojiImageReadyMsg. Measured window: the entry was
-// still held at the SendMsg observation point in 9 of 20000 runs, and
-// `-count=N` re-runs every one of these tests in the same process.
-//
-// The 1ms is a poll interval, not a wall-clock budget — there is no
-// deadline. A genuinely leaked entry hangs, and `go test`'s own timeout
-// dumps the goroutine that still holds it, which is a better diagnostic
-// than a downstream test failing with "want 1 fetch, got 0".
+// fetches and no EmojiImageReadyMsg, and `-count=N` re-runs every one
+// of these tests in the same process.
 func awaitInflightCleared(key string) {
+	inflightEmojiMu.Lock()
+	defer inflightEmojiMu.Unlock()
 	for {
-		inflightEmojiMu.Lock()
-		_, busy := inflightEmoji[key]
-		inflightEmojiMu.Unlock()
-		if !busy {
+		if _, busy := inflightEmoji[key]; !busy {
 			return
 		}
-		time.Sleep(time.Millisecond)
+		inflightEmojiCleared.Wait()
 	}
 }
 

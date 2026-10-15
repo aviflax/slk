@@ -55,6 +55,9 @@ type EmojiImageReadyMsg struct {
 var (
 	inflightEmoji   = map[string]struct{}{}
 	inflightEmojiMu sync.Mutex
+	// inflightEmojiCleared is broadcast each time a fetch goroutine
+	// releases its entry, so a test can wait for the release.
+	inflightEmojiCleared = sync.NewCond(&inflightEmojiMu)
 )
 
 // negativeEmojiCache records URLs whose fetch has failed at least once
@@ -184,6 +187,7 @@ func spawnEmojiFetch(ctx PlaceContext, key, url string, target goimage.Point) {
 		defer func() {
 			inflightEmojiMu.Lock()
 			delete(inflightEmoji, key)
+			inflightEmojiCleared.Broadcast()
 			inflightEmojiMu.Unlock()
 		}()
 
