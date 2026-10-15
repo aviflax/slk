@@ -127,35 +127,39 @@ func TestBorderedTopPane_MatchesLipgloss(t *testing.T) {
 	for _, tc := range cases {
 		for _, focused := range []bool{true, false} {
 			for _, sel := range []int{-1, 0, 1} { // bottom, top, +1 from top
-				a := tc.app()
-				switch sel {
-				case 0:
-					a.messagepane.GoToTop()
-				case 1:
-					a.messagepane.GoToTop()
-					a.messagepane.MoveDown()
-				}
-
-				msgView, msgWidth, msgBorder, topHeight, _ := buildMsgViewForTest(a, focused)
-				full := msgWidth + msgBorder
-
-				want := padPaneToSize(topBorderStyleForTest(msgWidth, focused).Render(msgView), msgWidth, full, topHeight, styles.Background)
-				got := borderedTopPane(msgView, msgWidth-2, full, topHeight, focused, styles.Background)
-
-				wl := strings.Split(want, "\n")
-				gl := strings.Split(got, "\n")
-				if len(wl) != topHeight || len(gl) != topHeight {
-					t.Fatalf("[%s focused=%v sel=%d] rows: want=%d got=%d (topHeight=%d)", tc.name, focused, sel, len(wl), len(gl), topHeight)
-				}
-				for i := range wl {
-					gw := ansi.StringWidth(gl[i])
-					if gw != full {
-						t.Fatalf("[%s focused=%v sel=%d] row %d width=%d want=%d (short source line?)\n got=%q", tc.name, focused, sel, i, gw, full, gl[i])
+				// Each case builds its own App: they run in parallel.
+				t.Run(fmt.Sprintf("%s/focused=%v/sel=%d", tc.name, focused, sel), func(t *testing.T) {
+					t.Parallel()
+					a := tc.app()
+					switch sel {
+					case 0:
+						a.messagepane.GoToTop()
+					case 1:
+						a.messagepane.GoToTop()
+						a.messagepane.MoveDown()
 					}
-					if ansi.Strip(wl[i]) != ansi.Strip(gl[i]) {
-						t.Fatalf("[%s focused=%v sel=%d] row %d plaintext differs:\n want=%q\n got =%q", tc.name, focused, sel, i, ansi.Strip(wl[i]), ansi.Strip(gl[i]))
+
+					msgView, msgWidth, msgBorder, topHeight, _ := buildMsgViewForTest(a, focused)
+					full := msgWidth + msgBorder
+
+					want := padPaneToSize(topBorderStyleForTest(msgWidth, focused).Render(msgView), msgWidth, full, topHeight, styles.Background)
+					got := borderedTopPane(msgView, msgWidth-2, full, topHeight, focused, styles.Background)
+
+					wl := strings.Split(want, "\n")
+					gl := strings.Split(got, "\n")
+					if len(wl) != topHeight || len(gl) != topHeight {
+						t.Fatalf("[%s focused=%v sel=%d] rows: want=%d got=%d (topHeight=%d)", tc.name, focused, sel, len(wl), len(gl), topHeight)
 					}
-				}
+					for i := range wl {
+						gw := ansi.StringWidth(gl[i])
+						if gw != full {
+							t.Fatalf("[%s focused=%v sel=%d] row %d width=%d want=%d (short source line?)\n got=%q", tc.name, focused, sel, i, gw, full, gl[i])
+						}
+						if ansi.Strip(wl[i]) != ansi.Strip(gl[i]) {
+							t.Fatalf("[%s focused=%v sel=%d] row %d plaintext differs:\n want=%q\n got =%q", tc.name, focused, sel, i, ansi.Strip(wl[i]), ansi.Strip(gl[i]))
+						}
+					}
+				})
 			}
 		}
 	}

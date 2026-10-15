@@ -531,6 +531,7 @@ func TestCollectSixelPlacements_WithheldWhileAModalIsOpen(t *testing.T) {
 		},
 	} {
 		t.Run(name, func(t *testing.T) {
+			t.Parallel() // each builds its own App
 			a, _, _ := twoWindowApp(t)
 			a.imgProtocol = imgpkg.ProtoSixel
 			setupTwoWindowSixelImages(t, a)
