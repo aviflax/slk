@@ -35,6 +35,29 @@ Tests are plain `testing.T`. No testify, no gomock, no golden libraries.
 White-box (`package ui`, not `package ui_test`) by convention. The one
 test dependency is `pgregory.net/rapid`, for property tests.
 
+### No wall-clock waits
+
+A test never passes or fails because of how long something took. A loaded
+machine (CI, `-race`, two suites at once) then cannot fail it. In practice:
+
+- Waiting for something that must happen: block on the signal with no
+  deadline. A hang is caught by `go test -timeout`, which names the stuck
+  goroutine. No `select` with `time.After` as the failure branch.
+- Checking that something does not happen: run the code to completion (drain
+  the command, wait for the goroutine's done signal), then assert. Never a
+  quiet period.
+- Code with timeouts, tickers or sleeps: run it in a `testing/synctest`
+  bubble, or pass in the clock or timer (`tick` in `internal/ui`, `now` and
+  `newTicker` fields elsewhere). Network code reaches its handler in memory
+  (`handlerClient`) so synctest can see it block.
+- Ordering goroutines: channels, `sync.WaitGroup` or `sync.Cond`, not
+  `time.Sleep`.
+- A child process (a fake `pbcopy`): build the command and inspect it rather
+  than start it.
+
+When a test does need real time, say why in a comment and why load cannot
+make it fail.
+
 ### Property tests and fuzzing
 
 A function whose output depends only on its arguments gets a property
