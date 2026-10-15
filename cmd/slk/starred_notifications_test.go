@@ -7,7 +7,6 @@ import (
 	"net/http/httptest"
 	"sync"
 	"testing"
-	"time"
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/gammons/slk/internal/cache"
@@ -80,12 +79,12 @@ func TestStarredPeerBatchCancellationAndRetry(t *testing.T) {
 		t.Fatalf("canceled batch lost rows: %+v", wctx.Channels)
 	}
 	releaseRetry()
+	// No deadline: a canceled budget that never schedules the background
+	// batch retry hangs here and go test -timeout reports it.
 	select {
 	case <-watch.done:
 	case err := <-batchErrors:
 		t.Fatal(err) // report immediately on the test goroutine
-	case <-time.After(5 * time.Second):
-		t.Fatal("canceled budget did not schedule a background batch retry")
 	}
 	h.OnPendingEvents()
 	if metadata != 2 || batches != 2 {

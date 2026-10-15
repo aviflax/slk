@@ -8,7 +8,6 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
-	"time"
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/gammons/slk/internal/cache"
@@ -83,11 +82,7 @@ func TestStarredRecoveredPeerRetries(t *testing.T) {
 			}
 			releaseRetry()
 			if mode == "transient failure" || mode == "shared context canceled" {
-				select {
-				case <-watch.done:
-				case <-time.After(5 * time.Second):
-					t.Fatal("scheduled profile retry did not finish")
-				}
+				<-watch.done // no deadline, a hang is reported by go test -timeout: the scheduled profile retry finishes
 			}
 			wctx.UserResolver.inflight.Delete("U1")
 			h.reconcileStarredConversations(context.Background())

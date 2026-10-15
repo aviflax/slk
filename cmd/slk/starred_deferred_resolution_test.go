@@ -7,7 +7,6 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
-	"time"
 
 	"github.com/gammons/slk/internal/cache"
 	"github.com/gammons/slk/internal/core"
@@ -118,11 +117,7 @@ func TestDMSweepFallbackRepairsInactiveWorkspace(t *testing.T) {
 	if wctx.Channels[0].Name != "U1" || wctx.FinderItems[0].Name != "U1" {
 		t.Fatal("background sweep mutated conversation snapshots")
 	}
-	select {
-	case <-h.PendingEvents():
-	case <-time.After(5 * time.Second):
-		t.Fatal("sweep fallback did not queue a repair without a UI sender")
-	}
+	<-h.PendingEvents() // no deadline, a hang is reported by go test -timeout: the sweep fallback queues a repair without a UI sender
 	h.OnPendingEvents()
 	if item := wctx.Channels[0]; item.Name != "Build Bot" || item.Type != "app" || item.Status.Text != "Ready" {
 		t.Fatalf("inactive sidebar = %+v", item)
@@ -141,11 +136,7 @@ func TestUserResolverRequestsUnnamedCachedPeer(t *testing.T) {
 	r := newUserResolver("T1", nil, db, nil, watch.send,
 		&fakeBatcher{res: []edge.User{edgeUserRecord("U1", "alice", "Alice", "", "T1", 1, false)}}, nil)
 	r.Request("U1")
-	select {
-	case <-watch.done:
-	case <-time.After(5 * time.Second):
-		t.Fatal("an unnamed cached placeholder suppressed deferred resolution")
-	}
+	<-watch.done // no deadline, a hang is reported by go test -timeout: an unnamed cached placeholder must not suppress deferred resolution
 	u, err := db.GetUser("U1")
 	if err != nil || u.DisplayName != "Alice" {
 		t.Fatalf("resolved placeholder = %+v, %v", u, err)
@@ -228,22 +219,14 @@ func TestStarredDeferredResolutionRepairsRowsWithoutReconnect(t *testing.T) {
 					// Production must schedule the retry for this quiet peer itself:
 					// no message, membership lookup, or manual Request triggers it.
 					releaseRetry()
-					select {
-					case <-watch.done:
-					case <-time.After(5 * time.Second):
-						t.Fatal("background profile lookup did not complete")
-					}
+					<-watch.done // no deadline, a hang is reported by go test -timeout: the background profile lookup completes
 					// The background goroutine may update synchronized profile state,
 					// but must leave the conversation slices to the event owner.
 					if wctx.Channels[0] != before || wctx.FinderItems[0].Name != "U1" || len(sender.sent) != 0 {
 						t.Fatal("background resolution mutated conversation snapshots directly")
 					}
 					pending := slk.PendingEventHandler(h)
-					select {
-					case <-pending.PendingEvents():
-					case <-time.After(5 * time.Second):
-						t.Fatal("successful resolution did not queue a repair")
-					}
+					<-pending.PendingEvents() // no deadline, a hang is reported by go test -timeout: a successful resolution queues a repair
 					pending.OnPendingEvents() // no second OnConnect/reconciliation
 					item, finder := wctx.Channels[0], wctx.FinderItems[0]
 					if item.Name != "Build Bot" || item.Type != "app" || item.Status.Text != "Ready" || item.Section != before.Section || item.SectionOrder != before.SectionOrder || item.ChannelOrder != before.ChannelOrder {

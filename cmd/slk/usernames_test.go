@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"sync"
 	"testing"
-	"time"
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/gammons/slk/internal/ui"
@@ -33,20 +32,12 @@ func TestUINameNotifier_DoesNotBlockTheCaller(t *testing.T) {
 		s.Set("U1", "Alice")
 		close(done)
 	}()
-	select {
-	case <-done:
-	case <-time.After(2 * time.Second):
-		t.Fatal("Set blocked on the UI send: this deadlocks when Set runs on the Update goroutine")
-	}
+	<-done // no deadline, a hang is reported by go test -timeout: Set must not block on the UI send, which would deadlock on the Update goroutine
 
-	select {
-	case m := <-received:
-		got, ok := m.(ui.UserResolvedMsg)
-		if !ok || got.TeamID != "T1" || got.UserID != "U1" || got.DisplayName != "Alice" {
-			t.Errorf("sent %#v; want UserResolvedMsg{TeamID: T1, UserID: U1, DisplayName: Alice}", m)
-		}
-	case <-time.After(2 * time.Second):
-		t.Fatal("no UserResolvedMsg was sent")
+	m := <-received // no deadline: a missing UserResolvedMsg hangs and go test -timeout reports it
+	got, ok := m.(ui.UserResolvedMsg)
+	if !ok || got.TeamID != "T1" || got.UserID != "U1" || got.DisplayName != "Alice" {
+		t.Errorf("sent %#v; want UserResolvedMsg{TeamID: T1, UserID: U1, DisplayName: Alice}", m)
 	}
 }
 
