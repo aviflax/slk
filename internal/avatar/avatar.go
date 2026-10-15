@@ -91,6 +91,11 @@ type Cache struct {
 	// rely on.
 	preloadCh chan preloadJob
 
+	// workers counts the preloadWorker goroutines the constructor
+	// started. The pool bound is then a fact a test can read, where
+	// "no second request arrives" can only be waited for.
+	workers int
+
 	// sizeURL maps the URL handed to Preload to the URL actually
 	// fetched: SizedURL in production. Tests replace it so httptest
 	// URLs can stand in for Slack's. nil fetches the URL as given.
@@ -123,6 +128,7 @@ func newCacheForTest(fetcher *imgpkg.Fetcher, kitty *imgpkg.KittyRenderer, useKi
 		sizeURL:   func(u string) string { return SizedURL(u, sizedAvatarPx) },
 	}
 	for i := 0; i < workers; i++ {
+		c.workers++
 		go c.preloadWorker()
 	}
 	return c

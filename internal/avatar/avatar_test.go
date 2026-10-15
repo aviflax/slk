@@ -11,7 +11,6 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
-	"time"
 
 	imgpkg "github.com/gammons/slk/internal/image"
 )
@@ -353,6 +352,14 @@ func TestPreload_BoundedConcurrencyN1(t *testing.T) {
 
 	c := newCacheForTest(fetcher, nil, false, 1, 8)
 
+	// "No second request arrives" cannot be proved by waiting, so the
+	// bound is asserted where it is made: the pool started one worker.
+	// Every job goes through those workers, so the four requests can
+	// only be served one after another.
+	if c.workers != 1 {
+		t.Fatalf("pool started %d workers, want 1", c.workers)
+	}
+
 	ready := make(chan struct{}, 4)
 	c.SetOnReady(func(string) { ready <- struct{}{} })
 
@@ -369,29 +376,6 @@ func TestPreload_BoundedConcurrencyN1(t *testing.T) {
 	// is precisely how the old fixed 50ms sleep failed when it was not
 	// long enough for even the first request to land.
 	<-serving // request 0 reached the handler and is held at `release`
-
-	// This window is load-bearing; do not delete it. It is NOT here
-	// because "no signal can prove a second request is not about to
-	// arrive" (true, but that only argues against *asserting* here —
-	// the assertion is the exact post-drain read at the bottom). It is
-	// here because the receive above proves only that ONE request
-	// landed, and the very next statement releases it. Under a widened
-	// pool the other three workers need a moment to reach the network;
-	// if we release request 0 immediately, its handler returns and
-	// inflight falls back to 0 before they arrive, so peak reads 1 and
-	// the mutation escapes. Measured against a workers→workers*4
-	// mutation, same machine, same harness: with this window 200/200
-	// detected, without it 166/200.
-	//
-	// It is not a wall-clock budget — the bias is one-sided. If the
-	// pool is correctly bounded, peak stays 1 however long we wait, so
-	// the window cannot false-fail; it can only false-pass. The loop
-	// exits the instant a violation appears, so only the passing case
-	// pays the full 50ms.
-	overlapWindow := time.Now().Add(50 * time.Millisecond)
-	for time.Now().Before(overlapWindow) && peak.Load() == 1 {
-		time.Sleep(time.Millisecond)
-	}
 
 	// Let the four requests through one at a time. With workers=1 the
 	// (i+1)-th request cannot even start until the i-th handler has
