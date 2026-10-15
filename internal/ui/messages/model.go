@@ -1137,9 +1137,14 @@ func (m *Model) SetColoredUsernames(enabled bool) {
 }
 
 // SetCurrentUser records the authenticated user ID so UpdateReaction can
-// flag the current user's own reactions (HasReacted) correctly.
+// flag the current user's own reactions (HasReacted) correctly, and so
+// messages that mention the user are highlighted.
 func (m *Model) SetCurrentUser(userID string) {
+	if m.currentUserID == userID {
+		return
+	}
 	m.currentUserID = userID
+	m.InvalidateCache()
 }
 
 // PatchUserName updates the in-memory userNames map (used for @mention
@@ -1470,6 +1475,7 @@ func (m *Model) renderContext() *RenderContext {
 		ImageChannel:     m.channelName,
 		SearchTerms:      m.searchTerms,
 		Nav:              m.nav,
+		SelfUserID:       m.currentUserID,
 	}
 }
 

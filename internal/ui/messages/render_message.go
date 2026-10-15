@@ -2,6 +2,7 @@ package messages
 
 import (
 	"fmt"
+	"github.com/gammons/slk/internal/mention"
 	"io"
 	"strings"
 	"time"
@@ -28,6 +29,9 @@ type RenderContext struct {
 	ImageChannel     string              // the key image fetches and ImageReadyMsg use (P3)
 	SearchTerms      []string
 	Nav              ReactionNav // drawn only when RenderOptions.IsSelected
+	// SelfUserID is the current user: their own @name is drawn as a pill
+	// and RenderedMessage.Mention is set from it. Empty disables both.
+	SelfUserID string
 }
 
 // RenderOptions are the per-pane differences in how a message renders:
@@ -49,7 +53,10 @@ type RenderedMessage struct {
 	Header       string // the author line (with "(edited)"), for SelectedHeader
 	HeaderBudget int
 	Hits         []entrylist.Hit // image hits (when ImageHits), then reaction pills
-	SixelRows    map[int]sixelEntry
+	// Mention is how the message mentions the current user (never for the
+	// user's own messages); WrapRows marks the row from it.
+	Mention   mention.Kind
+	SixelRows map[int]sixelEntry
 	// Kitty uploads by source: each pane keeps its own upload order.
 	BodyFlushes, BlockFlushes, ReactionFlushes, AttachmentFlushes []func(io.Writer) error
 }
@@ -89,6 +96,7 @@ func BlockkitContext(msg MessageItem, rc *RenderContext) blockkit.Context {
 				UserNames:    un,
 				ChannelNames: channelNames,
 				UserGroups:   rc.UserGroups,
+				SelfUserID:   rc.SelfUserID,
 				PlaceCtx:     rc.Emoji.PlaceCtx,
 				EmojiCells:   rc.Emoji.Cells,
 				Customs:      rc.Emoji.Customs,
@@ -121,6 +129,9 @@ func BlockkitContext(msg MessageItem, rc *RenderContext) blockkit.Context {
 // columns.
 func RenderMessage(msg MessageItem, width int, rc *RenderContext, opt RenderOptions) RenderedMessage {
 	var out RenderedMessage
+	if rc.SelfUserID != "" && msg.UserID != rc.SelfUserID {
+		out.Mention = mention.Classify(msg.Text, rc.SelfUserID)
+	}
 	avatarStr := opt.Avatar
 	stats := opt.stats
 	line := styles.Username(msg.UserID, rc.ColoredUsernames).Render(msg.UserName) + AuthorStatusSuffix(rc.UserStatuses, msg.UserID, time.Now()) + lipgloss.NewStyle().Background(styles.Background).Render("  ") + styles.Timestamp.Render(msg.Timestamp)
@@ -146,6 +157,7 @@ func RenderMessage(msg MessageItem, width int, rc *RenderContext, opt RenderOpti
 		UserNames:    rc.UserNames,
 		ChannelNames: rc.ChannelNames,
 		UserGroups:   rc.UserGroups,
+		SelfUserID:   rc.SelfUserID,
 		PlaceCtx:     rc.Emoji.PlaceCtx,
 		EmojiCells:   rc.Emoji.Cells,
 		Customs:      rc.Emoji.Customs,

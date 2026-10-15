@@ -3,6 +3,7 @@ package thread
 import (
 	"bytes"
 	"fmt"
+	"github.com/gammons/slk/internal/mention"
 	"math"
 	"slices"
 	"strings"
@@ -585,9 +586,14 @@ func (m *Model) SetUserGroups(groups map[string]string) {
 }
 
 // SetCurrentUser records the authenticated user ID so UpdateReaction can
-// flag the current user's own reactions (HasReacted) correctly.
+// flag the current user's own reactions (HasReacted) correctly, and so
+// messages that mention the user are highlighted.
 func (m *Model) SetCurrentUser(userID string) {
+	if m.currentUserID == userID {
+		return
+	}
 	m.currentUserID = userID
+	m.InvalidateCache()
 }
 
 // SetUserStatuses replaces the user ID -> custom status map; see
@@ -1106,6 +1112,8 @@ func (m *Model) viewInternal(height, width int, applySelection bool) string {
 			BorderBackground(styles.SelectionTintColor(m.focused)).
 			Background(styles.SelectionTintColor(m.focused)).
 			Render(parentContent)
+	} else if parentRendered.Mention != mention.None {
+		parentContent = strings.Join(messages.NewWrapStyles(m.focused).MentionVariant(parentContent, width, parentRendered.Mention), "\n")
 	} else {
 		parentContent = lipgloss.NewStyle().BorderStyle(thickLeftBorder).BorderLeft(true).
 			BorderForeground(styles.Background).BorderBackground(styles.Background).
@@ -1367,6 +1375,7 @@ func (m *Model) renderContext() *messages.RenderContext {
 		Images:           m.imgRenderer,
 		ImageChannel:     m.channelID,
 		Nav:              m.nav,
+		SelfUserID:       m.currentUserID,
 	}
 }
 

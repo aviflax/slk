@@ -113,6 +113,17 @@ func mentionStyle() lipgloss.Style {
 		Foreground(styles.Primary).
 		Bold(true)
 }
+
+// selfMentionStyle is the pill behind the current user's own @name. Its
+// background is a tint, not solid Warning, so it does not read as a
+// search hit (SearchHighlightBg).
+func selfMentionStyle() lipgloss.Style {
+	return lipgloss.NewStyle().
+		Foreground(styles.TextPrimary).
+		Background(styles.MentionPillBg).
+		Bold(true)
+}
+
 func blockquoteStyle() lipgloss.Style {
 	return lipgloss.NewStyle().
 		Foreground(styles.TextMuted).
@@ -621,6 +632,9 @@ type RenderSlackMarkdownOpts struct {
 	UserNames    map[string]string
 	ChannelNames map[string]string
 	UserGroups   map[string]string
+	// SelfUserID is the current user; their own <@ID> is drawn as a pill
+	// (selfMentionStyle). Empty draws every user mention alike.
+	SelfUserID string
 
 	// Emoji-image opts (zero values disable the image path).
 	PlaceCtx     emojiutil.PlaceContext
@@ -821,6 +835,9 @@ func renderInlineFormattingWith(text string, opts RenderSlackMarkdownOpts) strin
 			if resolved, ok := userNames[userID]; ok {
 				name = resolved
 			}
+		}
+		if userID == opts.SelfUserID {
+			return selfMentionStyle().Render("@" + name)
 		}
 		return mentionStyle().Render("@" + name)
 	})

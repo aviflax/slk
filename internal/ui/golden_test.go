@@ -1476,6 +1476,35 @@ func goldenScenarios() []goldenScenario {
 			},
 		},
 		{
+			// The current user is alice (U1): bob names her (bar, tint
+			// and pill), carol broadcasts (bar only), and alice's own
+			// message is unmarked. The cursor is on the last message, so
+			// all three marked rows are drawn unselected.
+			name: "mentions", w: goldenBaseW, h: goldenBaseH,
+			build: func(t *testing.T) *App {
+				a := newGoldenApp(t, goldenFixtureOpts()...)
+				a.SetCurrentUserID("U1")
+				msgs := append(goldenMessages()[:2],
+					messages.MessageItem{
+						TS: goldenTS(2 * time.Minute), UserID: "U2", UserName: "bob",
+						Text: "hey <@U1> can you look at the migration before lunch?", Timestamp: "9:02 AM", DateStr: "2026-03-15",
+					},
+					messages.MessageItem{
+						TS: goldenTS(3 * time.Minute), UserID: "U3", UserName: "carol",
+						Text: "<!here> standup in 5", Timestamp: "9:03 AM", DateStr: "2026-03-15",
+					},
+					messages.MessageItem{
+						TS: goldenTS(4 * time.Minute), UserID: "U1", UserName: "alice",
+						Text: "<!here> on my way", Timestamp: "9:04 AM", DateStr: "2026-03-15",
+					},
+				)
+				a.messagepane.SetUserNames(map[string]string{"U1": "alice", "U2": "bob", "U3": "carol"})
+				a.messagepane.SetMessages(msgs)
+				_ = a.View()
+				return a
+			},
+		},
+		{
 			// Wide enough for both: the thread is lifted to 80 columns.
 			name: "wide", w: 200, h: 50, layout: goldenSideBySide,
 			build: func(t *testing.T) *App { return goldenThreadScenario(t, 200, 50) },

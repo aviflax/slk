@@ -1,6 +1,7 @@
 package messages
 
 import (
+	"github.com/gammons/slk/internal/mention"
 	"strings"
 	"time"
 
@@ -11,13 +12,24 @@ import (
 
 // WrapStyles are the lipgloss styles that turn a rendered message into
 // list rows: the fill for the unselected row, the invisible and the
-// tinted left border. Build them once per cache build (NewWrapStyles)
-// and reuse them for every message, rather than allocating per message.
+// tinted left border, and the mention bar and tint. Build them once per
+// cache build (NewWrapStyles) and reuse them for every message, rather
+// than allocating per message.
 type WrapStyles struct {
 	fill     lipgloss.Style
 	invis    lipgloss.Style
 	selected lipgloss.Style
 	focused  bool
+
+	// Mention marks (docs/superpowers/specs/2026-10-15-mention-highlight-design.md):
+	// a broadcast gets mentionBar on the theme background; a direct
+	// mention gets mentionTinted, its content repainted from bgParams to
+	// mentionBgParams and filled with mentionFill.
+	mentionBar      lipgloss.Style
+	mentionTinted   lipgloss.Style
+	mentionFill     lipgloss.Style
+	bgParams        string
+	mentionBgParams string
 
 	// stats, when non-nil, collects per-sub-step durations (channel
 	// pane perf instrumentation).
@@ -36,7 +48,37 @@ func NewWrapStyles(focused bool) WrapStyles {
 			BorderBackground(styles.SelectionTintColor(focused)).
 			Background(styles.SelectionTintColor(focused)),
 		focused: focused,
+		mentionBar: lipgloss.NewStyle().BorderStyle(thickLeftBorder).BorderLeft(true).
+			BorderForeground(styles.MentionBar).BorderBackground(styles.Background),
+		mentionTinted: lipgloss.NewStyle().BorderStyle(thickLeftBorder).BorderLeft(true).
+			BorderForeground(styles.MentionBar).BorderBackground(styles.MentionBg),
+		mentionFill:     lipgloss.NewStyle().Background(styles.MentionBg),
+		bgParams:        bgSGRParams(BgANSI()),
+		mentionBgParams: bgSGRParams(bgANSIFor(styles.MentionBg)),
 	}
+}
+
+// MentionVariant renders content as an unselected row that mentions the
+// user (kind is not mention.None): filled to the row width and bordered
+// with the mention bar, tinted for a direct mention. Split on "\n". For a
+// row drawn outside WrapRows, such as the thread parent.
+func (s WrapStyles) MentionVariant(content string, width int, kind mention.Kind) []string {
+	return strings.Split(s.unselected(s.fill.Width(width-1).Render(content), content, width, kind), "\n")
+}
+
+// unselected borders filled, the row as drawn without the cursor on it:
+// the invisible border, or the mention bar and tint for kind.
+func (s WrapStyles) unselected(filled, content string, width int, kind mention.Kind) string {
+	switch kind {
+	case mention.Direct:
+		if s.bgParams != "" && s.bgParams != s.mentionBgParams {
+			content = substituteBgSGR(content, s.bgParams, s.mentionBgParams)
+		}
+		return s.mentionTinted.Render(s.mentionFill.Width(width - 1).Render(content))
+	case mention.Broadcast:
+		return s.mentionBar.Render(filled)
+	}
+	return s.invis.Render(filled)
 }
 
 // SelectedVariant renders content as the selected row: the selection
@@ -51,7 +93,8 @@ func (s WrapStyles) SelectedVariant(content string, width int) []string {
 // for an entrylist.Entry. A pane adds what is its own: ID, Ref, hits, and
 // the channel pane's trailing spacer rows.
 type WrappedRows struct {
-	// Lines is the unselected row, with the invisible left border.
+	// Lines is the unselected row, with the invisible left border, or the
+	// mention bar (and, for a direct mention, the mention tint).
 	Lines []string
 	// Selected is the selected row, with the tinted border and a
 	// date-qualified header timestamp.
@@ -88,7 +131,7 @@ func WrapRows(msg MessageItem, r RenderedMessage, width int, s WrapStyles) Wrapp
 		bwT0 = time.Now()
 	}
 	filledNormal := s.fill.Width(width - 1).Render(rendered)
-	normal := s.invis.Render(filledNormal)
+	normal := s.unselected(filledNormal, rendered, width, r.Mention)
 	selected := s.SelectedVariant(renderedSel, width)
 	var shortSrc string
 	if renderedSel != rendered {
