@@ -15,6 +15,10 @@ import (
 // breadcrumbHint is the right-aligned close hint on the breadcrumb row.
 const breadcrumbHint = "esc close"
 
+// breadcrumbPad is the blank columns on each side of the row, as in the
+// channel pane's header.
+const breadcrumbPad = 1
+
 // breadcrumbHintGap is the minimum run of spaces before the hint.
 const breadcrumbHintGap = 2
 
@@ -32,6 +36,20 @@ func renderBreadcrumb(width int, channelName, channelType, author string, replyC
 	if width <= 0 {
 		return ""
 	}
+	// Inset one column each side, matching the channel pane's header
+	// (Padding(0, 1)), so the two titles line up. Every width decision
+	// in breadcrumbRow runs against the inner budget. Too narrow to
+	// spare the columns, the row goes unpadded.
+	if width <= 2*breadcrumbPad {
+		return breadcrumbRow(width, channelName, channelType, author, replyCount)
+	}
+	padding := lipgloss.NewStyle().Background(styles.Background).Render(strings.Repeat(" ", breadcrumbPad))
+	return padding + breadcrumbRow(width-2*breadcrumbPad, channelName, channelType, author, replyCount) + padding
+}
+
+// breadcrumbRow renders the breadcrumb at exactly width cells, with no
+// inset.
+func breadcrumbRow(width int, channelName, channelType, author string, replyCount int) string {
 	label := "replies"
 	if replyCount == 1 {
 		label = "reply"

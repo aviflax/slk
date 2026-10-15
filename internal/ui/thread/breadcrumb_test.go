@@ -53,14 +53,25 @@ func TestRenderBreadcrumb(t *testing.T) {
 			if w := ansi.StringWidth(tt.want); w != tt.width {
 				t.Fatalf("bad row: want is %d cells, width is %d", w, tt.width)
 			}
-			got := renderBreadcrumb(tt.width, tt.channel, tt.chType, tt.author, tt.replies)
-			if w := ansi.StringWidth(got); w != tt.width {
-				t.Errorf("width = %d, want %d", w, tt.width)
+			// The row is inset one column each side, like the channel
+			// pane header, so the table's widths are the inner budget.
+			got := renderBreadcrumb(tt.width+2*breadcrumbPad, tt.channel, tt.chType, tt.author, tt.replies)
+			if w := ansi.StringWidth(got); w != tt.width+2 {
+				t.Errorf("width = %d, want %d", w, tt.width+2)
 			}
-			if plain := ansi.Strip(got); plain != tt.want {
+			if plain := ansi.Strip(got); plain != " "+tt.want+" " {
 				t.Errorf("breadcrumb =\n%q\nwant\n%q", plain, tt.want)
 			}
 		})
+	}
+}
+
+func TestRenderBreadcrumb_TinyWidthsStayExact(t *testing.T) {
+	for w := 1; w <= 14; w++ {
+		got := renderBreadcrumb(w, "general", "channel", "alice", 2)
+		if gw := ansi.StringWidth(got); gw != w {
+			t.Errorf("width %d: rendered %d cells", w, gw)
+		}
 	}
 }
 
@@ -82,7 +93,7 @@ func TestView_HeaderIsTheBreadcrumb(t *testing.T) {
 	m := breadcrumbTestModel()
 	m.SetBreadcrumb("general", "channel")
 	got := ansi.Strip(firstLine(m.View(20, 60)))
-	if want := hinted("# general › Thread from alice · 2 replies", 60); got != want {
+	if want := " " + hinted("# general › Thread from alice · 2 replies", 58) + " "; got != want {
 		t.Errorf("header =\n%q\nwant\n%q", got, want)
 	}
 	if m.chromeHeight != 2 {
@@ -99,7 +110,7 @@ func TestView_BreadcrumbChangeInvalidatesChrome(t *testing.T) {
 	if m.Version() == v {
 		t.Error("SetBreadcrumb did not bump Version; the App panel cache would serve the old header")
 	}
-	if got := ansi.Strip(firstLine(m.View(20, 60))); !strings.HasPrefix(got, "◆ design › Thread") {
+	if got := ansi.Strip(firstLine(m.View(20, 60))); !strings.HasPrefix(got, " ◆ design › Thread") {
 		t.Errorf("header after SetBreadcrumb = %q, want the new channel", got)
 	}
 	v = m.Version()
@@ -113,7 +124,7 @@ func TestView_BreadcrumbAuthorFallsBackToUserNames(t *testing.T) {
 	m := New()
 	m.SetThread(messages.MessageItem{TS: "1.0", UserID: "U9", Text: "parent"}, nil, "C1", "1.0")
 	m.SetUserNames(map[string]string{"U9": "zed"})
-	if got := ansi.Strip(firstLine(m.View(20, 60))); !strings.HasPrefix(got, "Thread from zed · 0 replies") {
+	if got := ansi.Strip(firstLine(m.View(20, 60))); !strings.HasPrefix(got, " Thread from zed · 0 replies") {
 		t.Errorf("header = %q, want the author resolved from userNames", got)
 	}
 }
@@ -127,7 +138,7 @@ func TestView_BreadcrumbIgnoresEphemeralReplies(t *testing.T) {
 	)
 	m.AddReply(messages.MessageItem{TS: "3.0", UserName: "slackbot", Text: "only you", Ephemeral: true})
 	got := ansi.Strip(firstLine(m.View(20, 60)))
-	if !strings.HasPrefix(got, "Thread from zed · 1 reply") || strings.Contains(got, "2 replies") {
+	if !strings.HasPrefix(got, " Thread from zed · 1 reply") || strings.Contains(got, "2 replies") {
 		t.Errorf("header = %q, want \"1 reply\": an ephemeral is not a reply", got)
 	}
 }
