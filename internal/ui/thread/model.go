@@ -367,8 +367,17 @@ func (m *Model) RemoveLocalSentReply(localTS string) bool {
 		if m.replies[i].TS == localTS {
 			m.replies = append(m.replies[:i], m.replies[i+1:]...)
 			m.InvalidateCache()
-			if m.selected >= len(m.replies) && len(m.replies) > 0 {
+			// Keep the cursor on the message it was on (the parent's
+			// sentinel is below every index), and fall back to the
+			// parent when no reply is left.
+			if i < m.selected {
+				m.selected--
+			}
+			if m.selected >= len(m.replies) {
 				m.selected = len(m.replies) - 1
+				if m.selected < 0 {
+					m.selected = parentSelected
+				}
 			}
 			return true
 		}

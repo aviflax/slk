@@ -1,0 +1,15 @@
+# 2026/10/15 14:01:32.465037 [TestRemoveLocalSentReplyKeepsSelection] [rapid] draw replies: 3
+# 2026/10/15 14:01:32.465049 [TestRemoveLocalSentReplyKeepsSelection] [rapid] draw removed: 0
+# 2026/10/15 14:01:32.465050 [TestRemoveLocalSentReplyKeepsSelection] [rapid] draw selected: 1
+# 2026/10/15 14:01:32.465050 [TestRemoveLocalSentReplyKeepsSelection] selection moved from 101.000001 to 101.000002
+# 
+v0.4.8#6901214195363277087
+0x0
+0x38e38e38e38e4
+0x2
+0x0
+0x0
+0x0
+0x0
+0x0
+0x1
