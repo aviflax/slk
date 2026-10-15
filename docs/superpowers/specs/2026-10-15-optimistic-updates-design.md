@@ -64,8 +64,9 @@ as it is; its shape differs and the activity path is already sound.
 ### 1. Row operations on `[]MessageItem` (package `messages`)
 
 Pure functions in `internal/ui/messages/rows.go`, each returning a
-`RowChange{Op, Index}` (`RowNone`, `RowAdded`, `RowRemoved`,
-`RowReplaced`) so the pane can fix its own selection and caches:
+`RowChange{Op, Index, From}` (`RowNone`, `RowAdded`, `RowRemoved`,
+`RowReplaced`, `RowMoved`) so the pane can fix its own selection and
+caches:
 
 ```go
 func IndexOfTS(rows []MessageItem, ts string) int      // from the back
@@ -74,15 +75,17 @@ func ReplaceTS(rows []MessageItem, ts string, item MessageItem) ([]MessageItem, 
 func RemoveTS(rows []MessageItem, ts string) ([]MessageItem, RowChange)
 func RemoveAt(rows []MessageItem, i int) ([]MessageItem, RowChange)
 func PatchTS(rows []MessageItem, ts string, f func(*MessageItem)) ([]MessageItem, RowChange) // from the front
-func Reinsert(rows []MessageItem, item MessageItem) ([]MessageItem, RowChange) // in TS order
+func Insert(rows []MessageItem, item MessageItem) ([]MessageItem, RowChange) // in TS order; no-op if shown
+func IsNewest(rows []MessageItem, i int) bool // no row Slack knows after i: the pane follows it
 func CompareTS(a, b string) int // numeric time order of Slack TSes
-func AppendIfAbsent(rows []MessageItem, item MessageItem) ([]MessageItem, RowChange)
-func Upsert(rows []MessageItem, item MessageItem) ([]MessageItem, RowChange)
-// Settle replaces the placeholder localTS with item (RowReplaced at
-// its index). When another row already has item.TS (a history load
-// brought it in first), that row takes item and the placeholder is
-// removed (RowRemoved at its old index). No placeholder: RowNone.
+func Upsert(rows []MessageItem, item MessageItem) ([]MessageItem, RowChange) // replace, else Insert
+// Settle replaces the placeholder localTS with item, which then moves
+// to where its TS belongs (RowReplaced at its index, or RowMoved from
+// it). When another row already has item.TS (a history load brought it
+// in first), that row takes item and the placeholder is removed
+// (RowRemoved at its old index). No placeholder: RowNone.
 func Settle(rows []MessageItem, localTS string, item MessageItem) ([]MessageItem, RowChange)
+func (c RowChange) Selection(selected int) int // the cursor kept on its message
 
 func LocalTS(n uint64) string           // "local:<n>", the placeholder id
 func IsLocalTS(ts string) bool          // the one placeholder predicate
@@ -96,18 +99,31 @@ delete path write through these; the reaction and reply-count paths only
 locate their row with `FirstIndexOfTS`. The send paths scan from the
 back (`IndexOfTS`); the edit and delete paths and their echoes scan from
 the front (`PatchTS`, `FirstIndexOfTS`), as they always have, so an
-edit or delete and its echo touch the same row. `Reinsert` puts a
-removed row back where its TS belongs: before the first row Slack knows
-with a later TS, else after the last such row, ahead of placeholders.
-History prepended or messages appended since the removal do not move
-it. It does nothing when the TS is shown again already.
+edit or delete and its echo touch the same row.
+
+The invariant: in both panes the rows Slack knows are in TS order,
+each TS once, and placeholders come after them in the order they were
+sent. `Insert` is the only way a row is added (a WebSocket message, a
+released held echo, a forward, an upsert, a restored delete), and
+`Settle` moves the sent message to its TS. `Insert` puts a row before
+the first row Slack knows with a later TS, else after the last such
+row, ahead of placeholders; a placeholder is appended. History
+prepended or messages appended meanwhile do not decide where it goes,
+only their TSes do. It does nothing when the TS is shown already. A
+pane follows the newest row (`IsNewest`: it selects it, which scrolls
+to it, as appending always did); any other insert or move keeps the
+cursor on the message it was on (`RowChange.Selection`). History loads
+(`SetMessages`, `PrependMessages`) come from Slack in order.
 
 Property tests are in `rows_prop_test.go`: `Settle` never yields
-duplicate TSes, reports its op, and leaves every other row alone;
+duplicate TSes, reports its op, and keeps every other row's order;
 `RemoveTS` then re-inserting at the reported index restores the slice;
-on TS-sorted rows `Reinsert` undoes `RemoveAt` and is a no-op on a
+on TS-sorted rows `Insert` undoes `RemoveAt` and is a no-op on a
 present TS, and it keeps the rows sorted after any prepends and
-appends; `CompareTS` is the time order.
+appends; `CompareTS` is the time order. `TestRowOpsKeepPaneOrder`
+runs random sequences of arrivals, sends, settles (onto new or shown
+TSes), removals and duplicates, and checks the invariant and that
+`Selection` keeps the cursor on its message after every step.
 
 There are two selection fix-ups. Each pane's `afterLocalRemoved` (used
 by `RemoveLocal`) steps back on `i < selected`, keeping the cursor on
@@ -378,7 +394,7 @@ The flow for a delete:
   is a success: the message is gone, so a second delete of a message
   already deleted reports nothing.
 - **Failure**: unless echoed (the delete went through), `restoreTo` puts
-  the rows back in TS order (`Reinsert`), reselected only if the
+  the rows back in TS order (`Insert`), reselected only if the
   cursor is still where the delete left it, and the toast shows. After
   the echo nothing is restored or reported.
 

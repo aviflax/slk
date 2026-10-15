@@ -66,13 +66,46 @@ const (
 	RowRemoved
 	// RowReplaced: the row at Index was replaced or patched in place.
 	RowReplaced
+	// RowMoved: the row that was at From was replaced and now sits at
+	// Index, where its TS belongs (Settle of a placeholder whose
+	// message is older than rows shown after it).
+	RowMoved
 )
 
 // RowChange reports what a row operation did and where. Index is -1
-// for RowNone.
+// for RowNone. From is set only for RowMoved.
 type RowChange struct {
 	Op    RowOp
 	Index int
+	From  int
+}
+
+// Selection is where a cursor on row selected sits after the change,
+// kept on the same message: a removal or insertion before it shifts
+// it, and a moved row takes the cursor with it. A cursor on a removed
+// row is left at the same index; each pane clamps it as it always has.
+func (c RowChange) Selection(selected int) int {
+	switch c.Op {
+	case RowAdded:
+		if c.Index <= selected {
+			return selected + 1
+		}
+	case RowRemoved:
+		if c.Index < selected {
+			return selected - 1
+		}
+	case RowMoved:
+		if selected == c.From {
+			return c.Index
+		}
+		if c.From < selected {
+			selected--
+		}
+		if c.Index <= selected {
+			selected++
+		}
+	}
+	return selected
 }
 
 var noRowChange = RowChange{Op: RowNone, Index: -1}
@@ -181,61 +214,79 @@ func splitTS(ts string) (sec, micro int64, ok bool) {
 	return sec, micro, sec >= 0
 }
 
-// Reinsert puts item back where its TS belongs and reports RowAdded
-// there: before the first row Slack knows with a later TS, or, when
-// there is none, after the last such row, ahead of any placeholders
-// (IsLocalTS rows, which are newer than anything Slack has). Rows that
-// were loaded or added since the removal (older history prepended, new
-// messages appended) therefore do not move it. When a row with item's
-// TS is already present (the pane reloaded it) nothing changes:
-// RowNone.
-func Reinsert(rows []MessageItem, item MessageItem) ([]MessageItem, RowChange) {
-	if item.TS != "" && FirstIndexOfTS(rows, item.TS) >= 0 {
+// ordered reports whether a row takes part in the TS order: a row Slack
+// assigned a TS. Placeholders (newer than anything Slack has, in the
+// order they were sent) and rows with no TS sit after them.
+func ordered(r MessageItem) bool { return r.TS != "" && !IsLocalTS(r.TS) }
+
+// Insert is the one way a row is added to a pane, and keeps its
+// invariant: the rows Slack knows are in TS order (CompareTS) and each
+// TS appears once, with placeholders after them. A row Slack knows goes
+// before the first such row with a later TS, or, when there is none,
+// after the last one, ahead of any placeholders; rows loaded or added
+// before it (older history prepended, newer messages appended) do not
+// decide where it goes, only their TSes do. A placeholder, or a row
+// with no TS, is appended. Reports RowAdded at the row's index. When a
+// row with item's TS is already present nothing changes: RowNone. An
+// item with an empty TS is always added.
+func Insert(rows []MessageItem, item MessageItem) ([]MessageItem, RowChange) {
+	if item.TS != "" && IndexOfTS(rows, item.TS) >= 0 {
 		return rows, noRowChange
 	}
-	i := 0
-	for j, r := range rows {
-		if IsLocalTS(r.TS) {
-			continue
+	i := len(rows)
+	if ordered(item) {
+		i = 0
+		for j, r := range rows {
+			if !ordered(r) {
+				continue
+			}
+			if CompareTS(r.TS, item.TS) > 0 {
+				i = j
+				break
+			}
+			i = j + 1
 		}
-		if CompareTS(r.TS, item.TS) > 0 {
-			i = j
-			break
-		}
-		i = j + 1
 	}
 	return slices.Insert(rows, i, item), RowChange{Op: RowAdded, Index: i}
 }
 
-// AppendIfAbsent appends item unless a row with its TS is already
-// present. An item with an empty TS is always appended.
-func AppendIfAbsent(rows []MessageItem, item MessageItem) ([]MessageItem, RowChange) {
-	if item.TS != "" && IndexOfTS(rows, item.TS) >= 0 {
-		return rows, noRowChange
+// IsNewest reports whether the row at i is the newest a pane shows: no
+// row Slack knows comes after it. A pane follows such a row (selects it
+// and scrolls to it), as it always followed an appended one; a row
+// inserted further up leaves the cursor where it is.
+func IsNewest(rows []MessageItem, i int) bool {
+	for _, r := range rows[i+1:] {
+		if ordered(r) {
+			return false
+		}
 	}
-	rows = append(rows, item)
-	return rows, RowChange{Op: RowAdded, Index: len(rows) - 1}
+	return true
 }
 
-// Upsert replaces the last row with item's TS by item, or appends item
-// when there is none. An item with an empty TS is always appended.
+// Upsert replaces the last row with item's TS by item, or Inserts item
+// when there is none. An item with an empty TS is always added.
 func Upsert(rows []MessageItem, item MessageItem) ([]MessageItem, RowChange) {
 	if item.TS != "" {
 		if out, ch := ReplaceTS(rows, item.TS, item); ch.Op != RowNone {
 			return out, ch
 		}
 	}
-	rows = append(rows, item)
-	return rows, RowChange{Op: RowAdded, Index: len(rows) - 1}
+	return Insert(rows, item)
 }
 
 // Settle replaces the placeholder row localTS with item, the
-// authoritative message, and reports RowReplaced at the placeholder's
-// index. When another row already carries item.TS (a history load
-// brought it in first), that row takes item and the placeholder is removed instead,
-// reported as RowRemoved at the placeholder's old index, so the message
-// never appears twice. A missing placeholder is a no-op (RowNone).
-// Matching is literal, item.TS "" included.
+// authoritative message. The message then moves to where its TS
+// belongs (Insert's order; an item with no TS, or a placeholder's,
+// stays put): RowReplaced at the placeholder's index when it is
+// already there, else RowMoved from that index. A message
+// older than rows shown after its placeholder (another client's
+// message that arrived while it was sending) therefore lands among
+// them in time order. When another row already carries item.TS (a
+// history load brought it in first), that row takes item and the
+// placeholder is removed instead, reported as RowRemoved at the
+// placeholder's old index, so the message never appears twice. A
+// missing placeholder is a no-op (RowNone). Matching is literal,
+// item.TS "" included.
 func Settle(rows []MessageItem, localTS string, item MessageItem) ([]MessageItem, RowChange) {
 	i := IndexOfTS(rows, localTS)
 	if i < 0 {
@@ -247,6 +298,14 @@ func Settle(rows []MessageItem, localTS string, item MessageItem) ([]MessageItem
 			return RemoveAt(rows, i)
 		}
 	}
-	rows[i] = item
-	return rows, RowChange{Op: RowReplaced, Index: i}
+	if !ordered(item) {
+		rows[i] = item
+		return rows, RowChange{Op: RowReplaced, Index: i}
+	}
+	rows, _ = RemoveAt(rows, i)
+	rows, ch := Insert(rows, item)
+	if ch.Index == i {
+		return rows, RowChange{Op: RowReplaced, Index: i}
+	}
+	return rows, RowChange{Op: RowMoved, Index: ch.Index, From: i}
 }

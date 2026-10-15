@@ -315,24 +315,34 @@ func (m *Model) LastReadTS() string {
 	return m.unreadBoundaryTS
 }
 
-// AddReply appends a reply to the thread and scrolls to the bottom.
-// We always advance `selected` to the new last index so the incoming
-// reply is visible regardless of where the user had scrolled.
+// AddReply adds a reply where its TS belongs (messages.Insert), so
+// replies Slack knows stay in TS order whatever order they arrive in.
+// The newest reply is selected, which scrolls to it, as appending
+// always did; a reply inserted further up leaves the cursor on the
+// message it was on. Idempotent on TS, for the same reason as
+// messages.Model.AppendMessage: the optimistic add (HTTP response) and
+// the WS echo can arrive in either order.
 func (m *Model) AddReply(msg messages.MessageItem) {
-	// Idempotent on TS -- same race-defense rationale as
-	// messages.Model.AppendMessage: optimistic add (HTTP response) and
-	// WS echo can arrive in either order, and a caller-side dedup map
-	// can lose the race if the echo lands first.
-	rows, ch := messages.AppendIfAbsent(m.replies, msg)
+	rows, ch := messages.Insert(m.replies, msg)
 	if ch.Op == messages.RowNone {
 		return
 	}
 	m.replies = rows
 	m.InvalidateCache()
-	m.selected = len(m.replies) - 1
-	// Reaction navigation was on the reply selected before; its next
-	// Enter must not act on the new one.
-	m.nav = messages.ReactionNav{}
+	m.afterInsert(ch)
+}
+
+// afterInsert moves the cursor after a reply was added at ch.Index:
+// the newest is followed and ends reaction navigation (its next Enter
+// must not act on the new reply); any other leaves the cursor on its
+// message.
+func (m *Model) afterInsert(ch messages.RowChange) {
+	if messages.IsNewest(m.replies, ch.Index) {
+		m.selected = ch.Index
+		m.nav = messages.ReactionNav{}
+		return
+	}
+	m.selected = ch.Selection(m.selected)
 }
 
 // RemoveLocalSentReply removes an optimistic placeholder reply
@@ -384,8 +394,7 @@ func (m *Model) UpsertSelfSentReply(msg messages.MessageItem) {
 	m.replies = rows
 	m.InvalidateCache()
 	if ch.Op == messages.RowAdded {
-		m.selected = len(m.replies) - 1
-		m.nav = messages.ReactionNav{}
+		m.afterInsert(ch)
 	}
 }
 
@@ -395,7 +404,8 @@ func (m *Model) UpsertSelfSentReply(msg messages.MessageItem) {
 func (m *Model) InsertLocal(msg messages.MessageItem) { m.AddReply(msg) }
 
 // Settle lands the sent reply (messages.Settle on this pane's
-// replies): the placeholder localTS is replaced by msg in place, or,
+// replies): the placeholder localTS is replaced by msg, which moves to
+// where its TS belongs if newer replies arrived meanwhile, or,
 // when a reply with msg.TS is already here (a fetch brought it in
 // first), that reply takes msg and the placeholder is removed, so the
 // reply shows once, with the cursor on it if it was on the
@@ -414,8 +424,11 @@ func (m *Model) Settle(localTS string, msg messages.MessageItem) {
 	}
 	m.replies = rows
 	m.InvalidateCache()
-	if ch.Op == messages.RowRemoved {
+	switch ch.Op {
+	case messages.RowRemoved:
 		m.afterSettleRemoved(ch.Index, msg.TS)
+	case messages.RowMoved:
+		m.selected = ch.Selection(m.selected)
 	}
 }
 
@@ -603,21 +616,20 @@ func (m *Model) selectedTS() string {
 }
 
 // Restore puts back a reply Remove took out, where its TS belongs
-// (messages.Reinsert; nothing when the reply is shown again already). A
+// (messages.Insert; nothing when the reply is shown again already). A
 // reply that was selected is selected again if the cursor is still
 // where Remove left it; otherwise the cursor stays where it is.
 func (m *Model) Restore(r messages.RemovedRow) {
 	cursorKept := m.selectedTS() == r.LeftOn
-	rows, ch := messages.Reinsert(m.replies, r.Item)
+	rows, ch := messages.Insert(m.replies, r.Item)
 	if ch.Op == messages.RowNone {
 		return
 	}
 	m.replies = rows
-	switch {
-	case r.Selected && cursorKept:
+	if r.Selected && cursorKept {
 		m.selected = ch.Index
-	case m.selected != parentSelected && ch.Index <= m.selected:
-		m.selected++
+	} else if m.selected != parentSelected {
+		m.selected = ch.Selection(m.selected)
 	}
 	m.InvalidateCache()
 }

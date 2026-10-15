@@ -44,7 +44,7 @@ type rowSink interface {
 	// row changes nothing.
 	Remove(ts string) (messages.RemovedRow, bool)
 	// Restore puts a removed row back where its TS belongs
-	// (messages.Reinsert), selected again if it was and the cursor is
+	// (messages.Insert), selected again if it was and the cursor is
 	// still where Remove left it; nothing when the row is shown
 	// already.
 	Restore(r messages.RemovedRow)

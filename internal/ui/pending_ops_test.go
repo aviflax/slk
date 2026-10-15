@@ -284,6 +284,15 @@ func TestPendingSend_TwoSendsEveryInterleaving(t *testing.T) {
 					t.Fatalf("%s: rows %q, want %v", name, got, want)
 				}
 			}
+			// In TS order, whatever order they arrived in.
+			if !slices.IsSorted(got) {
+				t.Fatalf("%s: rows %q are not in TS order", name, got)
+			}
+			for i, s := range log.seen {
+				if err := paneOrderErr(s); err != "" {
+					t.Fatalf("%s: step %d: %s", name, i, err)
+				}
+			}
 			if fail != 0 {
 				if !failed {
 					t.Fatalf("%s: the failure was not reported", name)
@@ -294,6 +303,66 @@ func TestPendingSend_TwoSendsEveryInterleaving(t *testing.T) {
 			}
 		})
 	}
+}
+
+// paneOrderErr checks a rowLog step: the rows Slack knows in TS order,
+// placeholders after them.
+func paneOrderErr(step string) string {
+	if step == "" {
+		return ""
+	}
+	last, local := "", false
+	for _, r := range strings.Split(step, " | ") {
+		ts, _, _ := strings.Cut(r, "=")
+		if messages.IsLocalTS(ts) {
+			local = true
+			continue
+		}
+		if local {
+			return "a row after a placeholder: " + step
+		}
+		if last != "" && messages.CompareTS(last, ts) >= 0 {
+			return "rows out of TS order: " + step
+		}
+		last = ts
+	}
+	return ""
+}
+
+// A message held while the user's send was pending is released in TS
+// order among the messages shown meanwhile, not appended at the end,
+// and a settled send moves to its TS too. The cursor stays on the
+// message it was on through both.
+func TestPendingSend_ReleasedEchoLandsInTSOrder(t *testing.T) {
+	t.Run("channel", func(t *testing.T) {
+		a := pendingApp(t)
+		local := sendTop(t, a, "mine")
+		a.Update(echo("C1", "100.000000", "", "from my phone"))
+		a.Update(NewMessageMsg{ChannelID: "C1", Message: messages.MessageItem{TS: "102.000000", UserID: "UOTHER", Text: "other"}})
+		wantRows(t, "while pending", a.messagepane.Messages(), "102.000000=other", local+"=mine")
+		if sel, _ := a.messagepane.SelectedMessage(); sel.TS != "102.000000" {
+			t.Fatalf("selected %q, want the newest message", sel.TS)
+		}
+		a.Update(MessageSentMsg{ChannelID: "C1", LocalTS: local, Message: messages.MessageItem{TS: "101.000000", UserID: "USELF", Text: "mine"}})
+		wantRows(t, "after result", a.messagepane.Messages(),
+			"100.000000=from my phone", "101.000000=mine", "102.000000=other")
+		if sel, _ := a.messagepane.SelectedMessage(); sel.TS != "102.000000" {
+			t.Fatalf("selected %q after the release, want the message it was on", sel.TS)
+		}
+	})
+	t.Run("thread", func(t *testing.T) {
+		a := pendingApp(t)
+		a.messagepane.SetMessages([]messages.MessageItem{{TS: "5.000000", Text: "parent"}})
+		openThread(a, "5.000000")
+		a.Update(SendThreadReplyMsg{ChannelID: "C1", ThreadTS: "5.000000", Text: "mine"})
+		local := a.threadPanel.Replies()[0].TS
+		a.Update(echo("C1", "100.000000", "5.000000", "from my phone"))
+		a.Update(NewMessageMsg{ChannelID: "C1", Message: messages.MessageItem{TS: "102.000000", ThreadTS: "5.000000", UserID: "UOTHER", Text: "other"}})
+		a.Update(ThreadReplySentMsg{ChannelID: "C1", ThreadTS: "5.000000", LocalTS: local,
+			Message: messages.MessageItem{TS: "101.000000", ThreadTS: "5.000000", UserID: "USELF", Text: "mine"}})
+		wantRows(t, "after result", a.threadPanel.Replies(),
+			"100.000000=from my phone", "101.000000=mine", "102.000000=other")
+	})
 }
 
 // permute calls f with every ordering of xs.

@@ -567,29 +567,39 @@ func (m *Model) SetMessages(msgs []MessageItem) {
 	m.selected = len(msgs) - 1
 }
 
+// AppendMessage adds msg where its TS belongs (Insert): rows Slack
+// knows stay in TS order whatever order they arrive in, so a message
+// held while a send was pending, or forwarded, lands among the messages
+// around it in time. It is idempotent on TS. Self-sent messages take an
+// optimistic path (MessageSentMsg from the chat.postMessage HTTP
+// response) AND can arrive again as a WebSocket echo (NewMessageMsg),
+// in either order, so the dedup lives here, at the model boundary,
+// rather than in a caller-side map that could lose the race.
 func (m *Model) AppendMessage(msg MessageItem) {
-	// Idempotent on TS. Self-sent messages take an optimistic path
-	// (MessageSentMsg from the chat.postMessage HTTP response) AND
-	// arrive again as a WebSocket echo (NewMessageMsg). The order of
-	// those two events isn't deterministic -- the WS echo can arrive
-	// before the HTTP response returns -- so a TS-keyed dedup map at the
-	// caller can race. Dedup here, at the model boundary, defends
-	// against duplicates regardless of arrival order.
-	rows, ch := AppendIfAbsent(m.messages, msg)
+	rows, ch := Insert(m.messages, msg)
 	if ch.Op == RowNone {
 		return
 	}
 	m.messages = rows
 	m.dropCache()
 	m.dirty()
+	m.afterInsert(ch)
+}
 
-	// Always scroll to the newest message. Advancing `selected` to the
-	// last index forces View() to re-snap yOffset to the bottom on the
-	// next render (because the snap mark != selected). Reaction
-	// navigation was on the message selected before, so it ends: its
-	// next Enter must not act on the new row.
-	m.selected = len(m.messages) - 1
-	m.nav = ReactionNav{}
+// afterInsert moves the cursor after a row was added at ch.Index. The
+// newest row (IsNewest) is followed: selecting it makes View() re-snap
+// yOffset to it, as appending always did, and reaction navigation,
+// which was on the message selected before, ends so its next Enter
+// cannot act on the new row. A row inserted further up leaves the
+// cursor on the message it was on.
+func (m *Model) afterInsert(ch RowChange) {
+	if IsNewest(m.messages, ch.Index) {
+		m.selected = ch.Index
+		m.nav = ReactionNav{}
+		return
+	}
+	m.selected = ch.Selection(m.selected)
+	m.list.ResetSnap()
 }
 
 // RemoveLocalSent removes an optimistic placeholder identified by
@@ -659,8 +669,7 @@ func (m *Model) UpsertSelfSent(msg MessageItem) {
 		m.list.ResetSnap()
 		return
 	}
-	m.selected = len(m.messages) - 1
-	m.nav = ReactionNav{}
+	m.afterInsert(ch)
 }
 
 // InsertLocal shows a placeholder for a message the user is sending.
@@ -669,8 +678,9 @@ func (m *Model) UpsertSelfSent(msg MessageItem) {
 func (m *Model) InsertLocal(msg MessageItem) { m.AppendMessage(msg) }
 
 // Settle lands the sent message (messages.Settle on this pane's rows).
-// The placeholder localTS is replaced by msg in place, so the order
-// matches what the user saw at Enter. When a row with msg.TS is already
+// The placeholder localTS is replaced by msg, which moves to where its
+// TS belongs when messages newer than it arrived while it was sending;
+// the cursor stays on the message it was on. When a row with msg.TS is already
 // here (a history load brought it in first), that row takes msg and the
 // placeholder is removed, so the message shows once; a selected
 // placeholder hands the cursor to that row. With no placeholder in this
@@ -694,8 +704,11 @@ func (m *Model) Settle(localTS string, msg MessageItem) {
 	// (server-rendered blocks), so the snap anchor needs a refresh, as
 	// in UpsertSelfSent's replace branch.
 	m.list.ResetSnap()
-	if ch.Op == RowRemoved {
+	switch ch.Op {
+	case RowRemoved:
 		m.afterSettleRemoved(ch.Index, msg.TS)
+	case RowMoved:
+		m.selected = ch.Selection(m.selected)
 	}
 }
 
@@ -1117,22 +1130,21 @@ func (m *Model) selectedTS() string {
 }
 
 // Restore puts back a message Remove took out, where its TS belongs
-// (Reinsert; nothing when the message is shown again already). A
+// (Insert; nothing when the message is shown again already). A
 // message that was selected is selected again if the cursor is still
 // where Remove left it; otherwise the cursor stays on the message it is
 // on.
 func (m *Model) Restore(r RemovedRow) {
 	cursorKept := m.selectedTS() == r.LeftOn
-	rows, ch := Reinsert(m.messages, r.Item)
+	rows, ch := Insert(m.messages, r.Item)
 	if ch.Op == RowNone {
 		return
 	}
 	m.messages = rows
-	switch {
-	case r.Selected && cursorKept || len(m.messages) == 1:
+	if r.Selected && cursorKept || len(m.messages) == 1 {
 		m.selected = ch.Index
-	case ch.Index <= m.selected:
-		m.selected++
+	} else {
+		m.selected = ch.Selection(m.selected)
 	}
 	m.dropCache()
 	m.dirty()

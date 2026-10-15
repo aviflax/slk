@@ -68,8 +68,9 @@ func assertDistinctTS(t *rapid.T, rows []MessageItem) {
 // whether the authoritative TS is new, already present (the echo landed
 // first), or equal to the placeholder's own, and whether the
 // placeholder is there at all. It reports what it did, and every row
-// other than the placeholder and the row it settles onto is untouched:
-// a replace leaves the rest in place, a removal only closes the gap.
+// other than the placeholder and the row it settles onto keeps its
+// order: a replace leaves the rest in place, a move or removal only
+// closes the gap and opens one where the message belongs.
 func TestSettleNeverDuplicatesTS(t *testing.T) {
 	rapid.Check(t, func(t *rapid.T) {
 		rows := drawRows(t)
@@ -86,9 +87,20 @@ func TestSettleNeverDuplicatesTS(t *testing.T) {
 		case i < 0:
 			want, wantCh = before, RowChange{Op: RowNone, Index: -1}
 		case j < 0 || j == i:
+			// The placeholder is replaced, then the message moves to
+			// where Insert puts it, unless it has no place in the
+			// TS order.
 			want = slices.Clone(before)
 			want[i] = item
 			wantCh = RowChange{Op: RowReplaced, Index: i}
+			if ordered(item) {
+				want = slices.Delete(want, i, i+1)
+				var ins RowChange
+				want, ins = Insert(want, item)
+				if ins.Index != i {
+					wantCh = RowChange{Op: RowMoved, Index: ins.Index, From: i}
+				}
+			}
 		default:
 			want = slices.Clone(before)
 			want[j] = item
@@ -170,10 +182,10 @@ func realSorted(rows []MessageItem) bool {
 	return slices.IsSortedFunc(real, func(a, b MessageItem) int { return CompareTS(a.TS, b.TS) })
 }
 
-// On rows in TS order, Reinsert undoes a removal: removing a row and
-// reinserting it gives the original slice back, and reinserting a row
-// whose TS is still present changes nothing.
-func TestReinsertUndoesRemove(t *testing.T) {
+// On rows in TS order, Insert undoes a removal: removing a row and
+// inserting it again gives the original slice back, and inserting a
+// row whose TS is still present changes nothing.
+func TestInsertUndoesRemove(t *testing.T) {
 	rapid.Check(t, func(t *rapid.T) {
 		rows := drawSortedRows(t)
 		i := slices.IndexFunc(rows, func(r MessageItem) bool { return IsLocalTS(r.TS) })
@@ -187,11 +199,11 @@ func TestReinsertUndoesRemove(t *testing.T) {
 		before := slices.Clone(rows)
 		item := rows[i]
 		got, ch := RemoveAt(rows, i)
-		got, back := Reinsert(got, item)
+		got, back := Insert(got, item)
 		if back != (RowChange{Op: RowAdded, Index: ch.Index}) || !sameRows(got, before) {
 			t.Fatalf("reinsert of %d: %v [%s], want [%s]", i, back, tsList(got), tsList(before))
 		}
-		again, ch := Reinsert(slices.Clone(got), item)
+		again, ch := Insert(slices.Clone(got), item)
 		if ch.Op != RowNone || !sameRows(again, before) {
 			t.Fatalf("reinsert of a present row: %v [%s]", ch, tsList(again))
 		}
@@ -201,14 +213,14 @@ func TestReinsertUndoesRemove(t *testing.T) {
 // A removed row goes back in TS order however much history was loaded
 // in front of it or arrived after it in the meantime: the rows Slack
 // knows stay sorted, and nothing else moves.
-func TestReinsertKeepsTSOrderAfterPrependsAndAppends(t *testing.T) {
+func TestInsertKeepsTSOrderAfterPrependsAndAppends(t *testing.T) {
 	rapid.Check(t, func(t *rapid.T) {
 		rows := drawSortedRows(t)
 		item := MessageItem{TS: proptest.TS().Draw(t, "removed"), Text: "back"}
 		if FirstIndexOfTS(rows, item.TS) >= 0 {
 			return
 		}
-		got, ch := Reinsert(slices.Clone(rows), item)
+		got, ch := Insert(slices.Clone(rows), item)
 		if ch.Op != RowAdded || got[ch.Index].TS != item.TS || !realSorted(got) {
 			t.Fatalf("reinsert %s into [%s]: %v [%s]", item.TS, tsList(rows), ch, tsList(got))
 		}
@@ -274,32 +286,117 @@ func TestReplaceAndPatchTouchOnlyTheMatch(t *testing.T) {
 	})
 }
 
-// AppendIfAbsent adds a row only for a TS the slice lacks; Upsert always
-// ends with exactly one row for the TS, replacing in place or appending.
-func TestAppendIfAbsentAndUpsert(t *testing.T) {
+// Insert adds a row only for a TS the slice lacks, and leaves the other
+// rows in their order; Upsert always ends with exactly one row for the
+// TS, replacing in place or inserting.
+func TestInsertAndUpsert(t *testing.T) {
 	rapid.Check(t, func(t *rapid.T) {
 		rows := drawRows(t)
 		item := MessageItem{TS: drawTarget(t, rows), Text: "new"}
 		present := IndexOfTS(rows, item.TS)
 		before := slices.Clone(rows)
 
-		got, ch := AppendIfAbsent(slices.Clone(rows), item)
+		got, ch := Insert(slices.Clone(rows), item)
 		if present >= 0 {
 			if ch.Op != RowNone || !sameRows(got, before) {
-				t.Fatalf("AppendIfAbsent on present %q: %v [%s]", item.TS, ch, tsList(got))
+				t.Fatalf("Insert on present %q: %v [%s]", item.TS, ch, tsList(got))
 			}
-		} else if ch.Op != RowAdded || ch.Index != len(before) || !sameRow(got[len(got)-1], item) {
-			t.Fatalf("AppendIfAbsent on absent %q: %v [%s]", item.TS, ch, tsList(got))
+		} else {
+			if ch.Op != RowAdded || !sameRow(got[ch.Index], item) {
+				t.Fatalf("Insert on absent %q: %v [%s]", item.TS, ch, tsList(got))
+			}
+			if rest := slices.Delete(slices.Clone(got), ch.Index, ch.Index+1); !sameRows(rest, before) {
+				t.Fatalf("Insert moved other rows: [%s], want [%s]", tsList(rest), tsList(before))
+			}
 		}
 
 		got, ch = Upsert(slices.Clone(rows), item)
 		assertDistinctTS(t, got)
-		want := RowChange{Op: RowAdded, Index: len(before)}
 		if present >= 0 {
-			want = RowChange{Op: RowReplaced, Index: present}
+			if ch != (RowChange{Op: RowReplaced, Index: present}) {
+				t.Fatalf("Upsert %q: %v, want replaced at %d", item.TS, ch, present)
+			}
+		} else if ch.Op != RowAdded {
+			t.Fatalf("Upsert %q: %v, want added", item.TS, ch)
 		}
-		if ch != want || !sameRow(got[ch.Index], item) {
-			t.Fatalf("Upsert %q: %v, want %v; [%s]", item.TS, ch, want, tsList(got))
+		if !sameRow(got[ch.Index], item) {
+			t.Fatalf("Upsert %q: row %d is %+v", item.TS, ch.Index, got[ch.Index])
+		}
+	})
+}
+
+// assertPaneOrder fails unless the rows Slack knows are strictly in TS
+// order (so each TS once) and every placeholder comes after them.
+func assertPaneOrder(t *rapid.T, rows []MessageItem) {
+	lastReal := ""
+	seenLocal := false
+	for _, r := range rows {
+		if IsLocalTS(r.TS) {
+			seenLocal = true
+			continue
+		}
+		if seenLocal {
+			t.Fatalf("row %s after a placeholder: [%s]", r.TS, tsList(rows))
+		}
+		if lastReal != "" && CompareTS(lastReal, r.TS) >= 0 {
+			t.Fatalf("rows out of TS order or repeated: [%s]", tsList(rows))
+		}
+		lastReal = r.TS
+	}
+	assertDistinctTS(t, rows)
+}
+
+// Whatever order messages arrive in, and however the sends among them
+// settle, fail and are put back, a pane's rows Slack knows stay strictly
+// in TS order, each once, with the placeholders after them. Each step
+// also keeps a cursor on the message it was on (RowChange.Selection),
+// unless that message left.
+func TestRowOpsKeepPaneOrder(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		var rows []MessageItem
+		pool := rapid.SliceOfNDistinct(proptest.TS(), 1, 10, func(s string) string { return s }).Draw(t, "pool")
+		var nextLocal uint64
+		for range rapid.IntRange(0, 30).Draw(t, "steps") {
+			sel := -1
+			selTS := ""
+			if len(rows) > 0 {
+				sel = rapid.IntRange(0, len(rows)-1).Draw(t, "sel")
+				selTS = rows[sel].TS
+			}
+			var ch RowChange
+			gone := ""
+			switch rapid.IntRange(0, 4).Draw(t, "op") {
+			case 0: // a message arrives (or is put back)
+				rows, ch = Insert(rows, MessageItem{TS: rapid.SampledFrom(pool).Draw(t, "ts")})
+			case 1: // the user sends
+				nextLocal++
+				rows, ch = Insert(rows, MessageItem{TS: LocalTS(nextLocal)})
+			case 2: // a send settles, perhaps onto a TS already shown
+				locals := slices.DeleteFunc(slices.Clone(rows), func(r MessageItem) bool { return !IsLocalTS(r.TS) })
+				if len(locals) == 0 {
+					continue
+				}
+				l := rapid.SampledFrom(locals).Draw(t, "settle").TS
+				gone = l
+				rows, ch = Settle(rows, l, MessageItem{TS: rapid.SampledFrom(pool).Draw(t, "as")})
+			case 3: // a row goes: a failed send, a delete
+				if len(rows) == 0 {
+					continue
+				}
+				gone = rows[rapid.IntRange(0, len(rows)-1).Draw(t, "rm")].TS
+				rows, ch = RemoveTS(rows, gone)
+			case 4: // the same message arrives twice
+				if len(rows) == 0 {
+					continue
+				}
+				rows, ch = Insert(rows, rows[rapid.IntRange(0, len(rows)-1).Draw(t, "dup")])
+			}
+			assertPaneOrder(t, rows)
+			if sel >= 0 && selTS != gone {
+				if got := ch.Selection(sel); got < 0 || got >= len(rows) || rows[got].TS != selTS {
+					t.Fatalf("cursor on %s at %d went to %d after %v: [%s]", selTS, sel, got, ch, tsList(rows))
+				}
+			}
 		}
 	})
 }

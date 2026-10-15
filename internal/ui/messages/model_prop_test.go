@@ -39,6 +39,25 @@ func (s *listMachine) existing(t *rapid.T) (string, bool) {
 	return rapid.SampledFrom(s.ts).Draw(t, "existing"), true
 }
 
+// insertReal puts a real TS into the reference where Insert puts it:
+// in TS order among the real rows, ahead of the placeholders. It
+// returns the index.
+func (s *listMachine) insertReal(ts string) int {
+	i := 0
+	for j, x := range s.ts {
+		if strings.HasPrefix(x, "local:") {
+			continue
+		}
+		if x > ts {
+			i = j
+			break
+		}
+		i = j + 1
+	}
+	s.ts = slices.Insert(s.ts, i, ts)
+	return i
+}
+
 func (s *listMachine) selectLast() {
 	s.selected = ""
 	if len(s.ts) > 0 {
@@ -124,8 +143,25 @@ func TestModelListOperations(t *testing.T) {
 			"AppendNew": func(t *rapid.T) {
 				ts := s.nextTS()
 				s.m.AppendMessage(MessageItem{TS: ts})
-				s.ts = append(s.ts, ts)
-				s.selectLast()
+				s.insertReal(ts)
+				s.selected = ts // the newest is followed
+			},
+			"AppendOlder": func(t *rapid.T) {
+				// A message held while a send was pending, released
+				// after newer ones showed: it lands in TS order and
+				// the cursor stays on its message.
+				if s.newest-s.oldest < 2 {
+					return
+				}
+				ts := tsN(rapid.IntRange(s.oldest+1, s.newest-1).Draw(t, "older"))
+				if s.index(ts) >= 0 {
+					return
+				}
+				s.m.AppendMessage(MessageItem{TS: ts})
+				i := s.insertReal(ts)
+				if !slices.ContainsFunc(s.ts[i+1:], func(x string) bool { return !strings.HasPrefix(x, "local:") }) {
+					s.selected = ts // newest after all: followed
+				}
 			},
 			"AppendDuplicate": func(t *rapid.T) {
 				if ts, ok := s.existing(t); ok {
@@ -181,7 +217,6 @@ func TestModelListOperations(t *testing.T) {
 				}
 				local := rapid.SampledFrom(locals).Draw(t, "local")
 				i := s.index(local)
-				before := s.m.SelectedIndex()
 				// The real TS is new, or one an echo already appended.
 				if len(reals) > 0 && rapid.Bool().Draw(t, "echoFirst") {
 					real := rapid.SampledFrom(reals).Draw(t, "echoed")
@@ -198,14 +233,14 @@ func TestModelListOperations(t *testing.T) {
 					}
 					return
 				}
+				// A new real TS: the message moves ahead of any
+				// placeholder sent before it, taking the cursor with it.
 				real := s.nextTS()
 				s.m.Settle(local, MessageItem{TS: real})
-				s.ts[i] = real
+				s.remove(i)
+				s.insertReal(real)
 				if s.selected == local {
 					s.selected = real
-				}
-				if got := s.m.SelectedIndex(); got != before {
-					t.Fatalf("swap moved selection %d -> %d", before, got)
 				}
 			},
 			"RemovePlaceholder": func(t *rapid.T) {
@@ -237,8 +272,8 @@ func TestModelListOperations(t *testing.T) {
 			"UpsertNew": func(t *rapid.T) {
 				ts := s.nextTS()
 				s.m.UpsertSelfSent(MessageItem{TS: ts})
-				s.ts = append(s.ts, ts)
-				s.selectLast()
+				s.insertReal(ts)
+				s.selected = ts
 			},
 			"RemoveByTS": func(t *rapid.T) {
 				ts, ok := s.existing(t)
