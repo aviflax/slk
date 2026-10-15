@@ -110,6 +110,13 @@ func countMentionsSince(db *cache.DB, chType, channelID, sinceTS, selfUserID str
 	if err != nil {
 		return 0, err
 	}
+	return countMentions(msgs, chType, selfUserID), nil
+}
+
+// countMentions is the pure core of countMentionsSince: how many of msgs
+// count toward the mention badge of a conversation of type chType,
+// self-authored messages excluded.
+func countMentions(msgs []cache.Message, chType, selfUserID string) int {
 	n := 0
 	for _, m := range msgs {
 		if m.UserID != "" && m.UserID == selfUserID {
@@ -119,7 +126,7 @@ func countMentionsSince(db *cache.DB, chType, channelID, sinceTS, selfUserID str
 			n++
 		}
 	}
-	return n, nil
+	return n
 }
 
 func markChannelRead(ctx context.Context, client channelMarker, db *cache.DB, channelID, ts string) error {
