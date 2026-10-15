@@ -42,6 +42,11 @@ type Detector struct {
 	// tests override the field directly to inject a controlled clock.
 	now func() time.Time
 
+	// newTicker starts the tick source Run steps on and returns its
+	// channel and stop func. Defaults to a time.Ticker in New; tests
+	// override it to deliver ticks by hand.
+	newTicker func(d time.Duration) (<-chan time.Time, func())
+
 	// initialized is false until the first Step seeds last.
 	initialized bool
 	// last is the most recent observation. Only meaningful when
@@ -63,7 +68,13 @@ func New(interval, threshold time.Duration, onWake func(time.Duration)) *Detecto
 		threshold: threshold,
 		onWake:    onWake,
 		now:       time.Now,
+		newTicker: realTicker,
 	}
+}
+
+func realTicker(d time.Duration) (<-chan time.Time, func()) {
+	t := time.NewTicker(d)
+	return t.C, t.Stop
 }
 
 // Step records a single clock observation. The first call seeds the
@@ -102,13 +113,17 @@ func (d *Detector) Step() {
 // returns promptly without firing further callbacks.
 func (d *Detector) Run(ctx context.Context) {
 	d.Step()
-	ticker := time.NewTicker(d.interval)
-	defer ticker.Stop()
+	newTicker := d.newTicker
+	if newTicker == nil {
+		newTicker = realTicker
+	}
+	ticks, stop := newTicker(d.interval)
+	defer stop()
 	for {
 		select {
 		case <-ctx.Done():
 			return
-		case <-ticker.C:
+		case <-ticks:
 			d.Step()
 		}
 	}

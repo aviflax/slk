@@ -260,15 +260,16 @@ func TestStep_StripsMonotonicReading_SoWallJumpsAreDetected(t *testing.T) {
 }
 
 func TestRun_ContextCancellation_ReturnsCleanly(t *testing.T) {
-	// Drive Run with a real ticker until we have observed it tick a few
-	// times, then cancel. Confirm the goroutine exits.
+	// Drive Run with hand-delivered ticks, then cancel. Confirm the
+	// goroutine exits.
 	d := New(10*time.Millisecond, 5*time.Millisecond, func(time.Duration) {})
+	ticks := make(chan time.Time)
+	d.newTicker = func(time.Duration) (<-chan time.Time, func()) { return ticks, func() {} }
 
 	// Count clock observations. Step calls d.now() exactly once per
 	// invocation, so N receives from stepped means Run has executed N
-	// Steps — the loop demonstrably spinning, rather than "50ms was
-	// probably long enough for three ticks". The send is non-blocking
-	// so Run is never throttled by a test that stopped listening.
+	// Steps. The send is non-blocking so Run is never throttled by a
+	// test that stopped listening.
 	stepped := make(chan struct{}, 8)
 	realNow := d.now
 	d.now = func() time.Time {
@@ -287,14 +288,12 @@ func TestRun_ContextCancellation_ReturnsCleanly(t *testing.T) {
 		close(done)
 	}()
 
-	// Three Steps: Run's immediate seeding Step plus two ticker-driven
-	// ones.
-	//
-	// No timeout by design: `go test` already imposes one (default 10m),
-	// and a wall-clock budget inside the test is exactly what made this
-	// load-sensitive. A hang here produces a goroutine dump naming the
-	// stuck test, which beats "Run did not return within 1s".
-	for i := 0; i < 3; i++ {
+	// Three Steps: Run's immediate seeding Step plus two ticks. The
+	// tick channel is unbuffered, so each send returns only once Run
+	// has taken the tick.
+	<-stepped
+	for i := 0; i < 2; i++ {
+		ticks <- time.Time{}
 		<-stepped
 	}
 	cancel()
@@ -302,28 +301,26 @@ func TestRun_ContextCancellation_ReturnsCleanly(t *testing.T) {
 }
 
 func TestRun_FiresOnSimulatedJump(t *testing.T) {
-	// Integration check that Run actually calls Step on every tick.
-	// We can't synchronize a real ticker with manual fake-clock
-	// advances without races, so we keep the test scope narrow:
-	// confirm that *after* simulating a large clock jump on the fake
-	// clock, the callback eventually fires. The Step tests cover the
-	// exact-threshold and below-threshold cases — this test only
-	// proves Run wires Step to the ticker.
+	// Integration check that Run actually calls Step on every tick:
+	// after a large jump on the fake clock, one tick must fire the
+	// callback. The Step tests cover the exact-threshold and
+	// below-threshold cases; this one only proves Run wires Step to the
+	// ticker.
 	fc := &fakeClock{current: time.Unix(1000, 0)}
 	fired := make(chan time.Duration, 10)
 	d := New(5*time.Millisecond, 5*time.Millisecond, func(e time.Duration) {
 		fired <- e
 	})
+	ticks := make(chan time.Time)
+	d.newTicker = func(time.Duration) (<-chan time.Time, func()) { return ticks, func() {} }
 
 	// seeded closes once the first clock observation has *returned* its
 	// value. The return, not the call, is the barrier we need: Step
 	// stores exactly the value it read, so advancing the fake clock any
 	// time after the read is observed cannot corrupt the baseline.
 	// Signalling before fc.Now() ran would let fc.Advance land first,
-	// seeding the baseline at the post-jump time — the jump would then
-	// be invisible and this test would wait forever. (Signalling from
-	// the fake's entry point instead of after the production read is
-	// the exact defect this PR exists to remove.)
+	// seeding the baseline at the post-jump time, and the jump would
+	// then be invisible.
 	seeded := make(chan struct{})
 	var once sync.Once
 	d.now = func() time.Time {
@@ -345,14 +342,12 @@ func TestRun_FiresOnSimulatedJump(t *testing.T) {
 
 	<-seeded // Run's first Step has read the baseline off the fake clock
 
-	// Simulate a wake: advance the fake clock by 2 seconds. The next
-	// tick calls Step, observes the jump, fires onWake.
+	// Simulate a wake: advance the fake clock by 2 seconds and deliver
+	// the tick that makes Run observe it.
 	fc.Advance(2 * time.Second)
+	ticks <- time.Time{}
 
-	// No timeout by design: `go test` already imposes one (default 10m),
-	// and a wall-clock budget inside the test is exactly what made this
-	// load-sensitive. A hang here produces a goroutine dump naming the
-	// stuck test, which beats "callback not fired within 500ms".
+	// A hang here produces a goroutine dump naming the stuck test.
 	e := <-fired
 	if e < 2*time.Second {
 		t.Errorf("callback elapsed = %v, want >= 2s", e)
