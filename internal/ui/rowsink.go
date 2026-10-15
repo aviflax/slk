@@ -124,26 +124,40 @@ func (a *App) localRow(localTS, text, threadTS, subtype string) messages.Message
 	}
 }
 
+// noWorkspaceReason is the failure a service result of nil stands for:
+// the cmd/slk closures return nil when no workspace is active.
+const noWorkspaceReason = "no active workspace"
+
 // stampLocalTS wraps a send's service call so its sent or failed result
-// carries localTS, which the result's reducer arm needs to find the
+// carries ins.localTS, which the result's reducer arm needs to find the
 // placeholder; services never set it. A failed thread reply also gets
 // broadcast, so its arm knows to roll back the channel feed's copy. A
-// sent reply's Broadcast is the service's to set.
-func stampLocalTS(localTS string, broadcast bool, call func() tea.Msg) tea.Cmd {
+// sent reply's Broadcast is the service's to set. A nil result (no
+// active workspace) becomes the send's failure, so the pending insert
+// ends and the placeholder goes.
+func stampLocalTS(ins pendingInsert, call func() tea.Msg) tea.Cmd {
 	return func() tea.Msg {
 		switch r := call().(type) {
+		case nil:
+			if ins.threadTS == "" {
+				return MessageSendFailedMsg{ChannelID: ins.channelID, LocalTS: ins.localTS, Reason: noWorkspaceReason}
+			}
+			return ThreadReplySendFailedMsg{
+				ChannelID: ins.channelID, ThreadTS: ins.threadTS, LocalTS: ins.localTS,
+				Reason: noWorkspaceReason, Broadcast: ins.broadcast,
+			}
 		case MessageSentMsg:
-			r.LocalTS = localTS
+			r.LocalTS = ins.localTS
 			return r
 		case MessageSendFailedMsg:
-			r.LocalTS = localTS
+			r.LocalTS = ins.localTS
 			return r
 		case ThreadReplySentMsg:
-			r.LocalTS = localTS
+			r.LocalTS = ins.localTS
 			return r
 		case ThreadReplySendFailedMsg:
-			r.LocalTS = localTS
-			r.Broadcast = broadcast
+			r.LocalTS = ins.localTS
+			r.Broadcast = ins.broadcast
 			return r
 		default:
 			return r

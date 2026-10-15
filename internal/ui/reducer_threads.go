@@ -321,10 +321,11 @@ var reduceThreads reducerFunc = func(a *App, msg tea.Msg) (tea.Cmd, bool) {
 		// the LocalTS / swap-or-remove contract and the
 		// mrkdwn.Convert rationale.
 		localTS := a.pendingOps.NextLocalTS()
-		a.pendingOps.BeginInsert(pendingInsert{
+		ins := pendingInsert{
 			localTS: localTS, channelID: m.ChannelID, threadTS: m.ThreadTS, broadcast: m.Broadcast,
 			teamID: m.TeamID, typed: m.Typed,
-		})
+		}
+		a.pendingOps.BeginInsert(ins)
 		sinks := a.replySinksFor(m.ChannelID, m.ThreadTS, m.Broadcast)
 		if sinks.thread != nil {
 			sinks.thread.InsertLocal(a.localRow(localTS, m.Text, m.ThreadTS, ""))
@@ -344,7 +345,7 @@ var reduceThreads reducerFunc = func(a *App, msg tea.Msg) (tea.Cmd, bool) {
 		ts := ids.ThreadTS(m.ThreadTS)
 		text := m.Text
 		broadcast := m.Broadcast
-		return stampLocalTS(localTS, broadcast, func() tea.Msg {
+		return stampLocalTS(ins, func() tea.Msg {
 			return threads.SendReply(chID, ts, text, broadcast)
 		}), true
 

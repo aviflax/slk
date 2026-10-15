@@ -5,6 +5,8 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
+	"github.com/gammons/slk/internal/core"
+	"github.com/gammons/slk/internal/ids"
 	"github.com/gammons/slk/internal/ui/messages"
 )
 
@@ -12,8 +14,9 @@ import (
 // Broadcast only to a failed reply (a sent reply's comes from the
 // service), and passes anything else through untouched.
 func TestStampLocalTS(t *testing.T) {
+	reply := pendingInsert{localTS: "local:7", channelID: "C1", threadTS: "5.0", broadcast: true}
 	run := func(result tea.Msg) tea.Msg {
-		return stampLocalTS("local:7", true, func() tea.Msg { return result })()
+		return stampLocalTS(reply, func() tea.Msg { return result })()
 	}
 	if got := run(MessageSentMsg{}).(MessageSentMsg); got.LocalTS != "local:7" {
 		t.Errorf("MessageSentMsg.LocalTS = %q", got.LocalTS)
@@ -30,8 +33,42 @@ func TestStampLocalTS(t *testing.T) {
 	if got := run(ToastMsg{Text: "x"}); got != (ToastMsg{Text: "x"}) {
 		t.Errorf("other result = %#v, want it unchanged", got)
 	}
-	if got := run(nil); got != nil {
-		t.Errorf("nil result = %#v, want nil", got)
+}
+
+// A service with no active workspace returns nil. For a send that is a
+// failure: without one the pending insert would never end and its
+// placeholder would never leave the screen.
+func TestStampLocalTS_NilIsFailure(t *testing.T) {
+	top := pendingInsert{localTS: "local:1", channelID: "C1"}
+	got, ok := stampLocalTS(top, func() tea.Msg { return nil })().(MessageSendFailedMsg)
+	if !ok || got != (MessageSendFailedMsg{ChannelID: "C1", LocalTS: "local:1", Reason: noWorkspaceReason}) {
+		t.Errorf("top-level nil result = %#v, want MessageSendFailedMsg", got)
+	}
+	reply := pendingInsert{localTS: "local:2", channelID: "C1", threadTS: "5.0", broadcast: true}
+	gotR, ok := stampLocalTS(reply, func() tea.Msg { return nil })().(ThreadReplySendFailedMsg)
+	want := ThreadReplySendFailedMsg{ChannelID: "C1", ThreadTS: "5.0", LocalTS: "local:2", Reason: noWorkspaceReason, Broadcast: true}
+	if !ok || gotR != want {
+		t.Errorf("reply nil result = %#v, want %#v", gotR, want)
+	}
+
+	// End to end, through a service that answers nil: the placeholder
+	// goes and the text is given back.
+	a := typedApp(t)
+	a.SetMessageService(core.NewMessageService(core.MessageServiceFuncs{
+		Send: func(ids.ChannelID, string) core.Msg { return nil },
+	}))
+	a.mode = ModeInsert
+	a.focusedPanel = PanelMessages
+	a.compose.SetValue("hi")
+	send := deliveredMsgs[SendMessageMsg](t, pressEnter(a))[0]
+	_, cmd := a.Update(send)
+	a.Update(cmd())
+	wantRows(t, "channel", a.messagepane.Messages(), "1.0=msg-1", "2.0=msg-2", "3.0=msg-3")
+	if got := a.compose.Value(); got != "hi" {
+		t.Errorf("composer = %q, want the typed text back", got)
+	}
+	if n := len(a.pendingOps.inserts); n != 0 {
+		t.Errorf("%d pending inserts left, want 0", n)
 	}
 }
 

@@ -454,15 +454,14 @@ func reduceSendMessage(a *App, m SendMessageMsg) tea.Cmd {
 	localTS := a.pendingOps.NextLocalTS()
 	// Recorded whether or not a pane shows the placeholder, so the
 	// echo is adopted rather than appended either way.
-	a.pendingOps.BeginInsert(pendingInsert{
-		localTS: localTS, channelID: m.ChannelID, teamID: m.TeamID, typed: m.Typed,
-	})
+	ins := pendingInsert{localTS: localTS, channelID: m.ChannelID, teamID: m.TeamID, typed: m.Typed}
+	a.pendingOps.BeginInsert(ins)
 	for _, s := range a.sinksFor(m.ChannelID).channel {
 		s.InsertLocal(a.localRow(localTS, m.Text, "", ""))
 	}
 	messageSvc := a.messageSvc
 	chID, text := ids.ChannelID(m.ChannelID), m.Text
-	return stampLocalTS(localTS, false, func() tea.Msg {
+	return stampLocalTS(ins, func() tea.Msg {
 		return messageSvc.Send(chID, text)
 	})
 }
