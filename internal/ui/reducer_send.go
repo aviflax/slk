@@ -675,12 +675,7 @@ func editFailedToast(err error, onClipboard bool) tea.Cmd {
 // no-op that leaves every selection alone.
 func (a *App) applyMessageDeleted(channelID, ts string) tea.Cmd {
 	a.pendingOps.EditGone(channelID, ts)
-	for _, mm := range a.modelsForChannel(channelID) {
-		mm.RemoveMessageByTS(ts)
-	}
-	if channelID == a.threadPanel.ChannelID() {
-		a.threadPanel.RemoveMessageByTS(ts)
-	}
+	a.removeFrom(a.shownSinks(channelID), ts)
 	// If the deleted message is the one currently being
 	// edited, cancel the edit (the message is gone --
 	// submitting would fail).
