@@ -37,12 +37,6 @@ type paneView struct {
 	selfID                      string
 }
 
-// conversation is the conversation v shows: for a channel feed its top
-// level (a broadcast reply in it belongs to its thread, conversationOf).
-func (v paneView) conversation() conversationKey {
-	return conversationKey{v.teamID, v.channelID, v.threadTS}
-}
-
 // overlay is fetched, rows Slack (or the cache) gave a pane for v, with
 // every pending operation put back that applies to a row Slack knows:
 // the shown body of a message with an edit pending, the message with a
