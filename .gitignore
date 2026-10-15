@@ -12,3 +12,7 @@ slk-debug.log
 # credentials and real message content, so they must never be
 # committed. Sanitized extracts belong in testdata/ instead.
 *.har
+
+# rapid writes a reproduction file here when a property fails; it is for
+# local replay, not for committing.
+**/testdata/rapid/
