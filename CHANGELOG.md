@@ -8,8 +8,14 @@ Earlier history, up to v0.26.2, is in [upstream's releases](https://github.com/g
 
 ## [Unreleased]
 
+## [0.29.0] - 2026-10-15
+
 ### Changed
 
+- Each sidebar section lists its channels first, then people, apps and group
+  DMs, each group in alphabetical order. Until now only the Starred section
+  did this, so apps and DMs in other sections were mixed in among the
+  channels.
 - Edits and deletes show at once. An edit appears in every pane showing the
   message as soon as you press Enter, and a deleted message leaves right
   away. If Slack refuses, the message goes back to what it was: a failed
@@ -195,5 +201,6 @@ v0.26.2.
   last-viewed channel drops its `▌` marker while Threads or Activity is the
   view on screen.
 
+[0.29.0]: https://github.com/kirahowe/slk/releases/tag/v0.29.0
 [0.28.0]: https://github.com/kirahowe/slk/releases/tag/v0.28.0
 [0.27.0]: https://github.com/kirahowe/slk/releases/tag/v0.27.0
