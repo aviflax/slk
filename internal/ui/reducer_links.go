@@ -91,23 +91,36 @@ var reduceLinks reducerFunc = func(a *App, msg tea.Msg) (tea.Cmd, bool) {
 
 // routeLink decides between in-app navigation and the browser.
 func (a *App) routeLink(rawURL string) tea.Cmd {
-	if cmd, err := a.routeLinkInApp(rawURL); err == nil {
+	cmd, err := a.routeLinkInApp(rawURL)
+	if err == nil || errors.Is(err, errUploadInProgress) {
+		// During an upload cmd is applyLocation's toast: the link is
+		// in-app and only has to wait, so the browser is not the answer.
 		return cmd
 	}
 	return a.browserOpener(rawURL)
 }
 
+// errUploadInProgress is routeLinkInApp's refusal while an upload runs.
+var errUploadInProgress = errors.New("an upload is in progress")
+
 // routeLinkInApp starts in-app navigation to rawURL. A non-nil error
 // says why slk will not show it; routeLink then opens the browser, and
-// OpenPermalinkMsg passes the error back to its sender.
+// OpenPermalinkMsg passes the error back to its sender. With
+// errUploadInProgress the returned cmd is applyLocation's toast.
 func (a *App) routeLinkInApp(rawURL string) (tea.Cmd, error) {
 	loc, err := a.permalinkLocation(rawURL)
 	if err != nil {
 		return nil, err
 	}
+	// applyLocation refuses during an upload but still reports ok, with
+	// its toast as the cmd; read the state first to tell the two apart.
+	uploading := a.compose.Uploading() || a.threadCompose.Uploading()
 	cmd, ok := a.applyLocation(loc, false)
 	if !ok {
 		return nil, fmt.Errorf("channel %s is not one slk knows", loc.ChannelID)
+	}
+	if uploading {
+		return cmd, errUploadInProgress
 	}
 	return cmd, nil
 }

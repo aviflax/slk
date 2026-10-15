@@ -102,3 +102,33 @@ func TestOpenPermalink_UnreadReplyDoesNotBlock(t *testing.T) {
 	app.Update(OpenPermalinkMsg{URL: "https://github.com/foo/bar", Reply: make(chan error)})
 	app.Update(OpenPermalinkMsg{URL: "https://github.com/foo/bar"})
 }
+
+// applyLocation refuses during an upload and shows a toast; the socket
+// sender must hear that as a refusal, not "ok".
+func TestOpenPermalink_DuringUpload_Declines(t *testing.T) {
+	app, opened := linkTestApp(t)
+	app.activeChannelID = "CELSEWHERE"
+	app.compose.SetUploading(true)
+	_, err := sendPermalink(t, app, "https://myteam.slack.com/archives/C054JFCBN69/p1779284733270139")
+	if err == nil || !strings.Contains(err.Error(), "upload is in progress") {
+		t.Errorf("reply = %v, want an upload refusal", err)
+	}
+	if app.pendingLinkNav != nil || *opened != "" {
+		t.Errorf("declined link acted: pending=%+v browser=%q", app.pendingLinkNav, *opened)
+	}
+}
+
+// o during an upload keeps its behaviour: the toast, not the browser.
+func TestOpenLink_DuringUpload_ToastsWithoutBrowser(t *testing.T) {
+	app, opened := linkTestApp(t)
+	app.activeChannelID = "CELSEWHERE"
+	app.compose.SetUploading(true)
+	_, cmd := app.Update(OpenLinkMsg{URL: "https://myteam.slack.com/archives/C054JFCBN69/p1779284733270139"})
+	drainCmd(cmd)
+	if *opened != "" {
+		t.Errorf("browser opened %q during an upload", *opened)
+	}
+	if got := statusbarText(app); !strings.Contains(got, "Upload in progress") {
+		t.Errorf("status bar = %q, want the upload toast", got)
+	}
+}
