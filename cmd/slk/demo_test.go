@@ -3,6 +3,7 @@ package main
 import (
 	"strings"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	tea "charm.land/bubbletea/v2"
@@ -15,10 +16,13 @@ import (
 
 // deliverDemo feeds msg to app, then runs the commands it returns,
 // recursively, as Bubble Tea would. A command that does not answer
-// within 500ms is a timer (typing expiry, loading timeout) and is
-// skipped; ui.SpinnerTickMsg is skipped explicitly (see runDemoCmd)
-// rather than by timeout, since it answers within 100ms and would
-// otherwise be delivered and re-armed recursively while loading.
+// until every goroutine in the test's synctest bubble is blocked is a
+// timer (typing expiry, loading timeout) and is skipped. Callers must
+// run inside synctest.Test: the bubble's clock stands still while the
+// command runs, so what counts as a timer does not depend on how fast
+// the machine is. ui.SpinnerTickMsg is skipped by type (see runDemoCmd),
+// since it would otherwise be delivered and re-armed recursively while
+// loading.
 func deliverDemo(t *testing.T, app *ui.App, msg tea.Msg, depth int) {
 	t.Helper()
 	if msg == nil || depth > 12 {
@@ -34,6 +38,18 @@ func deliverDemo(t *testing.T, app *ui.App, msg tea.Msg, depth int) {
 	runDemoCmd(t, app, cmd, depth+1)
 }
 
+// inDemoBubble runs body in a synctest bubble and then lets the bubble's
+// clock run past every timer deliverDemo abandoned, so each of those
+// goroutines can finish; synctest.Test insists they do. The clock is
+// fake, so this takes no real time.
+func inDemoBubble(t *testing.T, body func(*testing.T)) {
+	t.Helper()
+	synctest.Test(t, func(t *testing.T) {
+		defer time.Sleep(time.Hour)
+		body(t)
+	})
+}
+
 func runDemoCmd(t *testing.T, app *ui.App, cmd tea.Cmd, depth int) {
 	t.Helper()
 	if cmd == nil {
@@ -41,17 +57,25 @@ func runDemoCmd(t *testing.T, app *ui.App, cmd tea.Cmd, depth int) {
 	}
 	done := make(chan tea.Msg, 1)
 	go func() { done <- cmd() }()
+	// Wait returns once the command has answered or is parked on a
+	// timer; a parked timer is abandoned and fires harmlessly into the
+	// buffered channel when the bubble's clock advances at the end.
+	synctest.Wait()
 	select {
 	case msg := <-done:
 		if _, ok := msg.(ui.SpinnerTickMsg); ok {
 			return
 		}
 		deliverDemo(t, app, msg, depth)
-	case <-time.After(500 * time.Millisecond):
+	default:
 	}
 }
 
 func TestDemoAppRendersItsFirstFrame(t *testing.T) {
+	inDemoBubble(t, testDemoAppRendersItsFirstFrame)
+}
+
+func testDemoAppRendersItsFirstFrame(t *testing.T) {
 	d, err := demo.New("hero", time.Now())
 	if err != nil {
 		t.Fatal(err)
@@ -81,6 +105,10 @@ func TestRunDemoRejectsUnknownScenario(t *testing.T) {
 // fetch key (FileID + "-preview") differs from the inline renderer's and
 // must also be served by the demo's in-memory images.
 func TestDemoImageOpensFullScreen(t *testing.T) {
+	inDemoBubble(t, testDemoImageOpensFullScreen)
+}
+
+func testDemoImageOpensFullScreen(t *testing.T) {
 	d, err := demo.New("hero", time.Now())
 	if err != nil {
 		t.Fatal(err)
