@@ -535,3 +535,40 @@ func TestPageRows(t *testing.T) {
 		}
 	})
 }
+
+// The selection follows the channel, not its row: reordering, re-ranking
+// or dropping other items (SetItems, UpsertItem) leaves the cursor on the
+// same channel. This is the currentCursorKey / rebuildNavWithCursor
+// contract; reading old nav indices after the mutation would select a
+// neighbour instead.
+func TestSelectionSurvivesReorder(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		items := channelItems(12).Filter(func(s []ChannelItem) bool { return len(s) > 0 }).Draw(t, "items")
+		m := New(items)
+		target := rapid.SampledFrom(items).Draw(t, "target")
+		m.SelectByID(target.ID)
+		if m.SelectedID() != target.ID {
+			t.Fatalf("SelectByID(%s) selected %q", target.ID, m.SelectedID())
+		}
+
+		next := rapid.Permutation(items).Draw(t, "reordered")
+		next = slices.DeleteFunc(next, func(it ChannelItem) bool {
+			return it.ID != target.ID && rapid.IntRange(0, 4).Draw(t, "drop") == 0
+		})
+		for i := range next {
+			next[i].ChannelOrder = rapid.IntRange(0, 4).Draw(t, "newOrder")
+		}
+		m.SetItems(next)
+		if m.SelectedID() != target.ID {
+			t.Fatalf("SetItems moved the selection from %s to %q", target.ID, m.SelectedID())
+		}
+
+		other := rapid.SampledFrom(next).Draw(t, "upsert")
+		other.ChannelOrder = rapid.IntRange(0, 4).Draw(t, "upsertOrder")
+		m.UpsertItem(other)
+		m.UpsertItem(ChannelItem{ID: "Cnew", Name: "new", Type: "channel", Section: target.Section, ChannelOrder: 1})
+		if m.SelectedID() != target.ID {
+			t.Fatalf("UpsertItem moved the selection from %s to %q", target.ID, m.SelectedID())
+		}
+	})
+}
