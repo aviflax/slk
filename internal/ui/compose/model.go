@@ -344,6 +344,13 @@ func (m *Model) SetBroadcast(on bool) {
 	m.dirty()
 }
 
+// BoundTo reports whether the composer is bound to the draft of
+// conversation (teamID, channelID, threadTS) (SetDraftContext), so text
+// put there shows in it.
+func (m *Model) BoundTo(teamID, channelID, threadTS string) bool {
+	return m.activeKey == draftKey{teamID: teamID, channelID: channelID, threadTS: threadTS}
+}
+
 // Broadcast reports whether the next send will also post to the
 // parent channel.
 func (m Model) Broadcast() bool { return m.broadcast }

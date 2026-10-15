@@ -458,12 +458,22 @@ type DNDTickMsg struct{}
 
 // EditFailedMsg is delivered when chat.update fails. App handles by
 // showing the toast and scheduling a CopiedClearMsg.
-type EditFailedMsg struct{ Reason string }
+// OnClipboard is set when the edited text could not be given back to
+// a composer and was copied to the clipboard instead.
+type EditFailedMsg struct {
+	Reason      string
+	OnClipboard bool
+}
 
 // SendFailedMsg is delivered when chat.postMessage fails (either for a
 // top-level send or a thread reply). App handles by showing the toast
 // and scheduling a CopiedClearMsg.
-type SendFailedMsg struct{ Reason string }
+// OnClipboard is set when the text could not be given back to its
+// composer and was copied to the clipboard instead.
+type SendFailedMsg struct {
+	Reason      string
+	OnClipboard bool
+}
 
 // DeleteFailedMsg is delivered when chat.delete fails.
 type DeleteFailedMsg struct{ Reason string }

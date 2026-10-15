@@ -403,12 +403,21 @@ var reduceThreads reducerFunc = func(a *App, msg tea.Msg) (tea.Cmd, bool) {
 		if m.LocalTS != "" {
 			a.replySinksFor(m.ChannelID, m.ThreadTS, m.Broadcast).removeLocal(m.LocalTS)
 		}
+		var copyText tea.Cmd
+		var inComposer, onClipboard bool
 		if ok {
-			a.offerTypedBack(ins.origin())
+			copyText, inComposer, onClipboard = a.giveTextBack(ins.origin())
+		}
+		// A broadcast given back to the composer on screen gets its
+		// "also send to channel" toggle back, so Enter sends it as it
+		// was. A draft stored for later cannot carry it: opening a
+		// thread always clears the toggle.
+		if inComposer && ins.broadcast && a.threadCompose.BoundTo(ins.teamID, ins.channelID, ins.threadTS) {
+			a.threadCompose.SetBroadcast(true)
 		}
 		reason := m.Reason
-		return tea.Batch(func() tea.Msg {
-			return statusbar.SendFailedMsg{Reason: reason}
+		return tea.Batch(copyText, func() tea.Msg {
+			return statusbar.SendFailedMsg{Reason: reason, OnClipboard: onClipboard}
 		}, a.releaseHeld(release)), true
 	}
 	return nil, false

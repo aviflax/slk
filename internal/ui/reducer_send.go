@@ -128,12 +128,14 @@ var reduceSend reducerFunc = func(a *App, msg tea.Msg) (tea.Cmd, bool) {
 		if m.LocalTS != "" {
 			a.sinksFor(m.ChannelID).removeLocal(m.LocalTS)
 		}
+		var copyText tea.Cmd
+		var onClipboard bool
 		if ok {
-			a.offerTypedBack(ins.origin())
+			copyText, _, onClipboard = a.giveTextBack(ins.origin())
 		}
 		reason := m.Reason
-		return tea.Batch(func() tea.Msg {
-			return statusbar.SendFailedMsg{Reason: reason}
+		return tea.Batch(copyText, func() tea.Msg {
+			return statusbar.SendFailedMsg{Reason: reason, OnClipboard: onClipboard}
 		}, a.releaseHeld(release)), true
 
 	case EditMessageMsg:
@@ -481,8 +483,8 @@ func setEditedText(text string, edited bool) func(*messages.MessageItem) {
 // pendingOps until its result settles it (reduceMessageEdited).
 func reduceEditMessage(a *App, m EditMessageMsg) tea.Cmd {
 	if cmd, blocked := a.sendingGuard(m.TS); blocked {
-		a.offerTypedBack(commandOrigin{teamID: m.TeamID, channelID: m.ChannelID, threadTS: m.ThreadTS, typed: m.Typed})
-		return cmd
+		copyText, _, _ := a.giveTextBack(commandOrigin{teamID: m.TeamID, channelID: m.ChannelID, threadTS: m.ThreadTS, typed: m.Typed})
+		return tea.Batch(cmd, copyText)
 	}
 	converted, _ := mrkdwn.Convert(m.NewText)
 	prior, shown := a.shownSinks(m.ChannelID).patch(m.TS, setEditedText(converted, true))
@@ -516,21 +518,18 @@ func reduceMessageEdited(a *App, m MessageEditedMsg) tea.Cmd {
 	if m.Err == nil {
 		return nil
 	}
-	var reopen tea.Cmd
+	var reopen, copyText tea.Cmd
+	var onClipboard bool
 	if found && newest {
 		var ok bool
 		if reopen, ok = a.reopenEdit(e); !ok {
-			a.offerTypedBack(e.origin())
+			copyText, _, onClipboard = a.giveTextBack(e.origin())
 		}
 	}
 	reason := m.Err.Error()
-	toast := func() tea.Msg {
-		return statusbar.EditFailedMsg{Reason: reason}
-	}
-	if reopen == nil {
-		return toast
-	}
-	return tea.Batch(toast, reopen)
+	return tea.Batch(func() tea.Msg {
+		return statusbar.EditFailedMsg{Reason: reason, OnClipboard: onClipboard}
+	}, reopen, copyText)
 }
 
 // applyMessageDeleted shows that Slack deleted message ts of channelID,

@@ -149,7 +149,7 @@ var reduceIO reducerFunc = func(a *App, msg tea.Msg) (tea.Cmd, bool) {
 		return toastWithClear(a, "Save failed: "+truncateReason(m.Reason, 40), 3*time.Second), true
 
 	case statusbar.EditFailedMsg:
-		return toastWithClear(a, "Edit failed: "+truncateReason(m.Reason, 40), 3*time.Second), true
+		return failureToast(a, "Edit failed: "+truncateReason(m.Reason, 40), m.OnClipboard), true
 
 	case editEmptyToastMsg:
 		_ = m
@@ -159,7 +159,7 @@ var reduceIO reducerFunc = func(a *App, msg tea.Msg) (tea.Cmd, bool) {
 		return toastWithClear(a, "Delete failed: "+truncateReason(m.Reason, 40), 3*time.Second), true
 
 	case statusbar.SendFailedMsg:
-		return toastWithClear(a, "Send failed: "+truncateReason(m.Reason, 40), 3*time.Second), true
+		return failureToast(a, "Send failed: "+truncateReason(m.Reason, 40), m.OnClipboard), true
 
 	case statusbar.EditNotOwnMsg:
 		_ = m
@@ -376,4 +376,15 @@ func reducePaste(a *App, m tea.PasteMsg) tea.Cmd {
 	var cmd tea.Cmd
 	a.compose, cmd = a.compose.Update(m)
 	return cmd
+}
+
+// failureToast shows text, the failure of a send or an edit, adding
+// that the user's text is on the clipboard when giveTextBack put it
+// there. That toast stays up longer: it is the only place the user
+// learns where their text went.
+func failureToast(a *App, text string, onClipboard bool) tea.Cmd {
+	if !onClipboard {
+		return toastWithClear(a, text, 3*time.Second)
+	}
+	return toastWithClear(a, text+". Your text is on the clipboard.", 6*time.Second)
 }
