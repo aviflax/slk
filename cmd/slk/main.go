@@ -31,6 +31,7 @@ import (
 	"github.com/gammons/slk/internal/ids"
 	imgpkg "github.com/gammons/slk/internal/image"
 	"github.com/gammons/slk/internal/notify"
+	"github.com/gammons/slk/internal/opensocket"
 	"github.com/gammons/slk/internal/service"
 	slackclient "github.com/gammons/slk/internal/slack"
 	"github.com/gammons/slk/internal/slackdesktop"
@@ -114,6 +115,8 @@ func main() {
 				os.Exit(1)
 			}
 			os.Exit(0)
+		case "open":
+			os.Exit(openCommand(os.Args[2:], opensocket.Path(xdgData()), os.Stdout, os.Stderr))
 		case "--dump-sections":
 			if err := dumpSections(); err != nil {
 				fmt.Fprintf(os.Stderr, "Error: %v\n", err)
@@ -197,6 +200,9 @@ Usage:
   slk --dump-sections     Dump raw users.channelSections.list JSON (diagnostic)
   slk export [flags]      Export a channel's messages and threads to Markdown
                           (see 'slk export --help')
+  slk open <permalink>    Show a Slack permalink in the running slk; exits
+                          non-zero (3 if slk is not running) so a caller
+                          can fall back to the browser ('slk open --help')
   slk --version          Print version and exit
   slk --help             Show this help
 
@@ -1761,7 +1767,11 @@ func run() error {
 		}
 	}).Run(wakeCtx)
 
+	// Other programs hand permalinks to this instance with `slk open`.
+	stopOpenSocket := startOpenSocket(opensocket.Path(dataDir), p)
+
 	_, err = p.Run()
+	stopOpenSocket()
 	shutdown(app, router)
 
 	return err
