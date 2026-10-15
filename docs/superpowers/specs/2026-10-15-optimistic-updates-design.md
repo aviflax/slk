@@ -1,7 +1,8 @@
 # Optimistic updates: one shared mechanism
 
 Status: done, 2026-10-15 (phases 1 and 2, phase 3: optimistic edit
-and delete, phase 4: review fixes, phase 5: edit and delete fixes)
+and delete, phase 4: review fixes, phase 5: edit and delete fixes,
+phase 6: ordering, read cursors and timeouts)
 
 ## Problem
 
@@ -522,6 +523,19 @@ are out of scope.
    failed delete restores in TS order without taking a moved cursor;
    message_not_found ends a delete, and a failed edit of a deleted
    message goes to the clipboard, never a draft.
+
+6. **Ordering, read cursors and timeouts. Done:** every ctx reaches
+   slack-go (`SlackAPI` declares only `*Context` methods), so
+   `sendTimeout` ends a hung send and `requestTimeout` bounds the other
+   calls the UI waits on; rows Slack knows are TS-ordered in both panes
+   (`messages.Insert`, `Settle` moves the sent message); automatic read
+   marks never move Slack's cursor backward (`readFloors`); every
+   unsent text stays on the clipboard (`unsentTexts`); a reply already
+   in a refetched `reply_count` is not counted again (`LatestReply`);
+   join and older-history failures toast; held echoes are keyed by
+   workspace; the placeholder edit refusal reports the clipboard;
+   ephemerals stay out of navigation; a sent message is drawn from its
+   typed body throughout.
 
 ## Out of scope
 
