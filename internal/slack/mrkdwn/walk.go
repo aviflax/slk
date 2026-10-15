@@ -370,7 +370,8 @@ func (w *walker) collectInlineText(n ast.Node) string {
 // walkList emits a rich_text_list block (flat at Slack's level —
 // nested CommonMark lists are emitted as separate top-level lists
 // with increasing Indent). Mrkdwn fallback uses U+2022 bullets for
-// unordered and "N. " for ordered, with two-space indent per level.
+// unordered and "N. " for ordered (counting from the list's start
+// number), with two-space indent per level.
 func (w *walker) walkList(n *ast.List, indent int) {
 	w.flushSection()
 
@@ -380,6 +381,13 @@ func (w *walker) walkList(n *ast.List, indent int) {
 	}
 
 	list := slack.NewRichTextList(style, indent)
+	// An ordered list counts from the number it was typed with
+	// ("2024. was a year" is not "1. was a year"). Slack's list carries
+	// that as offset, the count of items before the first; it has no
+	// way to start at 0, so a list typed from 0 draws from 1 there.
+	if n.IsOrdered() && n.Start > 1 {
+		list.Offset = n.Start - 1
+	}
 
 	// Nested lists from this list's children are emitted as sibling
 	// top-level lists (Slack flat-with-indent shape). Collect them
@@ -399,7 +407,7 @@ func (w *walker) walkList(n *ast.List, indent int) {
 		// Mrkdwn marker for the item.
 		w.mrkdwn.WriteString(strings.Repeat("  ", indent))
 		if n.IsOrdered() {
-			w.mrkdwn.WriteString(strconv.Itoa(itemIdx + 1))
+			w.mrkdwn.WriteString(strconv.Itoa(n.Start + itemIdx))
 			w.mrkdwn.WriteString(". ")
 		} else {
 			w.mrkdwn.WriteString("• ")

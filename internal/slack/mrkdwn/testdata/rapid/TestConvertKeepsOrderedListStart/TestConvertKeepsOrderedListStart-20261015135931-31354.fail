@@ -1,0 +1,15 @@
+# 2026/10/15 13:59:31.678442 [TestConvertKeepsOrderedListStart] [rapid] draw start: 0
+# 2026/10/15 13:59:31.678454 [TestConvertKeepsOrderedListStart] [rapid] draw items: []string{"a"}
+# 2026/10/15 13:59:31.678480 [TestConvertKeepsOrderedListStart] Convert("0. a\n") = "1. a", want "0. a"
+# 
+v0.4.8#2511250642940511289
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0

@@ -1,12 +1,14 @@
 package mrkdwn
 
 import (
+	"fmt"
 	"regexp"
 	"strings"
 	"testing"
 	"unicode/utf8"
 
 	"github.com/gammons/slk/internal/proptest"
+	"github.com/slack-go/slack"
 	"pgregory.net/rapid"
 )
 
@@ -81,8 +83,8 @@ func TestConvertPlainTextIsIdentity(t *testing.T) {
 		// alone; every space here sits between two non-space characters.
 		//
 		// KNOWN: a line that is only a list marker becomes an empty list
-		// item: Convert("2024.") == "1. " and Convert("-") == "• ", so
-		// the text carries no digits.
+		// item: Convert("2024.") == "2024. " and Convert("-") == "• ",
+		// so the text carries no digits.
 		in := rapid.StringMatching(`[A-Za-z,.!?]([A-Za-z,.!?\n]| [A-Za-z,.!?]){0,30}`).Draw(t, "plain")
 		mr, _ := Convert(in)
 		if want := strings.TrimRight(in, "\n"); mr != want {
@@ -150,4 +152,30 @@ func TestConvertFenceInfoStringIsCode(t *testing.T) {
 	if blk == nil || len(blk.Elements) != 1 {
 		t.Fatalf("block = %+v", blk)
 	}
+}
+
+// An ordered list keeps the number it was typed with: the mrkdwn
+// fallback counts up from it and the rich text list carries it as its
+// offset, so "2024. was a year" is not sent as "1. was a year".
+func TestConvertKeepsOrderedListStart(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		start := rapid.IntRange(0, 999_999_999).Draw(t, "start")
+		items := rapid.SliceOfN(rapid.StringMatching(`[a-z]{1,8}`), 1, 4).Draw(t, "items")
+		var in, want strings.Builder
+		for i, it := range items {
+			fmt.Fprintf(&in, "%d. %s\n", start+i, it)
+			fmt.Fprintf(&want, "%d. %s\n", start+i, it)
+		}
+		mr, block := Convert(in.String())
+		if w := strings.TrimRight(want.String(), "\n"); mr != w {
+			t.Fatalf("Convert(%q) = %q, want %q", in.String(), mr, w)
+		}
+		list, ok := block.Elements[0].(*slack.RichTextList)
+		if !ok {
+			t.Fatalf("first element is %T, want a list", block.Elements[0])
+		}
+		if wantOffset := max(start-1, 0); list.Offset != wantOffset {
+			t.Fatalf("list offset %d, want %d", list.Offset, wantOffset)
+		}
+	})
 }
