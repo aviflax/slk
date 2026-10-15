@@ -169,3 +169,32 @@ func TestThreadScrolledUpKeepsTheCursorOnScreen(t *testing.T) {
 		t.Errorf("selected %q, want r10 selected and on screen after r8 grew:\n%s", got, strings.Join(f, "\n"))
 	}
 }
+
+// A new reply follows the cursor only when the cursor was at the end;
+// the user's own reply is selected wherever the cursor was.
+func TestNewReplyFollowsOnlyACursorAtTheEnd(t *testing.T) {
+	m := anchorThread(t)
+	m.AddReply(messages.MessageItem{TS: "21.000000", UserName: "u", Text: "r21"})
+	if got := selectedText(m); got != "r21" {
+		t.Errorf("cursor at the end: selected %q after r21 arrived, want r21", got)
+	}
+
+	m = anchorThread(t)
+	for range 3 {
+		m.MoveUp()
+		_ = m.View(anchorH, anchorW)
+	}
+	before := threadFrame(m)
+	m.AddReply(messages.MessageItem{TS: "21.000000", UserName: "u", Text: "r21"})
+	if got := selectedText(m); got != "r17" {
+		t.Errorf("cursor moved up: selected %q after r21 arrived, want r17 still", got)
+	}
+	if f := threadFrame(m); !frameHas(f, "r17") {
+		t.Errorf("cursor moved up: r17 left the screen\nbefore:\n%s\nafter:\n%s", strings.Join(before, "\n"), strings.Join(f, "\n"))
+	}
+
+	m.InsertLocal(messages.MessageItem{TS: messages.LocalTS(1), UserName: "me", Text: "mine"})
+	if got := selectedText(m); got != "mine" || !frameHas(threadFrame(m), "mine") {
+		t.Errorf("own reply: selected %q, want the placeholder selected and shown", got)
+	}
+}

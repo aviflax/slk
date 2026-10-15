@@ -195,3 +195,39 @@ func TestScrolledUpKeepsTheCursorOnScreen(t *testing.T) {
 		t.Errorf("selected %q, want m10 selected and on screen after m8 grew:\n%s", got, strings.Join(f, "\n"))
 	}
 }
+
+// A new message follows the cursor only when the cursor was at the end:
+// a user who moved up to read keeps their message selected and the
+// window where it was, with the hint that there is more below. Their
+// own send is selected wherever the cursor was.
+func TestNewMessageFollowsOnlyACursorAtTheEnd(t *testing.T) {
+	m := anchorPane(t)
+	m.AppendMessage(MessageItem{TS: "21.000000", UserName: "u", Text: "m21"})
+	if got := selectedText(m); got != "m21" {
+		t.Errorf("cursor at the end: selected %q after m21 arrived, want m21", got)
+	}
+
+	m = anchorPane(t)
+	for range 3 {
+		m.MoveUp()
+		_ = m.View(anchorH, anchorW)
+	}
+	m.ScrollUp(10)
+	_ = m.View(anchorH, anchorW)
+	sel := selectedText(m)
+	before := paneFrame(m)
+	m.AppendMessage(MessageItem{TS: "21.000000", UserName: "u", Text: "m21"})
+	f := paneFrame(m)
+	if got := selectedText(m); got != sel {
+		t.Errorf("cursor moved up: selected %q after m21 arrived, want %q still", got, sel)
+	}
+	if !slices.Equal(f, before) || !frameHas(f, "more below") {
+		t.Errorf("cursor moved up: the window moved, or no more-below hint\nbefore:\n%s\nafter:\n%s", strings.Join(before, "\n"), strings.Join(f, "\n"))
+	}
+
+	m.InsertLocal(MessageItem{TS: LocalTS(1), UserName: "me", Text: "mine"})
+	f = paneFrame(m)
+	if got := selectedText(m); got != "mine" || !frameHas(f, "mine") {
+		t.Errorf("own send: selected %q, want the placeholder selected and shown:\n%s", got, strings.Join(f, "\n"))
+	}
+}

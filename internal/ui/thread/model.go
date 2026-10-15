@@ -315,27 +315,46 @@ func (m *Model) LastReadTS() string {
 
 // AddReply adds a reply where its TS belongs (messages.Insert), so
 // replies Slack knows stay in TS order whatever order they arrive in.
-// The newest reply is selected, which scrolls to it, as appending
-// always did; a reply inserted further up leaves the cursor on the
+// The newest reply is selected, which scrolls to it, when the cursor
+// was at the end (cursorAtEnd); otherwise the cursor stays on the
 // message it was on. Idempotent on TS, for the same reason as
 // messages.Model.AppendMessage: the optimistic add (HTTP response) and
 // the WS echo can arrive in either order.
 func (m *Model) AddReply(msg messages.MessageItem) {
+	m.insert(msg, false)
+}
+
+// insert adds msg in TS order and moves the cursor (afterInsert);
+// sel says the user just sent it, so it is selected wherever the
+// cursor was.
+func (m *Model) insert(msg messages.MessageItem, sel bool) {
+	follow := sel || m.cursorAtEnd()
 	rows, ch := messages.Insert(m.replies, msg)
 	if ch.Op == messages.RowNone {
 		return
 	}
 	m.replies = rows
 	m.InvalidateCache()
-	m.afterInsert(ch)
+	m.afterInsert(ch, follow)
+}
+
+// cursorAtEnd reports whether the cursor is on the newest reply Slack
+// knows (or a placeholder after it), or on the parent of a thread with
+// no replies: a reader at the end, who follows a new reply.
+func (m *Model) cursorAtEnd() bool {
+	if m.selected < 0 || m.selected >= len(m.replies) {
+		return len(m.replies) == 0
+	}
+	return messages.IsNewest(m.replies, m.selected)
 }
 
 // afterInsert moves the cursor after a reply was added at ch.Index:
-// the newest is followed and ends reaction navigation (its next Enter
-// must not act on the new reply); any other leaves the cursor on its
+// with follow (the cursor was at the end, or the user sent it) the
+// newest is followed and ends reaction navigation (its next Enter
+// must not act on the new reply); otherwise the cursor stays on its
 // message.
-func (m *Model) afterInsert(ch messages.RowChange) {
-	if messages.IsNewest(m.replies, ch.Index) {
+func (m *Model) afterInsert(ch messages.RowChange, follow bool) {
+	if follow && messages.IsNewest(m.replies, ch.Index) {
 		m.selected = ch.Index
 		m.nav = messages.ReactionNav{}
 		return
@@ -388,18 +407,20 @@ func (m *Model) afterLocalRemoved(i int) {
 // motivating bug (Slack's WS-echo Text may flatten paragraph breaks
 // for rich_text_block messages).
 func (m *Model) UpsertSelfSentReply(msg messages.MessageItem) {
+	follow := m.cursorAtEnd()
 	rows, ch := messages.Upsert(m.replies, msg)
 	m.replies = rows
 	m.InvalidateCache()
 	if ch.Op == messages.RowAdded {
-		m.afterInsert(ch)
+		m.afterInsert(ch, follow)
 	}
 }
 
-// InsertLocal shows a placeholder for a reply the user is sending.
-// It is AddReply, under the name the App's send paths use for every
+// InsertLocal shows a placeholder for a reply the user is sending, as
+// AddReply does, and selects it wherever the cursor was: the user just
+// pressed Enter. It is the name the App's send paths use for every
 // pane (rowSink in package ui).
-func (m *Model) InsertLocal(msg messages.MessageItem) { m.AddReply(msg) }
+func (m *Model) InsertLocal(msg messages.MessageItem) { m.insert(msg, true) }
 
 // Settle lands the sent reply (messages.Settle on this pane's
 // replies): the placeholder localTS is replaced by msg, which moves to

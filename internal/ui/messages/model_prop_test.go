@@ -65,6 +65,16 @@ func (s *listMachine) selectLast() {
 	}
 }
 
+// atEnd reports whether the reference cursor is at the end: nothing
+// selected, or no message Slack knows after the selected one.
+func (s *listMachine) atEnd() bool {
+	i := s.index(s.selected)
+	if s.selected == "" || i < 0 {
+		return true
+	}
+	return !slices.ContainsFunc(s.ts[i+1:], func(x string) bool { return !strings.HasPrefix(x, "local:") })
+}
+
 // remove applies a removal to the reference. Removing a message below
 // the selection keeps the same message selected; removing the selected
 // one leaves the choice to the model (checked only for range).
@@ -141,10 +151,13 @@ func TestModelListOperations(t *testing.T) {
 				s.selectLast()
 			},
 			"AppendNew": func(t *rapid.T) {
+				atEnd := s.atEnd()
 				ts := s.nextTS()
 				s.m.AppendMessage(MessageItem{TS: ts})
 				s.insertReal(ts)
-				s.selected = ts // the newest is followed
+				if atEnd {
+					s.selected = ts // the newest is followed by a cursor at the end
+				}
 			},
 			"AppendOlder": func(t *rapid.T) {
 				// A message held while a send was pending, released
@@ -157,9 +170,10 @@ func TestModelListOperations(t *testing.T) {
 				if s.index(ts) >= 0 {
 					return
 				}
+				atEnd := s.atEnd()
 				s.m.AppendMessage(MessageItem{TS: ts})
 				i := s.insertReal(ts)
-				if !slices.ContainsFunc(s.ts[i+1:], func(x string) bool { return !strings.HasPrefix(x, "local:") }) {
+				if atEnd && !slices.ContainsFunc(s.ts[i+1:], func(x string) bool { return !strings.HasPrefix(x, "local:") }) {
 					s.selected = ts // newest after all: followed
 				}
 			},
@@ -171,9 +185,9 @@ func TestModelListOperations(t *testing.T) {
 			"AppendPlaceholder": func(t *rapid.T) {
 				s.locals++
 				ts := fmt.Sprintf("local:%d", s.locals)
-				s.m.AppendMessage(MessageItem{TS: ts})
+				s.m.InsertLocal(MessageItem{TS: ts})
 				s.ts = append(s.ts, ts)
-				s.selectLast()
+				s.selectLast() // the user's own send is selected
 			},
 			"Prepend": func(t *rapid.T) {
 				// Mostly older rows, plus some a raced backfill would
@@ -270,10 +284,13 @@ func TestModelListOperations(t *testing.T) {
 				}
 			},
 			"UpsertNew": func(t *rapid.T) {
+				atEnd := s.atEnd()
 				ts := s.nextTS()
 				s.m.UpsertSelfSent(MessageItem{TS: ts})
 				s.insertReal(ts)
-				s.selected = ts
+				if atEnd {
+					s.selected = ts
+				}
 			},
 			"RemoveByTS": func(t *rapid.T) {
 				ts, ok := s.existing(t)

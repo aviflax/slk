@@ -114,8 +114,12 @@ row, ahead of placeholders; a placeholder is appended. History
 prepended or messages appended meanwhile do not decide where it goes,
 only their TSes do. It does nothing when the TS is shown already. A
 pane follows the newest row (`IsNewest`: it selects it, which scrolls
-to it, as appending always did); any other insert or move keeps the
-cursor on the message it was on (`RowChange.Selection`). History loads
+to it) when its cursor was at the end before the insert (`cursorAtEnd`:
+on the newest row Slack knows or a placeholder after it, or nothing to
+select), and always for the user's own placeholder (`InsertLocal`);
+any other insert or move keeps the cursor on the message it was on
+(`RowChange.Selection`), and the window stays where it was, with
+"-- more below --" showing. History loads
 (`SetMessages`, `PrependMessages`) come from Slack in order.
 
 Property tests are in `rows_prop_test.go`: `Settle` never yields
@@ -703,7 +707,10 @@ are out of scope.
    (`entrylist.WithBottomOverlay`, which also counts a cursor on that
    row as off screen). A window at the end also scrolls back to a
    cursor wholly on screen that a change pushes out, unless the cursor
-   is on the last entry, when the end stays in view.
+   is on the last entry, when the end stays in view. A new message no
+   longer drags a cursor the user moved up down to it: only a cursor at
+   the end follows the newest row, and the user's own send is always
+   selected.
 
 ## Out of scope
 

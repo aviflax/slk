@@ -577,6 +577,14 @@ func (m *Model) SetMessages(msgs []MessageItem) {
 // in either order, so the dedup lives here, at the model boundary,
 // rather than in a caller-side map that could lose the race.
 func (m *Model) AppendMessage(msg MessageItem) {
+	m.insert(msg, false)
+}
+
+// insert adds msg in TS order and moves the cursor (afterInsert);
+// select says the user just sent it, so it is selected wherever the
+// cursor was.
+func (m *Model) insert(msg MessageItem, sel bool) {
+	follow := sel || m.cursorAtEnd()
 	rows, ch := Insert(m.messages, msg)
 	if ch.Op == RowNone {
 		return
@@ -584,18 +592,29 @@ func (m *Model) AppendMessage(msg MessageItem) {
 	m.messages = rows
 	m.dropCache()
 	m.dirty()
-	m.afterInsert(ch)
+	m.afterInsert(ch, follow)
+}
+
+// cursorAtEnd reports whether the cursor is on the newest message Slack
+// knows, or on a placeholder after it, or there is nothing to select:
+// a pane whose user is reading the newest messages, which follows a
+// new one.
+func (m *Model) cursorAtEnd() bool {
+	return len(m.messages) == 0 || m.selected < 0 || m.selected >= len(m.messages) ||
+		IsNewest(m.messages, m.selected)
 }
 
 // afterInsert moves the cursor after a row was added at ch.Index. The
-// newest row (IsNewest) is followed: selecting it makes View() scroll
-// to it, as appending always did, and reaction navigation, which was
-// on the message selected before, ends so its next Enter cannot act on
-// the new row. A row inserted further up leaves the cursor on the
-// message it was on. The list keeps the window in place (entrylist
-// anchoring).
-func (m *Model) afterInsert(ch RowChange) {
-	if IsNewest(m.messages, ch.Index) {
+// newest row (IsNewest) is followed when follow is set (the cursor was
+// at the end, cursorAtEnd, or the user sent the row): selecting it
+// makes View() scroll to it, and reaction navigation, which was on the
+// message selected before, ends so its next Enter cannot act on the new
+// row. Otherwise the cursor stays on the message it was on: a user who
+// moved up to read is not dragged down by a new message, and the list
+// keeps the window in place (entrylist anchoring), with "-- more
+// below --" showing there is more.
+func (m *Model) afterInsert(ch RowChange, follow bool) {
+	if follow && IsNewest(m.messages, ch.Index) {
 		m.selected = ch.Index
 		m.nav = ReactionNav{}
 		return
@@ -655,19 +674,21 @@ func (m *Model) afterLocalRemoved(i int) {
 // A replacement that changes the row's height leaves a window at the
 // bottom there (entrylist anchoring).
 func (m *Model) UpsertSelfSent(msg MessageItem) {
+	follow := m.cursorAtEnd()
 	rows, ch := Upsert(m.messages, msg)
 	m.messages = rows
 	m.dropCache()
 	m.dirty()
 	if ch.Op != RowReplaced {
-		m.afterInsert(ch)
+		m.afterInsert(ch, follow)
 	}
 }
 
-// InsertLocal shows a placeholder for a message the user is sending.
-// It is AppendMessage, under the name the App's send paths use for
+// InsertLocal shows a placeholder for a message the user is sending,
+// as AppendMessage does, and selects it wherever the cursor was: the
+// user just pressed Enter. It is the name the App's send paths use for
 // every pane (rowSink in package ui).
-func (m *Model) InsertLocal(msg MessageItem) { m.AppendMessage(msg) }
+func (m *Model) InsertLocal(msg MessageItem) { m.insert(msg, true) }
 
 // Settle lands the sent message (messages.Settle on this pane's rows).
 // The placeholder localTS is replaced by msg, which moves to where its
