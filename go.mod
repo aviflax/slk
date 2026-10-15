@@ -28,6 +28,7 @@ require (
 	golang.org/x/term v0.45.0
 	golang.org/x/text v0.40.0
 	modernc.org/sqlite v1.58.0
+	pgregory.net/rapid v1.3.0
 	r00t2.io/gosecret v1.1.5
 )
 

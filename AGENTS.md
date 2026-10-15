@@ -13,6 +13,7 @@ a fourth time because the author did not know the first three existed. See
 go build ./...
 go test ./...                 # ~10s
 go test ./... -race           # ~47s; this is what CI runs
+make fuzz                     # every Fuzz target, 30s each (FUZZTIME=2m)
 go vet ./...
 golangci-lint run             # v2.14.0, config in .golangci.yml
 gofmt -l .                    # must be empty; enforced in CI
@@ -27,8 +28,32 @@ The shape is what matters: under `-race`, four packages are ~95% of the run —
 you are changing; `internal/ui` alone is now longer under `-race` than the whole
 suite used to be.
 
-Tests are plain `testing.T`, stdlib only. No testify, no gomock, no golden
-libraries. White-box (`package ui`, not `package ui_test`) by convention.
+Tests are plain `testing.T`. No testify, no gomock, no golden libraries.
+White-box (`package ui`, not `package ui_test`) by convention. The one
+test dependency is `pgregory.net/rapid`, for property tests.
+
+### Property tests and fuzzing
+
+A function whose output depends only on its arguments gets a property
+test, not only examples. Two tools, picked by input shape:
+
+- **rapid** (`rapid.Check`) for structured inputs and stateful models.
+  Draw from the shared generators in `internal/proptest` (styled terminal
+  text, Slack wire text, IDs, timestamps) before writing a local one, and
+  add a generator there when two packages need it. A failure prints the
+  shrunk input; rerun it with the `-rapid.seed` it reports.
+- **Native fuzzing** (`func FuzzX(f *testing.F)`) for parsers and string
+  transforms that take arbitrary bytes. `go test` replays the seeds and
+  every saved crasher under `testdata/fuzz/`; `make fuzz` (or
+  `scripts/fuzz.sh 2m ./internal/text`) runs the fuzzer itself. Commit a
+  crasher with its fix.
+
+Property tests live in `*_prop_test.go` beside the example tests. State
+the property in the test's comment. When a function is impure only
+because it reads a theme global, the clock or model state, extract the
+pure core and test that; the refactor rules below still apply (move
+behaviour, never change it in the same commit). A property that finds a
+bug lands with the fix in its own commit.
 
 ## Architecture in one screen
 
@@ -280,6 +305,8 @@ greppable by name; no line numbers, because these files move.
 | A slashApp whose conversations.open is recorded and answers with DM D9 | `msgSlashApp(t)`, returning the App, the `*[]runCall` log and the `*[][]string` OpenConversation log (`internal/ui/slash_builtins_test.go`); `failOpenConversation(a)` then makes that open answer `NewMessageFailedMsg` |
 | The draft of a conversation in T1, read by switching the composer to it (changes the composer's draft context) | `draftIn(a, channelID)` (`internal/ui/slash_builtins_test.go`) |
 | Compare a request this repo builds with a scrubbed web-client capture (`{method, form, response}` JSON in `testdata/`) | `capturedForm(t, name)` (the capture's form minus `token` and the `_x_*` envelope) and `assertFormMatchesCapture(t, got, name)` (same fields and values, nothing extra; `client_token` checked for shape) (`internal/slack/command_test.go`, `package slackclient`) |
+| Generate styled terminal text, Slack wire text (mentions, links, code, entities), plain text with wide and combining runes, Slack IDs and timestamps, for a property test | `internal/proptest` (`StyledText`, `StyledTextWith`, `SGR`, `BgSGR`, `OSC8`, `SlackText(users, channels)`, `PlainText`, `Word`, `ID(prefix)`, `TS`); an ordinary package that only `_test.go` files import |
+| Run the fuzz targets | `scripts/fuzz.sh [fuzztime] [pattern]`, `make fuzz` |
 | Load a config from a TOML string | `loadConfigString(t, body)` (`internal/config/config_test.go`, `package config`) |
 
 ### Known duplication — do not add to it

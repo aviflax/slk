@@ -1,4 +1,4 @@
-.PHONY: build test lint run clean demo-gifs
+.PHONY: build test fuzz lint run clean demo-gifs
 
 BINARY=slk
 BUILD_DIR=bin
@@ -8,6 +8,11 @@ build:
 
 test:
 	go test ./... -v -race
+
+# Runs every Fuzz target for FUZZTIME each (default 30s). Plain `make
+# test` already replays the seed corpus and any saved crashers.
+fuzz:
+	scripts/fuzz.sh $(or $(FUZZTIME),30s)
 
 lint:
 	golangci-lint run ./...
