@@ -64,7 +64,6 @@ import (
 
 	"github.com/gammons/slk/internal/debuglog"
 	"github.com/gammons/slk/internal/ids"
-	"github.com/gammons/slk/internal/slack/mrkdwn"
 	"github.com/gammons/slk/internal/ui/messages"
 	"github.com/gammons/slk/internal/ui/statusbar"
 )
@@ -323,16 +322,9 @@ var reduceThreads reducerFunc = func(a *App, msg tea.Msg) (tea.Cmd, bool) {
 		// the LocalTS / swap-or-remove contract and the
 		// mrkdwn.Convert rationale.
 		localTS := a.selfSend.NextLocalTS()
-		optimisticText, _ := mrkdwn.Convert(m.Text)
-		if a.threadVisible && m.ThreadTS == a.threadPanel.ThreadTS() && m.ChannelID == a.threadPanel.ChannelID() {
-			a.threadPanel.AddReply(messages.MessageItem{
-				TS:        localTS,
-				UserID:    a.currentUserID,
-				UserName:  a.userNameFor(a.currentUserID),
-				Text:      optimisticText,
-				Timestamp: a.nowFormatted(),
-				ThreadTS:  m.ThreadTS,
-			})
+		sinks := a.replySinksFor(m.ChannelID, m.ThreadTS, m.Broadcast)
+		if sinks.thread != nil {
+			sinks.thread.InsertLocal(a.localRow(localTS, m.Text, m.ThreadTS, ""))
 		}
 		// Broadcast ("Also send to #channel"): the reply will also
 		// land in the parent channel feed as a thread_broadcast row.
@@ -340,37 +332,18 @@ var reduceThreads reducerFunc = func(a *App, msg tea.Msg) (tea.Cmd, bool) {
 		// ThreadReplySentMsg) suppresses the WS echo, so the only
 		// way the feed shows the row promptly is this optimistic
 		// add + the swap in ThreadReplySentMsg below.
-		if m.Broadcast {
-			for _, mm := range a.modelsForChannel(m.ChannelID) {
-				mm.AppendMessage(messages.MessageItem{
-					TS:        localTS,
-					UserID:    a.currentUserID,
-					UserName:  a.userNameFor(a.currentUserID),
-					Text:      optimisticText,
-					Timestamp: a.nowFormatted(),
-					ThreadTS:  m.ThreadTS,
-					Subtype:   "thread_broadcast",
-				})
-			}
+		// sinks.channel is empty unless m.Broadcast.
+		for _, s := range sinks.channel {
+			s.InsertLocal(a.localRow(localTS, m.Text, m.ThreadTS, "thread_broadcast"))
 		}
 		threads := a.threads
 		chID := ids.ChannelID(m.ChannelID)
 		ts := ids.ThreadTS(m.ThreadTS)
 		text := m.Text
 		broadcast := m.Broadcast
-		return func() tea.Msg {
-			result := threads.SendReply(chID, ts, text, broadcast)
-			switch r := result.(type) {
-			case ThreadReplySentMsg:
-				r.LocalTS = localTS
-				return r
-			case ThreadReplySendFailedMsg:
-				r.LocalTS = localTS
-				r.Broadcast = broadcast
-				return r
-			}
-			return result
-		}, true
+		return stampLocalTS(localTS, broadcast, func() tea.Msg {
+			return threads.SendReply(chID, ts, text, broadcast)
+		}), true
 
 	case ThreadReplySentMsg:
 		// chat.postMessage for the thread reply landed. If a
@@ -395,23 +368,12 @@ var reduceThreads reducerFunc = func(a *App, msg tea.Msg) (tea.Cmd, bool) {
 		// meant the user's own reply was sent to Slack but never
 		// appended locally -- they had to leave and re-enter the
 		// thread to see it.
-		if a.threadVisible && m.ThreadTS == a.threadPanel.ThreadTS() && m.ChannelID == a.threadPanel.ChannelID() {
-			if !a.threadPanel.SwapLocalSentReply(m.LocalTS, m.Message) {
-				a.threadPanel.UpsertSelfSentReply(m.Message)
-			}
-		}
+		//
 		// Broadcast: also land the authoritative message in the
 		// channel feed, swapping the optimistic thread_broadcast
 		// placeholder added in SendThreadReplyMsg. Mirrors
 		// MessageSentMsg's swap-or-upsert contract.
-		if m.Broadcast {
-			for _, mm := range a.modelsForChannel(m.ChannelID) {
-				item := cloneMessageItem(m.Message)
-				if !mm.SwapLocalSent(m.LocalTS, item) {
-					mm.UpsertSelfSent(item)
-				}
-			}
-		}
+		a.replySinksFor(m.ChannelID, m.ThreadTS, m.Broadcast).settle(m.LocalTS, m.Message)
 		for _, mm := range a.modelsForChannel(m.ChannelID) {
 			mm.IncrementReplyCount(m.ThreadTS, m.Message.TS)
 		}
@@ -425,13 +387,8 @@ var reduceThreads reducerFunc = func(a *App, msg tea.Msg) (tea.Cmd, bool) {
 		// the optimistic placeholder. Mirrors MessageSendFailedMsg.
 		// For broadcasts, also roll back the thread_broadcast row
 		// optimistically added to the channel feed.
-		if a.threadVisible && m.ThreadTS == a.threadPanel.ThreadTS() && m.ChannelID == a.threadPanel.ChannelID() && m.LocalTS != "" {
-			a.threadPanel.RemoveLocalSentReply(m.LocalTS)
-		}
-		if m.Broadcast && m.LocalTS != "" {
-			for _, mm := range a.modelsForChannel(m.ChannelID) {
-				mm.RemoveLocalSent(m.LocalTS)
-			}
+		if m.LocalTS != "" {
+			a.replySinksFor(m.ChannelID, m.ThreadTS, m.Broadcast).removeLocal(m.LocalTS)
 		}
 		reason := m.Reason
 		return func() tea.Msg {

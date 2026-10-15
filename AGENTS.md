@@ -235,6 +235,7 @@ scrollbars, date formatting, case folding, or ID formatting: it already exists.
 | Need | Use |
 |---|---|
 | Selected message or reply in the focused pane (channel, TS, text, author, panel) | `App.selectedMessageContext()` (`internal/ui/app.go`) |
+| Show, settle or roll back an optimistic message row (send, thread reply, broadcast) in every pane showing it | `rowSink` (`InsertLocal`, `Settle`, `RemoveLocal`; both panes implement it) and `(*App).sinksFor(channelID)` / `replySinksFor(channelID, threadTS, broadcast)`, whose `rowSinks.settle` / `removeLocal` clone per channel window; the placeholder row is `(*App).localRow(localTS, text, threadTS, subtype)`, and `stampLocalTS(localTS, broadcast, call)` wraps the service call so the result carries `LocalTS` (`internal/ui/rowsink.go`) |
 | Switch the active workspace from the UI | `App.switchWorkspace(teamID)` (`internal/ui/app.go`). Always use it: it saves a theme a cycle left pending, so a switch back to that workspace reads the new theme |
 | Save a per-workspace theme | `settings.SaveTheme(teamID, name, scope)` with the workspace on screen (`a.activeTeamID`), never the backend's active one: a switch moves that first |
 | Set the user's own presence or DND from the UI (optimistic cache + status bar, then the service) | `(*App).applyPresenceAction(action, snoozeMinutes)` (`internal/ui/presence_action.go`); the presence menu, custom snooze and the `/away` family use it |

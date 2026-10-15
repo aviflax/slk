@@ -686,6 +686,23 @@ func (m *Model) UpsertSelfSent(msg MessageItem) {
 	m.selected = len(m.messages) - 1
 }
 
+// InsertLocal shows a placeholder for a message the user is sending.
+// It is AppendMessage, under the name the App's send paths use for
+// every pane (rowSink in package ui).
+func (m *Model) InsertLocal(msg MessageItem) { m.AppendMessage(msg) }
+
+// Settle lands the sent message: it swaps out the placeholder localTS,
+// or upserts msg when the placeholder is not in this pane (the user
+// left the channel and came back before the post returned).
+func (m *Model) Settle(localTS string, msg MessageItem) {
+	if !m.SwapLocalSent(localTS, msg) {
+		m.UpsertSelfSent(msg)
+	}
+}
+
+// RemoveLocal rolls back the placeholder localTS after a failed send.
+func (m *Model) RemoveLocal(localTS string) bool { return m.RemoveLocalSent(localTS) }
+
 func (m *Model) Messages() []MessageItem {
 	return m.messages
 }

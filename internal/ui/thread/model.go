@@ -402,6 +402,22 @@ func (m *Model) UpsertSelfSentReply(msg messages.MessageItem) {
 	}
 }
 
+// InsertLocal shows a placeholder for a reply the user is sending.
+// It is AddReply, under the name the App's send paths use for every
+// pane (rowSink in package ui).
+func (m *Model) InsertLocal(msg messages.MessageItem) { m.AddReply(msg) }
+
+// Settle lands the sent reply: it swaps out the placeholder localTS,
+// or upserts msg when the placeholder is not in this pane.
+func (m *Model) Settle(localTS string, msg messages.MessageItem) {
+	if !m.SwapLocalSentReply(localTS, msg) {
+		m.UpsertSelfSentReply(msg)
+	}
+}
+
+// RemoveLocal rolls back the placeholder localTS after a failed send.
+func (m *Model) RemoveLocal(localTS string) bool { return m.RemoveLocalSentReply(localTS) }
+
 // Clear resets all thread state.
 func (m *Model) Clear() {
 	m.ClearSelection()

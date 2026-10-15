@@ -74,12 +74,13 @@ func (a *App) modelsForChannel(chID string) []*messages.Model {
 
 // cloneMessageItem returns a copy of item safe to hand to one model
 // when the same value fans out to several: the struct copies by
-// value, but the Reactions slice needs its own backing array —
-// UpdateReaction writes elements in place and shifts on remove, so a
-// shared array would let one window's reaction event corrupt another
-// window's view. ReactionItem.UserIDs needs no copy: Append /
-// RemoveUserID are copy-on-write. Attachments / Blocks /
-// LegacyAttachments are never mutated in place by the model.
+// value, and the Reactions slice gets its own backing array.
+// messages.ApplyReaction (behind UpdateReaction) already replaces the
+// slice rather than writing into it, so the copy is insurance against
+// a future in-place writer, not a fix for a current one.
+// ReactionItem.UserIDs needs no copy: Append / RemoveUserID are
+// copy-on-write. Attachments / Blocks / LegacyAttachments are never
+// mutated in place by the model.
 func cloneMessageItem(item messages.MessageItem) messages.MessageItem {
 	if len(item.Reactions) > 0 {
 		item.Reactions = append([]messages.ReactionItem(nil), item.Reactions...)

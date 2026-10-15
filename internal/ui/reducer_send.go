@@ -52,7 +52,6 @@ import (
 
 	"github.com/gammons/slk/internal/debuglog"
 	"github.com/gammons/slk/internal/ids"
-	"github.com/gammons/slk/internal/slack/mrkdwn"
 	"github.com/gammons/slk/internal/ui/messages"
 	"github.com/gammons/slk/internal/ui/statusbar"
 )
@@ -97,16 +96,8 @@ var reduceSend reducerFunc = func(a *App, msg tea.Msg) (tea.Cmd, bool) {
 			return nil, true
 		}
 		a.selfSend.RecordSent(m.Message.TS)
-		for _, mm := range a.modelsForChannel(m.ChannelID) {
-			// Per-model clone: fresh post responses carry no
-			// reactions today, but a shared Reactions array across
-			// sibling models would corrupt on the first in-place
-			// UpdateReaction — clone is the cheap insurance.
-			item := cloneMessageItem(m.Message)
-			if !mm.SwapLocalSent(m.LocalTS, item) {
-				mm.UpsertSelfSent(item)
-			}
-		}
+		// settle gives each channel window its own clone.
+		a.sinksFor(m.ChannelID).settle(m.LocalTS, m.Message)
 		return nil, true
 
 	case MessageSendFailedMsg:
@@ -114,9 +105,7 @@ var reduceSend reducerFunc = func(a *App, msg tea.Msg) (tea.Cmd, bool) {
 		// optimistic placeholder so the user can see the send
 		// didn't go through. A toast surfaces the reason.
 		if m.LocalTS != "" {
-			for _, mm := range a.modelsForChannel(m.ChannelID) {
-				mm.RemoveLocalSent(m.LocalTS)
-			}
+			a.sinksFor(m.ChannelID).removeLocal(m.LocalTS)
 		}
 		reason := m.Reason
 		return func() tea.Msg {
@@ -446,40 +435,16 @@ func reduceSendMessage(a *App, m SendMessageMsg) tea.Cmd {
 	// view) no window matches and we skip the placeholder; the HTTP
 	// response will fall back to UpsertSelfSent's append path.
 	//
-	// Convert the user-typed CommonMark to Slack mrkdwn before
-	// rendering so the placeholder picks up bold / italic / code /
-	// link styling immediately. Without this, "**bold**" would
-	// render literally until the chat.postMessage HTTP response
-	// landed and the swap dropped in Slack's converted form. The
-	// converter is the same one used by client.SendMessage, so the
-	// placeholder and the swapped message render identically for
-	// the common case (no rich_text_block paragraph quirks).
+	// localRow converts the user-typed CommonMark to Slack mrkdwn
+	// with the converter client.SendMessage uses, so "**bold**" is
+	// styled in the placeholder rather than literal until the swap.
 	localTS := a.selfSend.NextLocalTS()
-	optimisticText, _ := mrkdwn.Convert(m.Text)
-	for _, mm := range a.modelsForChannel(m.ChannelID) {
-		mm.AppendMessage(messages.MessageItem{
-			TS:        localTS,
-			UserID:    a.currentUserID,
-			UserName:  a.userNameFor(a.currentUserID),
-			Text:      optimisticText,
-			Timestamp: a.nowFormatted(),
-		})
+	for _, s := range a.sinksFor(m.ChannelID).channel {
+		s.InsertLocal(a.localRow(localTS, m.Text, "", ""))
 	}
 	messageSvc := a.messageSvc
 	chID, text := ids.ChannelID(m.ChannelID), m.Text
-	return func() tea.Msg {
-		result := messageSvc.Send(chID, text)
-		// Attach LocalTS so the receiving handler can swap or
-		// remove the placeholder. Senders shouldn't need to know
-		// about LocalTS themselves.
-		switch r := result.(type) {
-		case MessageSentMsg:
-			r.LocalTS = localTS
-			return r
-		case MessageSendFailedMsg:
-			r.LocalTS = localTS
-			return r
-		}
-		return result
-	}
+	return stampLocalTS(localTS, false, func() tea.Msg {
+		return messageSvc.Send(chID, text)
+	})
 }
