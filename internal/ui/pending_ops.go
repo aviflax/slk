@@ -344,7 +344,7 @@ func (p *pendingOps) EditEcho(channelID, ts string, body messages.Body) bool {
 		return false
 	}
 	m.server, m.known = body, true
-	if body.Text == m.inFlight.body.Text {
+	if messages.EchoCarries(body, m.inFlight.body) {
 		m.echoed = true
 	}
 	return true
@@ -357,11 +357,12 @@ func (p *pendingOps) EditEcho(channelID, ts string, body messages.Body) bool {
 //
 // A failure after an echo carried the edit's text is a success: Slack
 // stored it (the HTTP call failed after Slack accepted it). The test is
-// the text being equal, not merely an echo having arrived, because an
-// echo of another client's change would otherwise swallow a real
-// failure and lose the user's text. A false failure (Slack stored a
-// different form of the text) reopens an edit Slack has, which loses
-// nothing.
+// the echo carrying the text (messages.EchoCarries: equal in the form
+// Slack stores it), not merely an echo having arrived, because an echo
+// of another client's change would otherwise swallow a real failure and
+// lose the user's text. A false failure (Slack stored a form of the
+// text EchoCarries does not recognise) reopens an edit Slack has, which
+// loses nothing.
 func (p *pendingOps) EndEdit(id uint64, ok bool) (s editSettled, found bool) {
 	for k, m := range p.edits {
 		if m.inFlight.id != id {

@@ -376,9 +376,10 @@ The flow for an edit:
   is not marked "(edited)". While an edit is in flight, it is recorded
   (`EditEcho`: `server` becomes the echo; debug log
   `recorded_edit_echo_pending`), not shown, so an older state cannot
-  flicker over a newer edit. An echo whose text equals the in-flight
-  edit's proves Slack stored that edit (`echoed`). With nothing in
-  flight the echo is shown as it is.
+  flicker over a newer edit. An echo that carries the in-flight edit's
+  text in Slack's form (`messages.EchoCarries`) proves Slack stored that
+  edit (`echoed`), and the message then settles on the echo's body,
+  Slack's own form. With nothing in flight the echo is shown as it is.
 - **Result** (`reduceMessageEdited`): `EndEdit` settles the edit in
   flight. If it was echoed, `server` (the echo, or a newer one) stands,
   and a failure is not a failure: the HTTP call failed after Slack
@@ -394,15 +395,21 @@ The flow for an edit:
   message_not_found, `MessageEditedMsg.NotFound`) or its delete is
   pending, the text goes to the clipboard instead: a draft would post it
   as a new message. message_not_found also takes the message out of
-  every pane (`applyMessageDeleted`), as its echo would. A waiting edit whose message is gone is never sent
-  and its text is the one given back. The result never closes the
+  every pane (`applyMessageDeleted`), as its echo would. A waiting edit
+  whose message is gone is never sent and its text is the one given
+  back. The result never closes the
   editor: any editor open by then is a newer edit.
 
-The proof rule is "an echo with the edit's exact text", not "any echo
+The proof rule is "an echo carrying the edit's text", not "any echo
 after the edit was sent": another client's change could arrive in that
 window and would then swallow a real failure, losing the user's text.
-The exact rule can only err the other way (Slack stored a different
-form of the text), which reopens an edit Slack already has. One case
+The text is compared in the form Slack stores it (`EchoCarries`):
+Slack escapes &, < and > in the mrkdwn as entities (so every URL with
+a query string differs from what was sent) but keeps the rich_text
+block as sent, so the echo's mrkdwn is compared with those escapes
+undone once, or the two blocks' text when both have one. The rule can
+only err the other way (Slack stored a form of the text neither
+comparison recognises), which reopens an edit Slack already has. One case
 stays ambiguous: an edit succeeds, its echo is lost (a reconnect), and
 a stale echo of an older change by another client arrives after the
 result. The message then shows that echo until the next change.

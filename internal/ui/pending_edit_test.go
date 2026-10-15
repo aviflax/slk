@@ -2,6 +2,7 @@ package ui
 
 import (
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -443,6 +444,49 @@ func TestPendingEdit_QuickEdits(t *testing.T) {
 		a.Update(first)
 		wantText(t, "channel", a.messagepane.Messages(), "1.000000", "theirs", true)
 	})
+}
+
+// Slack stores a message's text with &, < and > escaped as entities
+// (outside its own <...> tokens), and keeps the rich_text block as sent.
+// An echo in that form carries the edit just as an echo of the exact
+// text does: a timeout after it is no failure, and the message keeps
+// Slack's own form of the body, whether the result failed or succeeded.
+func TestPendingEdit_EchoInSlacksFormProvesTheEdit(t *testing.T) {
+	for _, tc := range []struct{ name, typed, stored string }{
+		{"ampersand", "a & b", "a &amp; b"},
+		{"angle brackets", "x < y > z", "x &lt; y &gt; z"},
+		{"url with a query", "see https://x.test/?a=1&b=2", "see <https://x.test/?a=1&amp;b=2>"},
+		{"mention", "hi <@U1> & co", "hi <@U1> &amp; co"},
+	} {
+		for _, blocks := range []bool{true, false} {
+			for _, outcome := range []string{"timeout", "ok"} {
+				name := fmt.Sprintf("%s/blocks=%v/%s", tc.name, blocks, outcome)
+				t.Run(name, func(t *testing.T) {
+					var err error
+					if outcome == "timeout" {
+						err = errors.New("timeout")
+					}
+					a := editApp(t, err)
+					copied := clipboardLog(a)
+					res := editFrom(t, a, PanelMessages, "1.000000", tc.typed)
+					body := editedBody(tc.typed)
+					body.Text = tc.stored
+					if !blocks {
+						body.Blocks = nil
+					}
+					changed := messages.MessageItem{TS: "1.000000", UserID: "USELF"}
+					body.Apply(&changed)
+					a.Update(NewMessageMsg{ChannelID: "C1", Changed: true, Message: changed})
+					a.Update(res)
+					if a.editing.IsActive() || a.compose.Value() != "" || len(*copied) != 0 {
+						t.Errorf("editing=%v composer=%q clipboard=%q, want an edit Slack stored left alone",
+							a.editing.IsActive(), a.compose.Value(), *copied)
+					}
+					wantText(t, "channel", a.messagepane.Messages(), "1.000000", tc.stored, true)
+				})
+			}
+		}
+	}
 }
 
 // An edit whose chat.update failed after Slack stored it (a timeout) is
