@@ -12,32 +12,23 @@ import (
 
 // fakeMemberAPI implements ConversationMemberAPI for tests.
 //
-// delay is slept *after* the call is recorded and the lock released, so
-// a test can hold the Manager's post-call bookkeeping (lastFailed /
-// lastFetched, which backgroundFetch writes only once the API returns)
-// open for a deterministic window. Tests that assert on that
-// bookkeeping must therefore never treat callCount as a barrier for it
-// — see captureSink.pushed and awaitFailedFetchDone.
-//
-// The delay is a stimulus, not a deadline: nothing in this file is
-// asserted against it, so a loaded machine can only widen the window it
-// opens and make a false barrier more likely to be caught, never less.
+// It records its call on entry, before the call has returned, so
+// callCount is not a barrier for the Manager's post-call bookkeeping
+// (lastFailed / lastFetched, which backgroundFetch writes only once the
+// API returns). Tests that assert on that bookkeeping wait on
+// captureSink.pushed or awaitFetchDone instead.
 type fakeMemberAPI struct {
 	mu     sync.Mutex
 	calls  int
 	result []string
 	err    error
-	delay  time.Duration
 }
 
 func (f *fakeMemberAPI) GetUsersInConversation(ctx context.Context, channelID string) ([]string, error) {
 	f.mu.Lock()
 	f.calls++
-	result, err, delay := f.result, f.err, f.delay
+	result, err := f.result, f.err
 	f.mu.Unlock()
-	if delay > 0 {
-		time.Sleep(delay)
-	}
 	return result, err
 }
 
@@ -72,6 +63,10 @@ type captureSink struct {
 	mu     sync.Mutex
 	pushes []capturedPush
 	pushed chan capturedPush
+
+	// fetched receives the channel ID of every background fetch that
+	// ran to the end (Manager.fetchDone). See awaitFetchDone.
+	fetched chan string
 }
 type capturedPush struct {
 	channelID string
@@ -79,7 +74,7 @@ type capturedPush struct {
 }
 
 func newCaptureSink() *captureSink {
-	return &captureSink{pushed: make(chan capturedPush, 16)}
+	return &captureSink{pushed: make(chan capturedPush, 16), fetched: make(chan string, 16)}
 }
 
 func (s *captureSink) Push(channelID string, memberIDs []string) {
@@ -109,6 +104,12 @@ func newManagerForTest(t *testing.T) (*Manager, *fakeMemberAPI, *captureSink, *c
 	api := &fakeMemberAPI{}
 	sink := newCaptureSink()
 	mgr := New("T1", api, db, sink.Push, nil /* userResolver */)
+	mgr.fetchDone = func(channelID string) {
+		select {
+		case sink.fetched <- channelID:
+		default: // a test that never waits must not wedge the fetch
+		}
+	}
 	return mgr, api, sink, db
 }
 
@@ -181,41 +182,22 @@ func TestEnsureFreshStaleTriggersFetch(t *testing.T) {
 	}
 }
 
-// awaitFailedFetchDone blocks until the goroutine EnsureFresh spawned
-// has recorded a failed fetch *and* exited.
+// awaitFetchDone blocks until a background fetch for channelID has run
+// to the end: its bookkeeping (lastFailed on failure) is written and the
+// in-flight sentinel is released. A fetch that fails pushes nothing, so
+// this is the only signal there is. A caller that re-triggers a fetch
+// while the first is still unwinding gets it dropped at the `busy`
+// branch instead of the branch under test, which is why tests wait for
+// this before asking again.
 //
-// A failed fetch pushes nothing — backgroundFetch writes lastFailed and
-// returns (manager.go) — so there is no signal to receive from and the
-// manager's own state is the only barrier available. The conjunction is
-// what makes it one: the in-flight sentinel is set *before* the API
-// call and released by a deferred call *after* lastFailed is written,
-// so "failed and not busy" cannot be observed before the goroutine ran,
-// and cannot be observed while it is still running.
-//
-// Waiting for the sentinel too, rather than for lastFailed alone,
-// closes a latent race that predates this change: a caller that
-// re-triggers a fetch while the failed one is still unwinding gets it
-// dropped at the `busy` branch instead of at the branch under test.
-//
-// This is a condition wait, not a deadline: it returns on the next poll
-// after the state holds, has no wall-clock budget, and so a loaded
-// machine can only make it poll a few more times — it cannot
-// false-fail. The 1ms is a poll INTERVAL, not a budget; it matches
-// internal/emoji/place_test.go's awaitInflightCleared, and it is a
-// sleep rather than a runtime.Gosched so the wait does not burn a core
-// under -race. If the fetch never completes this hangs, and `go test`'s
-// own timeout dumps the stuck goroutine, the same failure mode as a
-// blocking receive.
-func awaitFailedFetchDone(mgr *Manager, channelID string) {
-	for {
-		mgr.mu.Lock()
-		_, failed := mgr.lastFailed[channelID]
-		_, busy := mgr.fetching[channelID]
-		mgr.mu.Unlock()
-		if failed && !busy {
+// It receives from Manager.fetchDone with no deadline. If the fetch
+// never completes this hangs, and `go test`'s own timeout dumps the
+// stuck goroutine.
+func awaitFetchDone(sink *captureSink, channelID string) {
+	for id := range sink.fetched {
+		if id == channelID {
 			return
 		}
-		time.Sleep(time.Millisecond)
 	}
 }
 
@@ -429,7 +411,7 @@ func TestBackgroundFetchDoesNotResolveEveryMember(t *testing.T) {
 // started 42 conversations.members requests, the exact amplification
 // shape this package's TTL exists to prevent.
 func TestBackgroundFetchFailureSuppressesImmediateRefetch(t *testing.T) {
-	mgr, api, _, db := newManagerForTest(t)
+	mgr, api, sink, db := newManagerForTest(t)
 	defer db.Close()
 	api.err = fmt.Errorf("channel_not_found")
 
@@ -440,7 +422,7 @@ func TestBackgroundFetchFailureSuppressesImmediateRefetch(t *testing.T) {
 	// that suppresses the retry below, and an unfinished fetch would
 	// suppress it at the in-flight branch instead — a green test for
 	// the wrong reason.
-	awaitFailedFetchDone(mgr, "C1")
+	awaitFetchDone(sink, "C1")
 
 	// A reconnect force-stales the channel and asks again. The fetch
 	// must not re-fire within the failure backoff window.
@@ -471,11 +453,6 @@ func TestBackgroundFetchRetriesAfterBackoffExpiry(t *testing.T) {
 	mgr, api, sink, db := newManagerForTest(t)
 	defer db.Close()
 	api.err = fmt.Errorf("channel_not_found")
-	// Hold the window between "the API was entered" and "the failure
-	// was recorded" open, so the interleaving that used to make this
-	// test flaky is its default path rather than a rare one (8eaeba9).
-	// Nothing is asserted against these 50ms.
-	api.delay = 50 * time.Millisecond
 
 	mgr.EnsureFresh(context.Background(), "C1")
 
@@ -484,7 +461,7 @@ func TestBackgroundFetchRetriesAfterBackoffExpiry(t *testing.T) {
 	// returns, so backdating it below on a callCount barrier alone
 	// races the write and gets clobbered — leaving the backoff live and
 	// suppressing the retry this test exists to prove.
-	awaitFailedFetchDone(mgr, "C1")
+	awaitFetchDone(sink, "C1")
 
 	// Simulate a failure far enough in the past that the backoff has
 	// expired, then recover.
@@ -500,7 +477,7 @@ func TestBackgroundFetchRetriesAfterBackoffExpiry(t *testing.T) {
 	// statement — after ReplaceChannelMembers, after m.members is
 	// swapped and after delete(m.lastFailed, ...). That makes it a
 	// barrier for both assertions below, so neither has to poll. A call
-	// count would fire 50ms before any of it, which is what forced the
+	// count would fire before any of it, which is what forced the
 	// polling this replaces.
 	recovered := <-sink.pushed
 
@@ -565,7 +542,7 @@ func TestEnsureFreshNeverFetchedPushesNothing(t *testing.T) {
 	mgr.EnsureFresh(context.Background(), "C1")
 	// EnsureFresh pushes synchronously and a failed fetch pushes
 	// nothing, so the sink is final once the fetch is done.
-	awaitFailedFetchDone(mgr, "C1")
+	awaitFetchDone(sink, "C1")
 
 	if pushes := sink.snapshot(); len(pushes) != 0 {
 		t.Errorf("never-fetched channel pushed %+v; want no push", pushes)

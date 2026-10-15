@@ -57,6 +57,13 @@ type Manager struct {
 	fetching    map[string]struct{}            // in-flight sentinel by channelID
 	lastFetched map[string]time.Time           // last successful full-fetch (in-memory, for dedup)
 	lastFailed  map[string]time.Time           // last failed fetch; backs off retries
+
+	// fetchDone, when set, is called at the very end of a backgroundFetch
+	// that got past the dedup checks, after the in-flight sentinel is
+	// released. Tests use it as the signal that the fetch has finished
+	// writing its bookkeeping, including on the failure path where
+	// nothing is pushed. Nil in production.
+	fetchDone func(channelID string)
 }
 
 // New constructs a Manager bound to one workspace.
@@ -185,6 +192,9 @@ func (m *Manager) backgroundFetch(ctx context.Context, channelID string) {
 		m.mu.Lock()
 		delete(m.fetching, channelID)
 		m.mu.Unlock()
+		if m.fetchDone != nil {
+			m.fetchDone(channelID)
+		}
 	}()
 
 	ids, err := m.api.GetUsersInConversation(ctx, channelID)
