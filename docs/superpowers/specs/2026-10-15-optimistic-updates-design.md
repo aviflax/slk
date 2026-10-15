@@ -202,8 +202,9 @@ send must always end, because echoes are held until it does. The
 timeout works because `SlackAPI` declares only slack-go's `*Context`
 methods (`TestSlackAPI_EveryMethodTakesContext`); the plain ones use
 `context.Background()` and dropped every ctx slk passed. Every other
-Web API call the UI waits on is bounded by `requestTimeout`, except a
-paginated one, whose client method bounds each page's request.
+Web API call the UI waits on is bounded: most by `requestTimeout`; the
+presence change, attachment-button presses and slash commands by their
+own 10s; and a paginated call by its client method, per page.
 
 The thread pane and the channel panes are kept apart in `rowSinks`
 because the paths write them differently: a broadcast placeholder is a
