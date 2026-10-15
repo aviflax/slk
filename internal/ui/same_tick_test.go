@@ -6,6 +6,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
+	"github.com/gammons/slk/internal/ui/mentionpicker"
 	"github.com/gammons/slk/internal/ui/messages"
 )
 
@@ -118,5 +119,23 @@ func TestKeyAfterConfirm_DeleteIsGone(t *testing.T) {
 	a.Update(keyPress('D'))
 	if !strings.Contains(a.confirmPrompt.View(), "msg-2") {
 		t.Errorf("the next D prompted for %q, want msg-2, the message now selected", a.confirmPrompt.View())
+	}
+}
+
+// A mention picker filtered to nothing is not on screen, so the first
+// Enter sends: it used to be swallowed by the hidden picker.
+func TestEnterSendsPastAHiddenMentionPicker(t *testing.T) {
+	a := typedApp(t)
+	a.compose.SetUsers([]mentionpicker.User{{ID: "U7", DisplayName: "Maya", Username: "maya"}})
+	a.focusedPanel = PanelMessages
+	typeInto(t, &a.compose, "x @Maya")
+	if !a.compose.IsMentionActive() {
+		t.Fatal("setup: the mention picker is not showing")
+	}
+	a.Update(keyPress(' '))
+	a.Update(keyPress('y'))
+	pressEnter(a)
+	if ins := lastInsert(t, a); ins.typed != "x @Maya y" {
+		t.Errorf("sent %q, want x @Maya y", ins.typed)
 	}
 }

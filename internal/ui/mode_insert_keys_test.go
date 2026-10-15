@@ -113,6 +113,12 @@ func openChannelPicker(t *testing.T, c *compose.Model) {
 // mustMention asserts the mention picker is open on the given compose.
 // Separate from openMentionPicker because these rows type a query after
 // the trigger and need the assertion at the end, not in the middle.
+// knowsAlice gives c one user, alice, so "@al" shows the mention
+// picker: a picker with no match is not on screen and takes no keys.
+func knowsAlice(c *compose.Model) {
+	c.SetUsers([]mentionpicker.User{{ID: "U9", DisplayName: "alice", Username: "alice", InChannel: true}})
+}
+
 func mustMention(t *testing.T, c *compose.Model) {
 	t.Helper()
 	if !c.IsMentionActive() {
@@ -831,9 +837,13 @@ func TestInsertModeKeys(t *testing.T) {
 			// the picker, not to the jump shortcut. Without the guard
 			// the cursor would be dragged to column 0 and the follow-up
 			// key would land in front of the trigger.
-			name:     "up with a picker active is left to the picker instead of jumping to the start",
-			opts:     insertOpts(),
-			setup:    func(t *testing.T, a *App) { typeInto(t, &a.compose, "@al"); mustMention(t, &a.compose) },
+			name: "up with a picker active is left to the picker instead of jumping to the start",
+			opts: insertOpts(),
+			setup: func(t *testing.T, a *App) {
+				knowsAlice(&a.compose)
+				typeInto(t, &a.compose, "@al")
+				mustMention(t, &a.compose)
+			},
 			key:      keyCode(tea.KeyUp),
 			wantMode: ModeInsert,
 			assert: func(t *testing.T, a *App, _ tea.Cmd) {
@@ -880,6 +890,7 @@ func TestInsertModeKeys(t *testing.T) {
 			name: "down with a picker active is left to the picker instead of jumping to the end",
 			opts: insertOpts(),
 			setup: func(t *testing.T, a *App) {
+				knowsAlice(&a.compose)
 				typeInto(t, &a.compose, "@al")
 				mustMention(t, &a.compose)
 				a.compose.MoveCursorToStart()
@@ -952,6 +963,7 @@ func TestInsertModeKeys(t *testing.T) {
 			opts: insertOpts(),
 			setup: func(t *testing.T, a *App) {
 				showThread(t, a)
+				knowsAlice(&a.threadCompose)
 				typeInto(t, &a.threadCompose, "@al")
 				typeInto(t, &a.compose, "draft")
 				mustMention(t, &a.threadCompose)

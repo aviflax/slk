@@ -487,6 +487,15 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		return m, nil
 	}
 
+	// A picker filtered to nothing draws nothing. It keeps filtering
+	// as the user types or deletes (so it shows again on a match), but
+	// any other key closes it and is handled as if no picker were open:
+	// otherwise the user's Enter, Tab or Esc would go to a popup they
+	// cannot see.
+	if isKey {
+		m.releaseHiddenPicker(keyMsg.Key())
+	}
+
 	// If emoji picker is active, intercept keys (takes precedence over mention).
 	if m.emojiActive && isKey {
 		m2, cmd := m.handleEmojiKey(keyMsg)
@@ -563,6 +572,27 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 	// per-call bump is correct and cheaper than introspecting.
 	m.dirty()
 	return m, cmd
+}
+
+// releaseHiddenPicker closes an active picker that shows no match
+// unless k edits its query (printable text or Backspace), so k reaches
+// the composer, and the App, as with no picker open.
+func (m *Model) releaseHiddenPicker(k tea.Key) {
+	if len(k.Text) > 0 || k.Code == tea.KeyBackspace {
+		return
+	}
+	if m.emojiActive && len(m.emojiPicker.Filtered()) == 0 {
+		m.emojiActive = false
+		m.emojiPicker.Close()
+	}
+	if m.mentionActive && len(m.mentionPicker.Filtered()) == 0 {
+		m.mentionActive = false
+		m.mentionPicker.Close()
+	}
+	if m.channelActive && len(m.channelPicker.Filtered()) == 0 {
+		m.channelActive = false
+		m.channelPicker.Close()
+	}
 }
 
 // cursorPosition computes the absolute byte offset of the cursor within
@@ -825,7 +855,9 @@ func (m *Model) SetChannels(channels []channelpicker.Channel) {
 }
 
 // IsChannelActive returns whether the channel picker is currently showing.
-func (m Model) IsChannelActive() bool { return m.channelActive }
+func (m Model) IsChannelActive() bool {
+	return m.channelActive && len(m.channelPicker.Filtered()) > 0
+}
 
 // CloseChannel dismisses the channel picker without selecting.
 func (m *Model) CloseChannel() {
@@ -1101,9 +1133,12 @@ func (m *Model) rebuildMentionUsers() {
 	m.mentionPicker.SetUsers(derived)
 }
 
-// IsMentionActive returns whether the mention picker is currently showing.
+// IsMentionActive returns whether the mention picker is currently
+// showing: open and matching something. One filtered to nothing takes
+// only the keys that edit its query (releaseHiddenPicker), so the App
+// routes Enter and the rest as with no picker.
 func (m Model) IsMentionActive() bool {
-	return m.mentionActive
+	return m.mentionActive && len(m.mentionPicker.Filtered()) > 0
 }
 
 // CloseMention dismisses the mention picker without selecting.
@@ -1262,7 +1297,9 @@ func (m *Model) SetEmojiCustoms(customs map[string]string) {
 }
 
 // IsEmojiActive returns whether the emoji picker is currently showing.
-func (m Model) IsEmojiActive() bool { return m.emojiActive }
+func (m Model) IsEmojiActive() bool {
+	return m.emojiActive && len(m.emojiPicker.Filtered()) > 0
+}
 
 // CloseEmoji dismisses the emoji picker without selecting.
 func (m *Model) CloseEmoji() {
