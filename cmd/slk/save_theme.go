@@ -99,7 +99,7 @@ func tomlString(s string) string {
 		case '\t':
 			b.WriteString(`\t`)
 		default:
-			if r < 0x20 {
+			if r < 0x20 || r == 0x7f {
 				fmt.Fprintf(&b, `\u%04X`, r)
 			} else {
 				b.WriteRune(r)
