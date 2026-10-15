@@ -1255,7 +1255,7 @@ func TestNormalModeKeys(t *testing.T) {
 				// Spot-check one entry that only the real keymap
 				// produces, so the row fails if FromKeyMap starts
 				// returning placeholder rows.
-				if !slices.Contains(got, help.Entry{Key: "Y/C", Desc: "copy permalink"}) {
+				if !slices.Contains(got, help.Entry{Key: "Y/C", Desc: "copy permalink", Group: "Messages"}) {
 					t.Error("help entries do not include the Y/C copy-permalink row")
 				}
 			},

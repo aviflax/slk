@@ -24,10 +24,37 @@ var _ interface {
 	chrome.Clickable
 } = (*Model)(nil)
 
-// Entry is one row in the help modal: a key label and its description.
+// Groups lists the help sections in display order. Every field of the
+// keymap struct passed to FromKeyMap carries a `help:"<group>"` tag naming
+// one of them; the ui package's test fails for a binding without one.
+var Groups = []string{
+	"Navigation",
+	"Search",
+	"Messages",
+	"Threads",
+	"Composer",
+	"Windows",
+	"Views",
+	"Commands",
+	"App",
+}
+
+// groupRank is the display position of a group; unknown groups sort last.
+func groupRank(g string) int {
+	for i, n := range Groups {
+		if n == g {
+			return i
+		}
+	}
+	return len(Groups)
+}
+
+// Entry is one row in the help modal: a key label, its description and the
+// section it is listed under. An empty Group is listed without a header.
 type Entry struct {
-	Key  string
-	Desc string
+	Key   string
+	Desc  string
+	Group string
 }
 
 // Model is the help overlay state.
@@ -60,8 +87,9 @@ func (m *Model) SetFooter(s string) {
 
 // FromKeyMap derives Entries from any struct whose fields are key.Binding.
 // Bindings without help metadata (empty Key and Desc) are skipped.
-// The returned slice is sorted alphabetically by description (case-insensitive)
-// for stable display order.
+// Each field's `help:"<group>"` tag sets Entry.Group. The returned slice is
+// ordered by group (see Groups), then alphabetically by description
+// (case-insensitive), for stable display order.
 func FromKeyMap(km any) []Entry {
 	var entries []Entry
 	v := reflect.ValueOf(km)
@@ -74,6 +102,7 @@ func FromKeyMap(km any) []Entry {
 	bindingType := reflect.TypeOf(key.Binding{})
 	for i := 0; i < v.NumField(); i++ {
 		f := v.Field(i)
+		group := v.Type().Field(i).Tag.Get("help")
 		if !f.Type().AssignableTo(bindingType) {
 			continue
 		}
@@ -85,9 +114,12 @@ func FromKeyMap(km any) []Entry {
 		if h.Key == "" && h.Desc == "" {
 			continue
 		}
-		entries = append(entries, Entry{Key: h.Key, Desc: h.Desc})
+		entries = append(entries, Entry{Key: h.Key, Desc: h.Desc, Group: group})
 	}
 	sort.SliceStable(entries, func(i, j int) bool {
+		if ri, rj := groupRank(entries[i].Group), groupRank(entries[j].Group); ri != rj {
+			return ri < rj
+		}
 		return strings.ToLower(entries[i].Desc) < strings.ToLower(entries[j].Desc)
 	})
 	return entries
@@ -204,8 +236,40 @@ func (m *Model) filter() {
 	}
 }
 
-// listTopOffset is the box-local row of the first keybinding row.
-func listTopOffset() int { return chrome.BodyTop(messages.ChromeStyles(), true) }
+// hasInput reports whether the filter line is drawn: while typing a filter
+// or after leaving search with one applied. Otherwise the footer's
+// "/ search" is the only hint and the line is left out.
+func (m Model) hasInput() bool { return m.searching || m.query != "" }
+
+// listTopOffset is the box-local row of the first list line.
+func (m Model) listTopOffset() int { return chrome.BodyTop(messages.ChromeStyles(), m.hasInput()) }
+
+// line is one drawn row of the list: a section header (idx < 0) or the
+// entry at filtered[idx]. Headers are never selectable.
+type line struct {
+	header string
+	idx    int
+}
+
+// lines lays the filtered entries out as display rows, with a header in
+// front of each run of entries sharing a non-empty group. A group with no
+// matching entry therefore has no header. selLine is the row of the
+// selected entry.
+func (m Model) lines() (ls []line, selLine int) {
+	prev := ""
+	for i, ei := range m.filtered {
+		g := m.entries[ei].Group
+		if g != "" && g != prev {
+			ls = append(ls, line{header: g, idx: -1})
+		}
+		prev = g
+		if i == m.selected {
+			selLine = len(ls)
+		}
+		ls = append(ls, line{idx: i})
+	}
+	return ls, selLine
+}
 
 // maxVisibleRows returns the height of the scroll window for a terminal
 // height, matching renderBox's computation.
@@ -223,7 +287,8 @@ func maxVisibleRows(termHeight int) int {
 // visibleWindow returns the [start, end) slice of m.filtered shown for a
 // given terminal height, using the same scroll math as the renderer.
 func (m *Model) visibleWindow(termHeight int) (int, int) {
-	return chrome.Window(m.selected, len(m.filtered), maxVisibleRows(termHeight))
+	ls, sel := m.lines()
+	return chrome.Window(sel, len(ls), maxVisibleRows(termHeight))
 }
 
 // BoxSize returns the rendered modal box's outer dimensions. The help box
@@ -235,11 +300,12 @@ func (m Model) BoxSize(termWidth, termHeight int) (int, int) {
 }
 
 // ClickRow moves the highlight to the keybinding row at box-local localY
-// and returns true when the click lands on a visible row. The help modal
+// and returns true when the click lands on a visible entry row. A click on
+// a section header does nothing. The help modal
 // has no activation action, so the caller does not synthesize a key after
 // a successful ClickRow; the highlight simply follows the click.
 func (m *Model) ClickRow(termWidth, termHeight, localY int) bool {
-	row := localY - listTopOffset()
+	row := localY - m.listTopOffset()
 	if row < 0 {
 		return false
 	}
@@ -247,7 +313,12 @@ func (m *Model) ClickRow(termWidth, termHeight, localY int) bool {
 	if row >= end-start {
 		return false
 	}
-	m.selected = start + row
+	ls, _ := m.lines()
+	l := ls[start+row]
+	if l.idx < 0 {
+		return false
+	}
+	m.selected = l.idx
 	return true
 }
 
@@ -280,20 +351,19 @@ func (m Model) renderBox(termWidth, termHeight int) string {
 	}
 	innerWidth := overlayWidth - 4 // account for border + padding
 
-	// Search input line: the active prompt, the filter left behind after
-	// leaving search, or a hint.
+	// Search input line: the active prompt or the filter left behind after
+	// leaving search. Otherwise none; the footer says "/ search".
 	var inputLine string
 	switch {
 	case m.searching:
 		inputLine = chrome.FilterInput(s, m.query, "Type to filter...")
 	case m.query != "":
 		inputLine = s.Empty.Render("filter: " + m.query)
-	default:
-		inputLine = s.Footer.Render("Press / to search")
 	}
 
 	start, end := m.visibleWindow(termHeight)
-	list := chrome.List{Start: start, End: end, Total: len(m.filtered)}
+	ls, selLine := m.lines()
+	list := chrome.List{Start: start, End: end, Total: len(ls)}
 	// rowWidth includes the marker column: key, a space and the
 	// description share rowWidth-1 columns.
 	rowWidth := list.ContentWidth(innerWidth) + 1
@@ -312,7 +382,13 @@ func (m Model) renderBox(termWidth, termHeight int) string {
 
 	keyStyle := s.Row.Foreground(styles.Accent)
 	rows := make([]string, 0, end-start)
-	for i := start; i < end; i++ {
+	for li := start; li < end; li++ {
+		if ls[li].idx < 0 {
+			h := truncate.StringWithTail(ls[li].header, uint(max(rowWidth-1, 1)), "\u2026")
+			rows = append(rows, s.Row.Bold(true).Width(rowWidth-1).Render(h))
+			continue
+		}
+		i := ls[li].idx
 		e := m.entries[m.filtered[i]]
 
 		keyLabel := e.Key
@@ -345,7 +421,7 @@ func (m Model) renderBox(termWidth, termHeight int) string {
 	f := chrome.Frame{
 		Title:  "Keybindings",
 		Input:  inputLine,
-		Body:   list.Rows(s, m.selected, rows),
+		Body:   list.Rows(s, selLine, rows),
 		Footer: footer,
 	}
 	if m.query != "" {

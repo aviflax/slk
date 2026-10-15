@@ -4,80 +4,80 @@ package ui
 import "charm.land/bubbles/v2/key"
 
 type KeyMap struct {
-	Up                  key.Binding
-	Down                key.Binding
-	Left                key.Binding
-	Right               key.Binding
-	Enter               key.Binding
-	Escape              key.Binding
-	InsertMode          key.Binding
-	CommandMode         key.Binding
-	SearchMode          key.Binding
-	SearchNext          key.Binding
-	SearchPrev          key.Binding
-	WorkspaceSearch     key.Binding
-	Tab                 key.Binding
-	ShiftTab            key.Binding
-	ToggleSidebar       key.Binding
-	SidebarGrow         key.Binding
-	SidebarShrink       key.Binding
-	ToggleThread        key.Binding
-	FuzzyFinder         key.Binding
-	FuzzyFinderAlt      key.Binding
-	Top                 key.Binding
-	Bottom              key.Binding
-	PageUp              key.Binding
-	PageDown            key.Binding
-	HalfPageUp          key.Binding
-	HalfPageDown        key.Binding
-	Quit                key.Binding
-	QuitConfirm         key.Binding
-	CloseThreadView     key.Binding
-	Reaction            key.Binding
-	ReactionNav         key.Binding
-	Edit                key.Binding
-	Delete              key.Binding
-	CopyMessage         key.Binding
-	CopyPermalink       key.Binding
-	ForwardMessage      key.Binding
-	OpenPreview         key.Binding
-	OpenLink            key.Binding
-	DownloadFile        key.Binding
-	MarkUnread          key.Binding
-	MarkSet             key.Binding
-	JumpMark            key.Binding
-	MarkBackJump        key.Binding
-	MarksList           key.Binding
-	MarksDelete         key.Binding
-	NextUnread          key.Binding
-	PrevUnread          key.Binding
-	ActivityView        key.Binding
-	ActivityUnread      key.Binding
-	WorkspaceFinder     key.Binding
-	NewMessage          key.Binding
-	ThemeSwitcher       key.Binding
-	ThemeSwitcherGlobal key.Binding
-	ThemeNext           key.Binding
-	ThemePrev           key.Binding // alt+Y: tmux extended-keys; alt+shift+Y: xterm modifyOtherKeys
-	PresenceMenu        key.Binding
-	ToggleSection       key.Binding
-	NavBack             key.Binding
-	NavForward          key.Binding
-	Help                key.Binding
-	SaveThread          key.Binding
-	RespondButtons      key.Binding
-	ListReactions       key.Binding
-	UserProfile         key.Binding
-	WindowPrefix        key.Binding
-	WinSplit            key.Binding
-	WinVSplit           key.Binding
-	WinNavigate         key.Binding
-	WinCycle            key.Binding
-	WinClose            key.Binding
-	WinOnly             key.Binding
-	ToggleBroadcast     key.Binding
-	OpenInEditor        key.Binding
-	ClearCompose        key.Binding
+	Up                  key.Binding `help:"Navigation"`
+	Down                key.Binding `help:"Navigation"`
+	Left                key.Binding `help:"Navigation"`
+	Right               key.Binding `help:"Navigation"`
+	Enter               key.Binding `help:"Navigation"`
+	Escape              key.Binding `help:"Navigation"`
+	InsertMode          key.Binding `help:"Composer"`
+	CommandMode         key.Binding `help:"Commands"`
+	SearchMode          key.Binding `help:"Search"`
+	SearchNext          key.Binding `help:"Search"`
+	SearchPrev          key.Binding `help:"Search"`
+	WorkspaceSearch     key.Binding `help:"Search"`
+	Tab                 key.Binding `help:"Navigation"`
+	ShiftTab            key.Binding `help:"Navigation"`
+	ToggleSidebar       key.Binding `help:"Windows"`
+	SidebarGrow         key.Binding `help:"Windows"`
+	SidebarShrink       key.Binding `help:"Windows"`
+	ToggleThread        key.Binding `help:"Threads"`
+	FuzzyFinder         key.Binding `help:"Navigation"`
+	FuzzyFinderAlt      key.Binding `help:"Navigation"`
+	Top                 key.Binding `help:"Navigation"`
+	Bottom              key.Binding `help:"Navigation"`
+	PageUp              key.Binding `help:"Navigation"`
+	PageDown            key.Binding `help:"Navigation"`
+	HalfPageUp          key.Binding `help:"Navigation"`
+	HalfPageDown        key.Binding `help:"Navigation"`
+	Quit                key.Binding `help:"App"`
+	QuitConfirm         key.Binding `help:"App"`
+	CloseThreadView     key.Binding `help:"Threads"`
+	Reaction            key.Binding `help:"Messages"`
+	ReactionNav         key.Binding `help:"Messages"`
+	Edit                key.Binding `help:"Messages"`
+	Delete              key.Binding `help:"Messages"`
+	CopyMessage         key.Binding `help:"Messages"`
+	CopyPermalink       key.Binding `help:"Messages"`
+	ForwardMessage      key.Binding `help:"Messages"`
+	OpenPreview         key.Binding `help:"Messages"`
+	OpenLink            key.Binding `help:"Messages"`
+	DownloadFile        key.Binding `help:"Messages"`
+	MarkUnread          key.Binding `help:"Messages"`
+	MarkSet             key.Binding `help:"Navigation"`
+	JumpMark            key.Binding `help:"Navigation"`
+	MarkBackJump        key.Binding `help:"Navigation"`
+	MarksList           key.Binding `help:"Commands"`
+	MarksDelete         key.Binding `help:"Commands"`
+	NextUnread          key.Binding `help:"Navigation"`
+	PrevUnread          key.Binding `help:"Navigation"`
+	ActivityView        key.Binding `help:"Views"`
+	ActivityUnread      key.Binding `help:"Views"`
+	WorkspaceFinder     key.Binding `help:"Commands"`
+	NewMessage          key.Binding `help:"Messages"`
+	ThemeSwitcher       key.Binding `help:"App"`
+	ThemeSwitcherGlobal key.Binding `help:"App"`
+	ThemeNext           key.Binding `help:"App"`
+	ThemePrev           key.Binding `help:"App"` // alt+Y: tmux extended-keys; alt+shift+Y: xterm modifyOtherKeys
+	PresenceMenu        key.Binding `help:"App"`
+	ToggleSection       key.Binding `help:"Navigation"`
+	NavBack             key.Binding `help:"Navigation"`
+	NavForward          key.Binding `help:"Navigation"`
+	Help                key.Binding `help:"App"`
+	SaveThread          key.Binding `help:"Threads"`
+	RespondButtons      key.Binding `help:"Messages"`
+	ListReactions       key.Binding `help:"Messages"`
+	UserProfile         key.Binding `help:"Messages"`
+	WindowPrefix        key.Binding `help:"Windows"`
+	WinSplit            key.Binding `help:"Windows"`
+	WinVSplit           key.Binding `help:"Windows"`
+	WinNavigate         key.Binding `help:"Windows"`
+	WinCycle            key.Binding `help:"Windows"`
+	WinClose            key.Binding `help:"Windows"`
+	WinOnly             key.Binding `help:"Windows"`
+	ToggleBroadcast     key.Binding `help:"Threads"`
+	OpenInEditor        key.Binding `help:"Composer"`
+	ClearCompose        key.Binding `help:"Composer"`
 }
 
 func DefaultKeyMap() KeyMap {
