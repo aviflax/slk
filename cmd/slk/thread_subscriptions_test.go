@@ -313,7 +313,12 @@ func TestEnsureThreadSubscriptions_ResyncsAfterWindow(t *testing.T) {
 	fake := &fakeSubscriptions{response: []slackclient.ThreadSubscriptionView{
 		subView("C1", "1700000100.000000", "1700000150.000000", "p1", "U2", true),
 	}}
-	gate := &threadSubsGate{window: 20 * time.Millisecond}
+	// The gate reads this clock, so the window is stepped over rather
+	// than slept through. Only the test goroutine reads it: the gate
+	// consults the clock in ensureThreadSubscriptions, before it spawns
+	// the sync goroutine.
+	clock := time.Now()
+	gate := &threadSubsGate{window: 20 * time.Millisecond, now: func() time.Time { return clock }}
 	done := make(chan struct{}, 2)
 
 	ensureThreadSubscriptions(context.Background(), gate,
@@ -326,19 +331,10 @@ func TestEnsureThreadSubscriptions_ResyncsAfterWindow(t *testing.T) {
 	<-done                 // the first sync completed
 	awaitGateRelease(gate) // ...and the goroutine released the gate
 
-	// A duration is semantically required here and no signal can
-	// replace it: the property under test is that the throttle
-	// *window* elapses, and the gate reads the real clock
-	// (tryStart(time.Now())) with no seam a test may inject through.
-	// The bias is one-sided — time.Sleep is guaranteed to sleep at
-	// least its argument, and the gate recorded `last` before this
-	// line — so load can only leave the window more elapsed, never
-	// less. It cannot false-fail. The other reason the old
-	// time.Sleep(40ms) was needed, giving the first goroutine room to
-	// release the gate, is now awaitGateRelease's job above; that half
-	// *was* load-sensitive and would have silently dropped the second
-	// trigger.
-	time.Sleep(gate.window)
+	// Exactly one window later the throttle admits the next sync. The
+	// first goroutine is already off the gate (awaitGateRelease above),
+	// so only the window can refuse it.
+	clock = clock.Add(gate.window)
 
 	ensureThreadSubscriptions(context.Background(), gate,
 		newSubscriptionSync(db, fake, nil),

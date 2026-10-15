@@ -159,6 +159,16 @@ type threadSubsGate struct {
 	last    time.Time
 	running bool
 	window  time.Duration
+	// now reads the clock for ensureThreadSubscriptions. Nil means
+	// time.Now; a test sets it to step through the window.
+	now func() time.Time
+}
+
+func (g *threadSubsGate) clock() time.Time {
+	if g.now != nil {
+		return g.now()
+	}
+	return time.Now()
 }
 
 // tryStart reports whether a sync may begin at `now`. first is true
@@ -221,7 +231,7 @@ func ensureWorkspaceThreadSubs(ctx context.Context, wctx *WorkspaceContext, db *
 // onDone fires only on success — telling the view to re-read a cache
 // that a failed fetch did not change would be a wasted round trip.
 func ensureThreadSubscriptions(ctx context.Context, gate *threadSubsGate, s *threadSubscriptionSync, onDone func()) {
-	first, ok := gate.tryStart(time.Now())
+	first, ok := gate.tryStart(gate.clock())
 	if !ok {
 		return
 	}
