@@ -70,16 +70,15 @@ func Overlay(visible []string, width, total, yOffset, visibleHeight int, bg, tra
 		// background-colored spaces so the scrollbar lands at a consistent
 		// column across rows of varying width.
 		line := visible[i]
-		w := ansi.StringWidth(line)
-		var prefix string
-		switch {
-		case w > gutterCol:
+		prefix := line
+		if w := ansi.StringWidth(line); w > gutterCol {
 			prefix = ansi.Cut(line, 0, gutterCol)
-		case w == gutterCol:
-			prefix = line
-		default:
-			pad := lipgloss.NewStyle().Background(bg).Width(gutterCol - w).Render("")
-			prefix = line + pad
+		}
+		// A wide rune straddling the gutter column is dropped whole by
+		// Cut, which leaves the prefix a column short; pad it so the
+		// glyph still lands in the last column.
+		if w := ansi.StringWidth(prefix); w < gutterCol {
+			prefix += lipgloss.NewStyle().Background(bg).Width(gutterCol - w).Render("")
 		}
 
 		var glyph string
