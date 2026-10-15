@@ -87,6 +87,15 @@ func (s rowSinks) settle(localTS string, item messages.MessageItem) {
 	}
 }
 
+// insertSinks returns the panes showing a pending send's row: the same
+// ones its HTTP result writes.
+func (a *App) insertSinks(ins pendingInsert) rowSinks {
+	if ins.threadTS == "" {
+		return a.sinksFor(ins.channelID)
+	}
+	return a.replySinksFor(ins.channelID, ins.threadTS, ins.broadcast)
+}
+
 // removeLocal rolls the placeholder localTS back out of every pane.
 func (s rowSinks) removeLocal(localTS string) {
 	if s.thread != nil {

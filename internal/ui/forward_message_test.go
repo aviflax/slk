@@ -141,7 +141,7 @@ func TestForwardMessageThreadsListDoesNotUseHiddenMessage(t *testing.T) {
 }
 
 func TestForwardMessageCompletionReconcilesSuppressedEcho(t *testing.T) {
-	for _, order := range []string{"suppressed echo first", "echo first", "response first", "different workspace"} {
+	for _, order := range []string{"echo adopted by a pending send", "echo first", "response first", "different workspace"} {
 		t.Run(order, func(t *testing.T) {
 			a := newTestApp(t, withActiveTeam("T1"), withActiveChannel("C1"))
 			a.SetCurrentUserID("SELF")
@@ -150,8 +150,8 @@ func TestForwardMessageCompletionReconcilesSuppressedEcho(t *testing.T) {
 			item := messages.MessageItem{TS: "20.0", Text: "https://example.slack.com/archives/C2/p1000000", UserID: "SELF"}
 			echo := NewMessageMsg{ChannelID: "C1", Message: item}
 			completion := messageForwardedMsg{teamID: "T1", channelID: "C1", destination: "#general", message: item}
-			if order == "suppressed echo first" {
-				a.selfSend.MarkInFlight("C1")
+			if order == "echo adopted by a pending send" {
+				a.Update(SendMessageMsg{ChannelID: "C1", Text: "concurrent"})
 			}
 			if order == "different workspace" {
 				a.activeTeamID = "T2"

@@ -315,23 +315,25 @@ var reduceThreads reducerFunc = func(a *App, msg tea.Msg) (tea.Cmd, bool) {
 		return func() tea.Msg { return threads.ListFetch(team) }, true
 
 	case SendThreadReplyMsg:
-		a.selfSend.MarkInFlight(m.ChannelID)
 		// Instant-display: append an optimistic placeholder to the
 		// thread panel immediately, before the chat.postMessage HTTP
 		// round-trip. Mirrors the SendMessageMsg path; see there for
 		// the LocalTS / swap-or-remove contract and the
 		// mrkdwn.Convert rationale.
-		localTS := a.selfSend.NextLocalTS()
+		localTS := a.pendingOps.NextLocalTS()
+		a.pendingOps.BeginInsert(pendingInsert{
+			localTS: localTS, channelID: m.ChannelID, threadTS: m.ThreadTS, broadcast: m.Broadcast,
+		})
 		sinks := a.replySinksFor(m.ChannelID, m.ThreadTS, m.Broadcast)
 		if sinks.thread != nil {
 			sinks.thread.InsertLocal(a.localRow(localTS, m.Text, m.ThreadTS, ""))
 		}
 		// Broadcast ("Also send to #channel"): the reply will also
 		// land in the parent channel feed as a thread_broadcast row.
-		// The self-send dedup (selfSend.RecordSent in
-		// ThreadReplySentMsg) suppresses the WS echo, so the only
-		// way the feed shows the row promptly is this optimistic
-		// add + the swap in ThreadReplySentMsg below.
+		// The echo is adopted by this send or dropped after
+		// ThreadReplySentMsg (pendingOps), so the only way the feed
+		// shows the row promptly is this optimistic add + the swap
+		// in ThreadReplySentMsg below.
 		// sinks.channel is empty unless m.Broadcast.
 		for _, s := range sinks.channel {
 			s.InsertLocal(a.localRow(localTS, m.Text, m.ThreadTS, "thread_broadcast"))
@@ -349,18 +351,19 @@ var reduceThreads reducerFunc = func(a *App, msg tea.Msg) (tea.Cmd, bool) {
 		// chat.postMessage for the thread reply landed. If a
 		// "local:..." placeholder is in the thread panel from the
 		// instant-display path (SendThreadReplyMsg above), swap it
-		// for the authoritative message; otherwise fall back to
-		// UpsertSelfSentReply.
+		// for the authoritative message (rowSink.Settle, which also
+		// covers an echo adopted first); otherwise it is upserted.
 		//
 		// Note: the internal Slack flannel WebSocket does not always
 		// echo self-posted thread replies as a plain "message" event,
 		// so we cannot rely on the WS echo alone -- the HTTP response
 		// must apply all the side effects (parent reply count, threads
 		// dirty) here.
+		a.pendingOps.EndInsert(m.LocalTS)
 		if m.Message.TS == "" {
 			return nil, true
 		}
-		a.selfSend.RecordSent(m.Message.TS)
+		a.pendingOps.RecordSent(m.Message.TS)
 		// Update the thread panel whenever the visible thread
 		// matches, regardless of activeChannelID. When a thread is
 		// opened from the threads view, activeChannelID is not
@@ -386,7 +389,12 @@ var reduceThreads reducerFunc = func(a *App, msg tea.Msg) (tea.Cmd, bool) {
 		// chat.postMessage for the thread reply failed; roll back
 		// the optimistic placeholder. Mirrors MessageSendFailedMsg.
 		// For broadcasts, also roll back the thread_broadcast row
-		// optimistically added to the channel feed.
+		// optimistically added to the channel feed. As with
+		// MessageSendFailedMsg, an adopted echo means the reply was
+		// posted: keep it and report nothing.
+		if ins, ok := a.pendingOps.EndInsert(m.LocalTS); ok && ins.adopted {
+			return nil, true
+		}
 		if m.LocalTS != "" {
 			a.replySinksFor(m.ChannelID, m.ThreadTS, m.Broadcast).removeLocal(m.LocalTS)
 		}

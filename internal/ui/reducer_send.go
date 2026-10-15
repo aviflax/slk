@@ -7,9 +7,10 @@
 // lives in reducer_threads.go):
 //
 //	NewMessageMsg            - inbound WS event for any channel:
-//	                           edit-echo update, self-send dedup
-//	                           (recorded + early-arrival in-flight
-//	                           guards), append-to-pane, staging a
+//	                           edit-echo update, self-send echo
+//	                           handling (drop by recorded TS, or
+//	                           adoption by a pending send),
+//	                           append-to-pane, staging a
 //	                           focus-gated read-cursor advance or
 //	                           surfacing the unread dot, and
 //	                           threads-list dirty-bump for replies.
@@ -18,7 +19,8 @@
 //	MessageSentMsg           - send landed: swap placeholder for
 //	                           authoritative message.
 //	MessageSendFailedMsg     - send failed: roll back placeholder
-//	                           + fire SendFailed toast.
+//	                           + fire SendFailed toast, unless the
+//	                           echo already showed it posted.
 //	EditMessageMsg           - user edit: chat.update call.
 //	MessageEditedMsg         - edit result: leave edit mode + on
 //	                           failure fire EditFailed toast.
@@ -37,7 +39,7 @@
 //	                           is the open thread's parent.
 //
 // Free reducer (not controller-absorbed): these arms cooperate on
-// the messagepane, threadPanel, selfSend, editController, sidebar
+// the messagepane, threadPanel, pendingOps, editController, sidebar
 // read-state, and the message service. No single existing
 // controller owns all of that cross-section.
 //
@@ -68,9 +70,10 @@ var reduceSend reducerFunc = func(a *App, msg tea.Msg) (tea.Cmd, bool) {
 		if m.teamID != a.activeTeamID {
 			return nil, true
 		}
-		// A concurrent compose send can suppress the forward's self-authored
-		// WS echo. Reconcile the HTTP result without touching drafts or
-		// placeholders. AppendMessage deduplicates echoes that arrived first.
+		// A concurrent compose send in this channel can adopt the forward's
+		// self-authored WS echo as its own. Reconcile the HTTP result without
+		// touching drafts or placeholders. AppendMessage deduplicates echoes
+		// that arrived first.
 		for _, mm := range a.modelsForChannel(m.channelID) {
 			mm.AppendMessage(cloneMessageItem(m.message))
 		}
@@ -80,17 +83,17 @@ var reduceSend reducerFunc = func(a *App, msg tea.Msg) (tea.Cmd, bool) {
 		// The chat.postMessage HTTP response landed. Settle (see
 		// rowSink) swaps the "local:..." placeholder from the
 		// instant-display path (SendMessageMsg above) for the
-		// authoritative message. A racing WS echo that slipped past
-		// the in-flight window and stored its own row first takes
-		// the authoritative message instead, and the placeholder
-		// goes, so the message shows once. With no placeholder
+		// authoritative message. When the echo got in first and was
+		// adopted, the placeholder is already gone and the echo's
+		// row takes the authoritative message. With no placeholder
 		// (test paths firing MessageSentMsg directly, or the user
 		// navigated away and back between Enter and the HTTP
 		// response) the message is upserted by its Slack TS.
+		a.pendingOps.EndInsert(m.LocalTS)
 		if m.Message.TS == "" {
 			return nil, true
 		}
-		a.selfSend.RecordSent(m.Message.TS)
+		a.pendingOps.RecordSent(m.Message.TS)
 		// settle gives each channel window its own clone.
 		a.sinksFor(m.ChannelID).settle(m.LocalTS, m.Message)
 		return nil, true
@@ -98,7 +101,13 @@ var reduceSend reducerFunc = func(a *App, msg tea.Msg) (tea.Cmd, bool) {
 	case MessageSendFailedMsg:
 		// The chat.postMessage HTTP call failed; roll back the
 		// optimistic placeholder so the user can see the send
-		// didn't go through. A toast surfaces the reason.
+		// didn't go through. A toast surfaces the reason. If the
+		// echo was adopted, Slack posted the message (the call
+		// failed after it was accepted, e.g. a timeout), so the row
+		// stays and nothing is reported.
+		if ins, ok := a.pendingOps.EndInsert(m.LocalTS); ok && ins.adopted {
+			return nil, true
+		}
 		if m.LocalTS != "" {
 			a.sinksFor(m.ChannelID).removeLocal(m.LocalTS)
 		}
@@ -108,7 +117,6 @@ var reduceSend reducerFunc = func(a *App, msg tea.Msg) (tea.Cmd, bool) {
 		}, true
 
 	case EditMessageMsg:
-		a.selfSend.MarkInFlight(m.ChannelID)
 		messageSvc := a.messageSvc
 		chID, ts, text := ids.ChannelID(m.ChannelID), ids.MessageTS(m.TS), m.NewText
 		return func() tea.Msg {
@@ -208,7 +216,7 @@ var reduceSend reducerFunc = func(a *App, msg tea.Msg) (tea.Cmd, bool) {
 
 // reduceNewMessage handles NewMessageMsg. Extracted because the
 // arm is ~100 lines covering six decision branches (edit echo,
-// self-send dedup, early-arrival in-flight guard, the ephemeral
+// self-send dedup, adoption by a pending send, the ephemeral
 // display-only return, the read-state decision for the channel and
 // thread cursors, threads-list dirty bump). The ephemeral branch
 // returns after the message is displayed, before any read-state work.
@@ -238,28 +246,25 @@ func reduceNewMessage(a *App, m NewMessageMsg) tea.Cmd {
 	// MessageSentMsg / ThreadReplySentMsg already updated the UI
 	// and scheduled side effects; redoing them here would
 	// double-render.
-	if a.selfSend.IsSelfSent(m.Message.TS) {
+	if a.pendingOps.IsSelfSent(m.Message.TS) {
 		debuglog.Cache("NewMessageMsg: channel=%s ts=%s decision=skipped_self_send",
 			m.ChannelID, m.Message.TS)
 		return nil
 	}
-	// Early-arrival suppression: if the WS echo for an
-	// slk-originated send arrives BEFORE the chat.postMessage HTTP
-	// response (and therefore before recordSelfSent could fire),
-	// drop it for self-user messages. Otherwise the WS-echo
-	// version -- which carries Slack's normalised text (paragraph
-	// breaks flattened for rich_text_block messages) -- renders
-	// briefly, then flicker-replaces with the optimistic version.
-	// See markSelfSendInFlight / selfSendInFlight comments.
-	//
-	// Cross-session messages from this user (sent via the official
-	// Slack client while slk is open) do NOT update
-	// lastSelfSendByChannel, so they pass through this guard.
-	// An ephemeral is never an echo of chat.postMessage, so it is exempt.
-	if !m.Message.Ephemeral && m.Message.UserID != "" && m.Message.UserID == a.currentUserID && a.selfSend.InFlight(m.ChannelID) {
-		debuglog.Cache("NewMessageMsg: channel=%s ts=%s decision=skipped_self_send_in_flight",
-			m.ChannelID, m.Message.TS)
-		return nil
+	// An echo of a send that is still waiting for its HTTP result
+	// takes the place of that send's placeholder, in every pane the
+	// result would write, instead of being appended beside it. The
+	// result then lands Slack's response on it and does the side
+	// effects (reply count, threads dirty), so none are done here.
+	// An ephemeral is never an echo of chat.postMessage.
+	if !m.Message.Ephemeral && m.Message.UserID != "" && m.Message.UserID == a.currentUserID {
+		if ins, ok := a.pendingOps.AdoptEcho(m.ChannelID, m.Message); ok {
+			debuglog.Cache("NewMessageMsg: channel=%s ts=%s decision=adopted_pending_send local=%s",
+				m.ChannelID, m.Message.TS, ins.localTS)
+			a.pendingOps.RecordSent(m.Message.TS)
+			a.insertSinks(ins).settle(ins.localTS, m.Message)
+			return nil
+		}
 	}
 	// An app's message ends its "working" status in this channel even
 	// when the clearing ai_assistant_status never arrives.
@@ -413,10 +418,6 @@ func reduceNewMessage(a *App, m NewMessageMsg) tea.Cmd {
 // reduceSend dispatch switch readable -- this arm does optimistic
 // placeholder + async chat.postMessage + LocalTS attachment.
 func reduceSendMessage(a *App, m SendMessageMsg) tea.Cmd {
-	// Mark in-flight regardless of whether a sender is wired --
-	// the user's send intent is what controls WS-echo suppression
-	// for self-user messages on this channel.
-	a.selfSend.MarkInFlight(m.ChannelID)
 	// Instant-display: append an optimistic placeholder for the
 	// active channel immediately, before the chat.postMessage HTTP
 	// round-trip. The placeholder carries a "local:<n>" TS so the
@@ -428,12 +429,15 @@ func reduceSendMessage(a *App, m SendMessageMsg) tea.Cmd {
 	// they must show the optimistic message too). For background
 	// sends (rare -- would require sending while in a different
 	// view) no window matches and we skip the placeholder; the HTTP
-	// response will fall back to UpsertSelfSent's append path.
+	// response will fall back to Settle's upsert.
 	//
 	// localRow converts the user-typed CommonMark to Slack mrkdwn
 	// with the converter client.SendMessage uses, so "**bold**" is
 	// styled in the placeholder rather than literal until the swap.
-	localTS := a.selfSend.NextLocalTS()
+	localTS := a.pendingOps.NextLocalTS()
+	// Recorded whether or not a pane shows the placeholder, so the
+	// echo is adopted rather than appended either way.
+	a.pendingOps.BeginInsert(pendingInsert{localTS: localTS, channelID: m.ChannelID})
 	for _, s := range a.sinksFor(m.ChannelID).channel {
 		s.InsertLocal(a.localRow(localTS, m.Text, "", ""))
 	}

@@ -605,13 +605,11 @@ type App struct {
 	// Falls back to 3 when unset (matches the pre-config behavior).
 	mouseWheelLines int
 
-	// selfSend tracks slk-originated message sends so WS echoes can
-	// be suppressed (preventing the visible flicker between Slack's
-	// normalised echo text and the optimistic instant-display text).
-	// See internal/ui/selfsend.go. Used for both channel-level
-	// in-flight suppression (before chat.postMessage's response
-	// returns) and TS-level exact-match suppression (after).
-	selfSend *selfSendDedup
+	// pendingOps is the ledger of the user's optimistic sends, which
+	// tells their WS echoes apart from the user's other messages: an
+	// echo before the HTTP result is adopted by its send, one after it
+	// is dropped by TS. See internal/ui/pending_ops.go.
+	pendingOps *pendingOps
 
 	// nowTimestampFormatter renders "now" using the same format used
 	// for message timestamps elsewhere (configured via
@@ -881,7 +879,7 @@ func NewApp() *App {
 		sidebarVisible:        true,
 		view:                  ViewChannels,
 		keys:                  DefaultKeyMap(),
-		selfSend:              newSelfSendDedup(),
+		pendingOps:            newPendingOps(),
 		bootstrap:             newWorkspaceBootstrap(),
 		windowTitle:           "slk",
 		threadsDirtyDebounce:  defaultThreadsDirtyDebounce,

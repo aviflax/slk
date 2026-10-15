@@ -63,13 +63,13 @@ func TestEphemeralThreadReply_ShownButNotCountedOrMarked(t *testing.T) {
 	}
 }
 
-// The in-flight guard drops WS echoes of the user's own chat.postMessage.
+// A pending send adopts the WS echo of the user's own chat.postMessage.
 // An ephemeral is never such an echo, even when it carries the user's ID.
-func TestEphemeralFromSelf_ShownWhileSendInFlight(t *testing.T) {
+func TestEphemeralFromSelf_ShownWhileSendPending(t *testing.T) {
 	app, _ := markCapture(t)
 	app.activeChannelID = "C1"
 	app.currentUserID = "USELF"
-	app.selfSend.MarkInFlight("C1")
+	app.Update(SendMessageMsg{ChannelID: "C1", Text: "pending"})
 
 	_, _ = app.Update(NewMessageMsg{
 		ChannelID: "C1",
@@ -77,6 +77,6 @@ func TestEphemeralFromSelf_ShownWhileSendInFlight(t *testing.T) {
 	})
 
 	if !paneHasTS(app, "5.000000") {
-		t.Error("an ephemeral from the current user was dropped by the self-send in-flight guard")
+		t.Error("an ephemeral from the current user was taken for the echo of a pending send")
 	}
 }

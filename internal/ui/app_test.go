@@ -1215,7 +1215,7 @@ func TestApp_ThreadReplySentOptimisticallyAddsToThreadPanel(t *testing.T) {
 	if got := app.threadPanel.ReplyCount(); got != 1 {
 		t.Fatalf("expected 1 reply added optimistically, got %d", got)
 	}
-	if !app.selfSend.IsSelfSent("1700000050.000400") {
+	if !app.pendingOps.IsSelfSent("1700000050.000400") {
 		t.Errorf("expected TS to be recorded as self-sent for echo dedup")
 	}
 }
@@ -1327,7 +1327,7 @@ func TestApp_MessageSentOptimisticallyAppendsToMessagepane(t *testing.T) {
 	if app.messagepane.Version() == beforeVer {
 		t.Errorf("expected messagepane version to advance after optimistic append")
 	}
-	if !app.selfSend.IsSelfSent("1700000999.000001") {
+	if !app.pendingOps.IsSelfSent("1700000999.000001") {
 		t.Errorf("expected TS to be recorded for echo dedup")
 	}
 }
@@ -3385,15 +3385,14 @@ func TestConversationOpenedMsg_InactiveWorkspaceIgnored(t *testing.T) {
 	}
 }
 
-// TestSelfSendInFlight_SuppressesEarlyWSEcho asserts that when a slk-
-// originated send has been marked in-flight for a channel, an
-// arriving WS echo from the same user is dropped. Without this guard,
-// the WS echo (with Slack's normalised text) would render alongside
-// the instant-display placeholder, double-rendering the same message.
+// TestSelfSendInFlight_SuppressesEarlyWSEcho asserts that a WS echo of
+// a slk-originated send that arrives before the HTTP response takes the
+// placeholder's place instead of rendering beside it (the pending send
+// adopts it), and that the response then lands its own text on that
+// row.
 //
-// Cross-session messages (where lastSelfSendByChannel is NOT updated
-// for that channel because the user sent from another tool) must
-// still pass through.
+// Cross-session messages (no pending send in that conversation, because
+// the user sent from another tool) must still pass through.
 func TestSelfSendInFlight_SuppressesEarlyWSEcho(t *testing.T) {
 	app := NewApp()
 	app.SetCurrentUserID("USELF")
@@ -3401,7 +3400,7 @@ func TestSelfSendInFlight_SuppressesEarlyWSEcho(t *testing.T) {
 
 	// User submits a slk-originated send. SendMessageMsg appends an
 	// optimistic placeholder (instant-display) AND records the
-	// in-flight timestamp.
+	// pending send.
 	app.Update(SendMessageMsg{ChannelID: "C1", Text: "Hello\nWorld"})
 
 	// Instant-display placeholder is in the pane immediately.
@@ -3412,8 +3411,11 @@ func TestSelfSendInFlight_SuppressesEarlyWSEcho(t *testing.T) {
 		t.Errorf("placeholder Text = %q, want %q", got, "Hello\nWorld")
 	}
 
+	// The LocalTS the send's result will carry, read off the placeholder.
+	localTS := app.messagepane.Messages()[0].TS
+
 	// Slack's WS echo arrives BEFORE chat.postMessage HTTP responds.
-	// selfSendInFlight must drop it so we don't double-render.
+	// The pending send adopts it so we don't double-render.
 	app.Update(NewMessageMsg{
 		ChannelID: "C1",
 		Message: messages.MessageItem{
@@ -3428,8 +3430,7 @@ func TestSelfSendInFlight_SuppressesEarlyWSEcho(t *testing.T) {
 	// LocalTS field — assigned in the SendMessageMsg handler and
 	// threaded through the sender closure — lets the handler swap the
 	// placeholder for the authoritative message in place. The
-	// test simulates that wiring by reading the placeholder's TS.
-	localTS := app.messagepane.Messages()[0].TS
+	// test simulates that wiring with the placeholder's TS read above.
 	app.Update(MessageSentMsg{
 		ChannelID: "C1",
 		LocalTS:   localTS,
@@ -3560,9 +3561,9 @@ func TestSelfSendInFlight_PassesThroughCrossSession(t *testing.T) {
 	app.SetCurrentUserID("USELF")
 	app.activeChannelID = "C1"
 
-	// No SendMessageMsg dispatched here — lastSelfSendByChannel["C1"]
-	// is unset. A WS echo from the user (e.g., they sent via the
-	// official Slack web client) must still render.
+	// No SendMessageMsg dispatched here, so no send is pending. A WS
+	// echo from the user (e.g., they sent via the official Slack web
+	// client) must still render.
 	app.Update(NewMessageMsg{
 		ChannelID: "C1",
 		Message: messages.MessageItem{
