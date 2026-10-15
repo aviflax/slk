@@ -869,11 +869,20 @@ func (m *Model) PrependMessages(msgs []MessageItem) {
 	// "seconds.micros" strings. A "local:" optimistic placeholder at
 	// the head compares greater than any numeric TS, so the guard
 	// degrades to keep-everything there — never a wrong drop.
+	//
+	// The head comparison alone is not enough: the list is not always in
+	// TS order (a swapped-in post TS can be newer than a row after it,
+	// and a placeholder head keeps everything), so a row already in the
+	// buffer is also dropped by TS.
 	if len(m.messages) > 0 {
 		head := m.messages[0].TS
+		have := make(map[string]struct{}, len(m.messages))
+		for _, item := range m.messages {
+			have[item.TS] = struct{}{}
+		}
 		kept := make([]MessageItem, 0, len(msgs))
 		for _, item := range msgs {
-			if item.TS < head {
+			if _, dup := have[item.TS]; item.TS < head && !dup {
 				kept = append(kept, item)
 			}
 		}

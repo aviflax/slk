@@ -140,16 +140,20 @@ func TestModelListOperations(t *testing.T) {
 				s.selectLast()
 			},
 			"Prepend": func(t *rapid.T) {
-				// Older rows, as backfill delivers them.
+				// Mostly older rows, plus some a raced backfill would
+				// deliver that the buffer already covers.
 				var msgs []MessageItem
 				n := rapid.IntRange(0, 4).Draw(t, "n")
 				for i := range n {
 					msgs = append(msgs, MessageItem{TS: tsN(s.oldest - n + i)})
 				}
 				s.oldest -= n
+				if ts, ok := s.existing(t); ok && rapid.Bool().Draw(t, "stale") {
+					msgs = append(msgs, MessageItem{TS: ts})
+				}
 				var kept []string
 				for _, msg := range msgs {
-					if len(s.ts) == 0 || msg.TS < s.ts[0] {
+					if (len(s.ts) == 0 || msg.TS < s.ts[0]) && s.index(msg.TS) < 0 {
 						kept = append(kept, msg.TS)
 					}
 				}
