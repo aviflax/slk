@@ -100,6 +100,11 @@ var reduceThreads reducerFunc = func(a *App, msg tea.Msg) (tea.Cmd, bool) {
 	}
 	switch m := msg.(type) {
 	case ThreadMarkedRemoteMsg:
+		// From a workspace the user has left since the socket sent it,
+		// as for ChannelMarkedRemoteMsg.
+		if m.TeamID != "" && m.TeamID != a.activeTeamID {
+			return nil, true
+		}
 		// Via the echo helper: this event is also how slk's own thread
 		// marks come back. See applyThreadMarkEcho.
 		a.applyThreadMarkEcho(m.ChannelID, m.ThreadTS, m.LastRead)

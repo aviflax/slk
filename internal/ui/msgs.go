@@ -72,6 +72,11 @@ type (
 		TeamID string
 	}
 	MessagesLoadedMsg struct {
+		// TeamID is the workspace the fetch ran in ("" means the
+		// active one). A Slack Connect channel has the same ID in every
+		// workspace sharing it, so read floors (read_floor.go) are
+		// written only when it is still the active workspace.
+		TeamID     string
 		ChannelID  string
 		Messages   []messages.MessageItem
 		LastReadTS string
@@ -688,7 +693,14 @@ type MessageMarkedUnreadMsg struct {
 // mark echoing back). The handler has already persisted the new
 // last_read_ts to SQLite via cache.UpdateChannelReadState; the App's
 // Update arm only updates the UI. No toast.
+//
+// TeamID is the workspace whose socket delivered the event ("" means
+// the active one). The handler sends it only for the active workspace,
+// but the user may switch before it is reduced; the reducer drops one
+// from another workspace, whose channel may share this ID (Slack
+// Connect).
 type ChannelMarkedRemoteMsg struct {
+	TeamID      string
 	ChannelID   string
 	TS          string
 	UnreadCount int
@@ -701,7 +713,10 @@ type ChannelMarkedRemoteMsg struct {
 // two apart). LastRead is the thread's new read cursor; whether that
 // means read or unread is decided by comparing it against the thread's
 // newest known reply.
+//
+// TeamID is as in ChannelMarkedRemoteMsg.
 type ThreadMarkedRemoteMsg struct {
+	TeamID    string
 	ChannelID string
 	ThreadTS  string
 	LastRead  string

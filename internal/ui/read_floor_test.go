@@ -260,3 +260,34 @@ func TestReadFloor_StagedMarkStaysInItsWorkspace(t *testing.T) {
 		t.Errorf("marks = %v, want T1's staged mark dropped in T2", *calls)
 	}
 }
+
+// A Slack Connect channel has the same ID in every workspace sharing
+// it. A fetch result or a mark echo from a workspace the user has left
+// by the time it arrives says nothing about the active workspace's
+// cursor, so it raises no floor there: the active workspace's next mark
+// still goes out.
+func TestReadFloor_OtherWorkspacesResultsLeaveTheFloor(t *testing.T) {
+	late := map[string]struct {
+		msg    any
+		thread bool
+	}{
+		"fetch result":       {MessagesLoadedMsg{TeamID: "T1", ChannelID: "C1", LastReadTS: "105.000000", MarkedTS: "106.000000"}, false},
+		"channel mark echo":  {ChannelMarkedRemoteMsg{TeamID: "T1", ChannelID: "C1", TS: "105.000000"}, false},
+		"thread mark echo":   {ThreadMarkedRemoteMsg{TeamID: "T1", ChannelID: "C1", ThreadTS: "5.000000", LastRead: "105.000000"}, true},
+		"active fetch (own)": {MessagesLoadedMsg{TeamID: "T2", ChannelID: "C1", LastReadTS: "105.000000"}, false},
+	}
+	for name, c := range late {
+		app, calls := floorApp(t)
+		app.activeTeamID = "T2"
+		app.Update(c.msg)
+		reshow(app)
+		arriveAndFlush(t, app, mark("104.000000", c.thread))
+		want := 1
+		if name == "active fetch (own)" {
+			want = 0 // the active workspace's own cursor does hold it back
+		}
+		if len(*calls) != want {
+			t.Errorf("%s: marks = %v, want %d", name, *calls, want)
+		}
+	}
+}

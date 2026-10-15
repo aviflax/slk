@@ -125,8 +125,13 @@ var reduceChannels reducerFunc = func(a *App, msg tea.Msg) (tea.Cmd, bool) {
 		a.selfMarks.record(selfMarkKey{channelID: m.ChannelID, ts: m.MarkedTS})
 		// Slack's cursor: the read state the fetch loaded, and the
 		// fetcher's own mark, in flight until ChannelMarkedReadMsg.
-		a.readFloors.held(a.channelFloor(m.ChannelID), m.LastReadTS)
-		a.readFloors.issued(a.channelFloor(m.ChannelID), m.MarkedTS)
+		// Only for the workspace the fetch ran in: a channel of the
+		// same ID (Slack Connect) in the workspace the user switched to
+		// has its own cursor.
+		if m.TeamID == "" || m.TeamID == a.activeTeamID {
+			a.readFloors.held(a.channelFloor(m.ChannelID), m.LastReadTS)
+			a.readFloors.issued(a.channelFloor(m.ChannelID), m.MarkedTS)
+		}
 		// Fan out to every window viewing the channel, focused or
 		// not (Phase 3).
 		models := a.modelsForChannel(m.ChannelID)
@@ -222,6 +227,11 @@ var reduceChannels reducerFunc = func(a *App, msg tea.Msg) (tea.Cmd, bool) {
 		return nil, true
 
 	case ChannelMarkedRemoteMsg:
+		// From a workspace the user has left since the socket sent it:
+		// its channel of the same ID is not the one on screen.
+		if m.TeamID != "" && m.TeamID != a.activeTeamID {
+			return nil, true
+		}
 		// Echo path: may be slk's own mark coming back. See
 		// applyChannelMarkEcho.
 		a.applyChannelMarkEcho(m.ChannelID, m.TS, m.UnreadCount)

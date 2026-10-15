@@ -870,6 +870,7 @@ func run() error {
 				}
 
 				return ui.MessagesLoadedMsg{
+					TeamID:     wctx.TeamID,
 					ChannelID:  chIDStr,
 					Messages:   msgItems,
 					LastReadTS: lastReadTS,
@@ -1661,6 +1662,7 @@ func run() error {
 					msgItems := fetchChannelMessages(wctx.Client, channelID, db, wctx.UserNames, tsFormat, avatarCache, router)
 					state, _ := db.GetChannelReadState(channelID)
 					p.Send(ui.MessagesLoadedMsg{
+						TeamID:     wctx.TeamID,
 						ChannelID:  channelID,
 						Messages:   msgItems,
 						LastReadTS: state.LastReadTS,

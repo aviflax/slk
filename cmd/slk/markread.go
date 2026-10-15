@@ -248,6 +248,7 @@ func (h *rtmEventHandler) OnChannelMarked(channelID, ts string, unreadCount, men
 		return
 	}
 	h.program.Send(ui.ChannelMarkedRemoteMsg{
+		TeamID:      h.workspaceID,
 		ChannelID:   channelID,
 		TS:          ts,
 		UnreadCount: unreadCount,
@@ -326,6 +327,7 @@ func (h *rtmEventHandler) OnThreadMarked(channelID, threadTS, lastRead string, s
 		return
 	}
 	h.program.Send(ui.ThreadMarkedRemoteMsg{
+		TeamID:    h.workspaceID,
 		ChannelID: channelID,
 		ThreadTS:  threadTS,
 		LastRead:  lastRead,

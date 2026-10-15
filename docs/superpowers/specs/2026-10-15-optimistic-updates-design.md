@@ -586,7 +586,11 @@ history or a link. The guards:
   when the workspace stops being active (`leaveWorkspace`, which also
   drops marks staged in it) and on any change of its connection
   (`ConnectionStateMsg.TeamID`), since slk then misses marks made
-  elsewhere. Opening a thread and entering a channel mark the newest
+  elsewhere. A fetch result (`MessagesLoadedMsg`) or a mark echo
+  (`ChannelMarkedRemoteMsg`, `ThreadMarkedRemoteMsg`) carries the
+  workspace it came from, and one from a workspace the user has left
+  writes no floor (the echoes are dropped whole): a Slack Connect
+  channel has the same ID in each workspace sharing it. Opening a thread and entering a channel mark the newest
   message the user sees without consulting the floor. The thread mark (`newestMarkableReplyTS`) and the
   mark-unread boundary take the nearest message Slack knows
   (`KnownToSlack`: no placeholder, no ephemeral).
