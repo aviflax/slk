@@ -708,7 +708,10 @@ func RenderSlackMarkdownWith(text string, opts RenderSlackMarkdownOpts) string {
 		if strings.HasPrefix(line, "&gt; ") || strings.HasPrefix(line, "> ") {
 			quoted := strings.TrimPrefix(line, "&gt; ")
 			quoted = strings.TrimPrefix(quoted, "> ")
-			quoted = slackEntityDecoder.Replace(quoted)
+			// Quoted text is formatted like any other line (bold, links,
+			// mentions), and entities are decoded after, for the same
+			// reason as below.
+			quoted = slackEntityDecoder.Replace(renderInlineFormattingWith(quoted, opts))
 			// Wrap before styling, to the width left after the bar and
 			// its padding, so lipgloss draws the bar on every wrapped
 			// row. The caller's WordWrap would otherwise break the
@@ -716,6 +719,11 @@ func RenderSlackMarkdownWith(text string, opts RenderSlackMarkdownOpts) string {
 			if w := opts.Width; w > 2 {
 				quoted = WordWrap(quoted, w-2)
 			}
+			// Each styled span ends in a reset, after which the pass at
+			// the end re-emits the normal text colour. Re-assert the
+			// quote's muted colour after it, so the rest of the quote
+			// stays muted.
+			quoted = ReapplyBgAfterResets(quoted, BgANSI()+fgANSIFor(styles.TextMuted))
 			line = blockquoteStyle().Render(quoted)
 		} else {
 			line = renderInlineFormattingWith(line, opts)

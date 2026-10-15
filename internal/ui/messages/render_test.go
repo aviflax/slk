@@ -990,3 +990,30 @@ func TestEphemeralLabel(t *testing.T) {
 		t.Errorf("regular message rendered the ephemeral label:\n%s", out)
 	}
 }
+
+// TestBlockquoteRendersInlineFormatting pins that text inside a quote is
+// formatted like any other line (bold, mentions, link labels lose their
+// markup), and that the quote's muted colour comes back after each styled
+// span instead of reverting to the normal text colour.
+func TestBlockquoteRendersInlineFormatting(t *testing.T) {
+	styles.Apply("dark", config.Theme{})
+	t.Cleanup(func() { styles.Apply("dark", config.Theme{}) })
+	in := "&gt; see *this* from <@U1> at <https://example.com|the doc> now"
+	out := RenderSlackMarkdownWith(in, RenderSlackMarkdownOpts{UserNames: map[string]string{"U1": "alice"}})
+	plain := ansi.Strip(out)
+	for _, want := range []string{"┃ see this from @alice at the doc now"} {
+		if !strings.Contains(plain, want) {
+			t.Fatalf("quote not formatted: got %q, want it to contain %q", plain, want)
+		}
+	}
+	// The last foreground set before " now" must be the muted one.
+	muted := strings.TrimSuffix(strings.TrimPrefix(fgANSIFor(styles.TextMuted), "\x1b["), "m")
+	i := strings.Index(out, " now")
+	if i < 0 {
+		t.Fatalf("no trailing text in %q", out)
+	}
+	before := out[:i]
+	if last := before[strings.LastIndex(before, "38;2;"):]; !strings.HasPrefix(last, muted) {
+		t.Errorf("text after the last span is not muted; last fg before it: %q", last)
+	}
+}
