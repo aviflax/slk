@@ -269,10 +269,21 @@ func stampEditID(e pendingEdit, call func() tea.Msg) tea.Cmd {
 // failNilDelete wraps a delete's service call so a nil result (no
 // active workspace) becomes a failed delete of channelID/ts.
 func failNilDelete(channelID, ts string, call func() tea.Msg) tea.Cmd {
+	return failNil(call, MessageDeletedMsg{ChannelID: channelID, TS: ts, Err: errNoWorkspace})
+}
+
+// errNoWorkspace is noWorkspaceReason as the error a failure carries.
+var errNoWorkspace = errors.New(noWorkspaceReason)
+
+// failNil wraps a service call so a nil result (no active workspace)
+// becomes fail, the operation's failure. An operation the user started
+// must end: one whose result never comes leaves its pending state (an
+// in-flight flag, a spinner, an upload) stuck, with nothing said.
+func failNil(call func() tea.Msg, fail tea.Msg) tea.Cmd {
 	return func() tea.Msg {
 		if r := call(); r != nil {
 			return r
 		}
-		return MessageDeletedMsg{ChannelID: channelID, TS: ts, Err: errors.New(noWorkspaceReason)}
+		return fail
 	}
 }

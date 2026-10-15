@@ -1951,9 +1951,9 @@ func (a *App) maybeFetchOlderHistory(atTop bool) tea.Cmd {
 		tea.Tick(100*time.Millisecond, func(time.Time) tea.Msg {
 			return SpinnerTickMsg{}
 		}),
-		func() tea.Msg {
+		failNil(func() tea.Msg {
 			return channels.FetchOlder(chID, oldestTS)
-		},
+		}, OlderMessagesLoadedMsg{ChannelID: string(chID), AnchorTS: string(oldestTS)}),
 	)
 }
 
@@ -3787,8 +3787,14 @@ func (a *App) submitWithAttachments(c *compose.Model) tea.Cmd {
 	}
 
 	c.SetUploading(true)
+	upload := teaCmd(a.files.Upload(channelID, threadTS, caption, attachments))
 	cmds := []tea.Cmd{
-		teaCmd(a.files.Upload(channelID, threadTS, caption, attachments)),
+		failNil(func() tea.Msg {
+			if upload == nil {
+				return nil
+			}
+			return upload()
+		}, UploadResultMsg{Err: errNoWorkspace}),
 		toastWithClear(a, fmt.Sprintf("Uploading 0/%d…", len(attachments)), 30*time.Second),
 	}
 	return tea.Batch(cmds...)

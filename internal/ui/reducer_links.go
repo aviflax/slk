@@ -338,9 +338,9 @@ func (a *App) completePendingLinkNav(channelID string, authoritative bool) tea.C
 		a.pendingLinkNav = nil
 		channels := a.channels
 		chID, ts := p.ChannelID, p.MessageTS
-		return func() tea.Msg {
+		return failNil(func() tea.Msg {
 			return channels.FetchAround(chID, ts)
-		}
+		}, MessagesAroundLoadedMsg{ChannelID: string(chID), TargetTS: string(ts), Err: errNoWorkspace})
 	}
 	return nil
 }

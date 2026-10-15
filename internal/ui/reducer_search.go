@@ -140,9 +140,9 @@ func (a *App) jumpToCurrentMatch() tea.Cmd {
 	}
 	channels := a.channels
 	chID := a.activeChannelID
-	return func() tea.Msg {
+	return failNil(func() tea.Msg {
 		return channels.FetchAround(ids.ChannelID(chID), ids.MessageTS(ts))
-	}
+	}, MessagesAroundLoadedMsg{ChannelID: chID, TargetTS: ts, Err: errNoWorkspace})
 }
 
 // searchStep moves the match selection by delta with wrap: +1 is the

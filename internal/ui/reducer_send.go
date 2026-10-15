@@ -175,9 +175,12 @@ var reduceSend reducerFunc = func(a *App, msg tea.Msg) (tea.Cmd, bool) {
 		threadTS := ids.ThreadTS(m.ThreadTS)
 		boundaryTS := ids.MessageTS(m.BoundaryTS)
 		n := m.UnreadCount
-		return func() tea.Msg {
+		return failNil(func() tea.Msg {
 			return messageSvc.MarkUnread(chID, threadTS, boundaryTS, n)
-		}, true
+		}, MessageMarkedUnreadMsg{
+			ChannelID: m.ChannelID, ThreadTS: m.ThreadTS, BoundaryTS: m.BoundaryTS,
+			UnreadCount: n, Err: errNoWorkspace,
+		}), true
 
 	case MessageDeletedMsg:
 		d, ok := a.pendingOps.EndDelete(m.ChannelID, m.TS)

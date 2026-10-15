@@ -24,7 +24,7 @@ func (a *App) openChannel(r channelfinder.ChannelResult) tea.Cmd {
 	}
 	channels := a.channels
 	id, name := ids.ChannelID(r.ID), r.Name
-	return func() tea.Msg {
+	return failNil(func() tea.Msg {
 		return channels.Join(id, name)
-	}
+	}, ChannelJoinFailedMsg{ID: r.ID, Name: r.Name, Err: errNoWorkspace})
 }
