@@ -244,6 +244,25 @@ func (m *Model) IndexOf(id string) (int, bool) {
 	return i, ok
 }
 
+// Shown reports whether the entry with id was on screen in the last
+// frame: its rows (less Trail) in the window and none of them under a
+// bottom overlay (WithBottomOverlay). An entry taller than the window
+// counts once its last row is shown with nothing below the window. A
+// change to the entries since the last frame (KeepLookups, SetEntries
+// before Layout) is not seen until the next one: an entry not laid out
+// yet is not shown.
+func (m *Model) Shown(id string) bool {
+	i, ok := m.ids[id]
+	if !ok || i >= m.lookupLen() || m.laidHeight <= 0 {
+		return false
+	}
+	start := m.offsets[i]
+	end := start + len(m.entries[i].Lines) - m.entries[i].Trail
+	bottom := m.yOffset + m.contentRows(m.yOffset, m.laidHeight)
+	atEnd := m.yOffset+m.laidHeight >= m.total
+	return end > start && end <= bottom && end > m.yOffset && (start >= m.yOffset || atEnd)
+}
+
 // ResetSnap makes the next Layout snap the window to the cursor even if
 // the cursor has not moved (used when the content is replaced).
 func (m *Model) ResetSnap() { m.hasSnapped, m.snapID, m.snapLost = false, "", false }

@@ -339,6 +339,17 @@ func showNewMessage(a *App, m NewMessageMsg) tea.Cmd {
 	isThreadReply := m.Message.ThreadTS != "" && m.Message.ThreadTS != m.Message.TS
 	isBroadcast := m.Message.Subtype == "thread_broadcast"
 
+	// A message counts as seen only if the pane followed it: the
+	// cursor was at the end, so it is selected and drawn. One that
+	// landed below the fold, because the user moved up to read, is
+	// staged as held (recordChannelMark) and stays unread until the
+	// pane shows it; markShownCheckMsg looks after this frame and
+	// after each key, mouse event and resize. held collects whether
+	// this arrival needs that check, notifyLater whether its unread
+	// state waits for it (focused) rather than showing now (blurred).
+	var held, notifyLater bool
+	threadShown := inOpenThreadPanel && a.threadPanel.CursorAtEnd()
+
 	// Thread-eligible: a reply the user has on screen in the open
 	// thread panel. The visibility gate mirrors the channel rule --
 	// "the panel is open on this thread", not "the thread pane holds
@@ -346,7 +357,8 @@ func showNewMessage(a *App, m NewMessageMsg) tea.Cmd {
 	// gates the flush (scheduleMarkFlush), so a blurred reply stays
 	// staged until the FocusMsg catch-up.
 	if isThreadReply && inOpenThreadPanel {
-		a.recordThreadMark(m.ChannelID, m.Message.ThreadTS, m.Message.TS)
+		a.recordThreadMark(m.ChannelID, m.Message.ThreadTS, m.Message.TS, threadShown)
+		held = held || !threadShown
 	}
 
 	// Channel-eligible: top-level messages and thread_broadcasts. Plain
@@ -360,6 +372,19 @@ func showNewMessage(a *App, m NewMessageMsg) tea.Cmd {
 			debuglog.Cache("NewMessageMsg: channel=%s ts=%s decision=mark_unread",
 				m.ChannelID, m.Message.TS)
 			a.notifyReadStateChanged()
+		case !a.messagepane.CursorAtEnd():
+			// On screen, but below the fold: the user moved up to read
+			// and the pane did not follow. Held, not marked; see held
+			// above. Blurred, the dot shows now, as below.
+			debuglog.Cache("NewMessageMsg: channel=%s ts=%s decision=active_below_fold_stay_unread",
+				m.ChannelID, m.Message.TS)
+			a.recordChannelMark(m.ChannelID, m.Message.TS, false)
+			held = true
+			if a.terminalFocused {
+				notifyLater = true
+			} else {
+				a.notifyReadStateChanged()
+			}
 		case a.terminalFocused:
 			// On screen AND the user can actually see it: stage a read-
 			// cursor advance. No notifyReadStateChanged, so this event
@@ -372,7 +397,7 @@ func showNewMessage(a *App, m NewMessageMsg) tea.Cmd {
 			// which is what this arm did before it marked anything.
 			debuglog.Cache("NewMessageMsg: channel=%s ts=%s decision=active_focused_mark_read",
 				m.ChannelID, m.Message.TS)
-			a.recordChannelMark(m.ChannelID, m.Message.TS)
+			a.recordChannelMark(m.ChannelID, m.Message.TS, true)
 		default:
 			// Selected, but slk is in a background terminal / inactive
 			// tmux window or pane. The user has NOT seen this, so show
@@ -382,9 +407,15 @@ func showNewMessage(a *App, m NewMessageMsg) tea.Cmd {
 			// catch-up in reducer_focus.go issues it.
 			debuglog.Cache("NewMessageMsg: channel=%s ts=%s decision=active_blurred_stay_unread",
 				m.ChannelID, m.Message.TS)
-			a.recordChannelMark(m.ChannelID, m.Message.TS)
+			a.recordChannelMark(m.ChannelID, m.Message.TS, true)
 			a.notifyReadStateChanged()
 		}
+	} else if inOpenThreadPanel && !threadShown && a.terminalFocused {
+		// In the open thread, but below the fold: held, and the dot
+		// waits for the check (see held above).
+		debuglog.Cache("NewMessageMsg: channel=%s ts=%s decision=thread_reply_below_fold_stay_unread",
+			m.ChannelID, m.Message.TS)
+		notifyLater = true
 	} else if inOpenThreadPanel && a.terminalFocused {
 		// On screen and visible: the thread mark staged above clears
 		// it before anything would repaint the dot, the same reason
@@ -407,6 +438,9 @@ func showNewMessage(a *App, m NewMessageMsg) tea.Cmd {
 	var cmds []tea.Cmd
 	if c := a.scheduleMarkFlush(); c != nil {
 		cmds = append(cmds, c)
+	}
+	if held {
+		cmds = append(cmds, markShownCheckCmd(notifyLater))
 	}
 	// A thread reply (regardless of channel) may have changed the
 	// involved-threads list -- ask for a re-query. A burst of replies

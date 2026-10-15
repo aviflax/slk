@@ -624,3 +624,60 @@ func TestBottomOverlayLeavesTheEndAlone(t *testing.T) {
 		t.Errorf("last row %q, want m19-1", got[len(got)-1])
 	}
 }
+
+// Shown is what the last frame showed whole: an entry partly off the
+// bottom, or with its last row under the bottom overlay, is not shown.
+func TestShownIsWhatTheLastFrameShowedWhole(t *testing.T) {
+	for _, overlay := range []bool{false, true} {
+		var opts []Option
+		if overlay {
+			opts = append(opts, WithBottomOverlay())
+		}
+		m := list(t, 20, 2, opts...)
+		if m.Shown("m19") {
+			t.Fatal("before any frame: m19 shown, want nothing shown")
+		}
+		m.Layout(19, nil)
+		if !m.Shown("m19") || !m.Shown("m15") || m.Shown("m14") {
+			t.Errorf("overlay=%v at the bottom: shown m19=%v m15=%v m14=%v, want m15..m19 only",
+				overlay, m.Shown("m19"), m.Shown("m15"), m.Shown("m14"))
+		}
+		// Two rows up: m18's first row is the window's last, under the
+		// overlay when there is one.
+		m.ScrollUp(2, 19)
+		m.Layout(19, nil)
+		if m.Shown("m19") {
+			t.Errorf("overlay=%v scrolled up: m19 shown, want it below the window", overlay)
+		}
+		if got := m.Shown("m17"); !got {
+			t.Errorf("overlay=%v scrolled up: m17 not shown, want it whole on screen", overlay)
+		}
+		if got, want := m.Shown("m18"), !overlay; got != want {
+			t.Errorf("overlay=%v scrolled up: m18 shown = %v, want %v", overlay, got, want)
+		}
+		m.KeepLookups(0)
+		if m.Shown("m17") {
+			t.Errorf("overlay=%v: an entry discarded since the frame counts as shown", overlay)
+		}
+	}
+}
+
+// An entry taller than the window is shown once its last row is, at the
+// end of the list.
+func TestShownTallEntryAtTheEnd(t *testing.T) {
+	m := list(t, 3, 15, WithBottomOverlay())
+	m.Layout(2, nil) // the cursor snaps to the entry's top
+	if m.Shown("m02") {
+		t.Error("tall last entry, its top on screen: shown, want its end below the window")
+	}
+	m.ScrollDown(10, 2)
+	m.Layout(2, nil)
+	if !m.Shown("m02") {
+		t.Error("tall last entry at the end: not shown")
+	}
+	m.ScrollUp(3, 2)
+	m.Layout(2, nil)
+	if m.Shown("m02") {
+		t.Error("tall last entry scrolled up: shown, want its end below the window")
+	}
+}

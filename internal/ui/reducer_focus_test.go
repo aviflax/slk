@@ -84,6 +84,14 @@ func TestReduceFocus_ClaimsOnlyItsOwnMessages(t *testing.T) {
 func markCapture(t *testing.T) (*App, *[]string) {
 	t.Helper()
 	app := NewApp()
+	return app, captureMarks(t, app)
+}
+
+// captureMarks is markCapture for an App the test built itself (with
+// newTestApp, say): it wires the same fake mark services into app and
+// returns the call log.
+func captureMarks(t *testing.T, app *App) *[]string {
+	t.Helper()
 	app.inTmux = false
 	app.markFlushDebounce = time.Millisecond
 	calls := &[]string{}
@@ -111,7 +119,7 @@ func markCapture(t *testing.T) (*App, *[]string) {
 			}
 		},
 	}))
-	return app, calls
+	return calls
 }
 
 // feed runs cmd to completion and pushes every resulting message back

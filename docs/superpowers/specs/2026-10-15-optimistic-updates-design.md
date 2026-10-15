@@ -117,7 +117,7 @@ row, ahead of placeholders; a placeholder is appended. History
 prepended or messages appended meanwhile do not decide where it goes,
 only their TSes do. It does nothing when the TS is shown already. A
 pane follows the newest row (`IsNewest`: it selects it, which scrolls
-to it) when its cursor was at the end before the insert (`cursorAtEnd`:
+to it) when its cursor was at the end before the insert (`CursorAtEnd`:
 on the newest row Slack knows or a placeholder after it, or nothing to
 select), and always for the user's own placeholder (`InsertLocal`);
 any other insert or move keeps the cursor on the message it was on
@@ -584,7 +584,17 @@ history or a link. The guards:
   `LastReadTS` and slk's own mark echoes raise the floor, a rejected
   one stops counting. A mark from another client sets it either way;
   the user's mark-unread (`markedUnread`) moves it back to the
-  boundary and drops a staged mark of that conversation. Floors exist
+  boundary and drops a staged mark of that conversation. A message
+  that lands below the fold (the pane did not follow it, so
+  `CursorAtEnd` is false after the insert) is staged as held: no flush
+  issues it, and the unread dot shows. `releaseShownMarks` makes it
+  issuable once the pane's last frame shows it whole, clear of
+  "-- more below --" (`messages.Model.Shows`, `thread.Model.Shows`,
+  `entrylist.Model.Shown`). It runs on `markShownCheckMsg`, which
+  `App.update` sends after every key, mouse event, resize and scroll
+  flush while a mark is held, so it arrives after the frame that
+  input produced. A held mark for a conversation the user leaves is
+  never issued, so the conversation stays unread. Floors exist
   only while slk watches a workspace without a gap: they are forgotten
   when the workspace stops being active (`leaveWorkspace`, which also
   drops marks staged in it) and on any change of its connection
@@ -720,7 +730,11 @@ are out of scope.
    is on the last entry, when the end stays in view. A new message no
    longer drags a cursor the user moved up down to it: only a cursor at
    the end follows the newest row, and the user's own send is always
-   selected. Clipboard writes land in the order they were made
+   selected. That left the read side behind at first: the arrival still
+   marked the message read when the channel was active and the terminal
+   focused, so Slack marked read a message the user could not see.
+   Such a message is now held unread until it is on screen (see "Read
+   cursors" above), as Slack's own clients do. Clipboard writes land in the order they were made
    (`newestClipboardWrite` in `cmd/slk`), so an older unsent bundle can
    no longer finish after a newer one and replace it. The row
    predicates are three, each documented in `rows.go`: `IsLocalTS`,

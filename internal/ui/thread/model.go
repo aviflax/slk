@@ -316,7 +316,7 @@ func (m *Model) LastReadTS() string {
 // AddReply adds a reply where its TS belongs (messages.Insert), so
 // replies Slack knows stay in TS order whatever order they arrive in.
 // The newest reply is selected, which scrolls to it, when the cursor
-// was at the end (cursorAtEnd); otherwise the cursor stays on the
+// was at the end (CursorAtEnd); otherwise the cursor stays on the
 // message it was on. Idempotent on TS, for the same reason as
 // messages.Model.AppendMessage: the optimistic add (HTTP response) and
 // the WS echo can arrive in either order.
@@ -328,7 +328,7 @@ func (m *Model) AddReply(msg messages.MessageItem) {
 // sel says the user just sent it, so it is selected wherever the
 // cursor was.
 func (m *Model) insert(msg messages.MessageItem, sel bool) {
-	follow := sel || m.cursorAtEnd()
+	follow := sel || m.CursorAtEnd()
 	rows, ch := messages.Insert(m.replies, msg)
 	if ch.Op == messages.RowNone {
 		return
@@ -338,15 +338,22 @@ func (m *Model) insert(msg messages.MessageItem, sel bool) {
 	m.afterInsert(ch, follow)
 }
 
-// cursorAtEnd reports whether the cursor is on the newest reply Slack
+// CursorAtEnd reports whether the cursor is on the newest reply Slack
 // knows (or a placeholder after it), or on the parent of a thread with
-// no replies: a reader at the end, who follows a new reply.
-func (m *Model) cursorAtEnd() bool {
+// no replies: a reader at the end, who follows a new reply. Right after
+// AddReply it says whether the pane followed the reply (the App counts
+// it as seen).
+func (m *Model) CursorAtEnd() bool {
 	if m.selected < 0 || m.selected >= len(m.replies) {
 		return len(m.replies) == 0
 	}
 	return messages.IsNewest(m.replies, m.selected)
 }
+
+// Shows reports whether the reply with ts was whole on screen in the
+// last frame (entrylist.Model.Shown). A reply added since that frame is
+// not shown until the next one.
+func (m *Model) Shows(ts string) bool { return m.list.Shown(ts) }
 
 // afterInsert moves the cursor after a reply was added at ch.Index:
 // with follow (the cursor was at the end, or the user sent it) the
@@ -407,7 +414,7 @@ func (m *Model) afterLocalRemoved(i int) {
 // motivating bug (Slack's WS-echo Text may flatten paragraph breaks
 // for rich_text_block messages).
 func (m *Model) UpsertSelfSentReply(msg messages.MessageItem) {
-	follow := m.cursorAtEnd()
+	follow := m.CursorAtEnd()
 	rows, ch := messages.Upsert(m.replies, msg)
 	m.replies = rows
 	m.InvalidateCache()

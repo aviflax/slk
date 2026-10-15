@@ -338,7 +338,11 @@ type App struct {
 	// screen — the selected channel, or the open thread panel —
 	// whether or not the user is looking at it. Staging is not
 	// focus-gated; only the flush is, so a slot staged while blurred
-	// waits for the next FocusMsg. A slot staged while FOCUSED waits
+	// waits for the next FocusMsg. A message that landed below the
+	// fold (the user had moved up to read) is staged as held, which no
+	// flush issues: it waits until the pane shows it
+	// (releaseShownMarks), and is never issued if the user leaves
+	// without bringing it on screen. A slot staged while FOCUSED waits
 	// too if auto-marking is not armed — inside a tmux session that
 	// has never reported a focus event that is the whole session, and
 	// the slot is only ever issued if one arrives. See autoMarkArmed.
@@ -728,6 +732,10 @@ type pendingChannelMarkState struct {
 	teamID    string
 	channelID string
 	ts        string
+	// held is the newest staged ts the user has not had on screen yet
+	// (newer than ts): no flush issues it, releaseShownMarks moves it
+	// to ts once the pane shows it. "" when nothing is held.
+	held string
 }
 
 // pendingThreadMarkState is App.pendingThreadMark's slot: the newest
@@ -739,6 +747,7 @@ type pendingThreadMarkState struct {
 	channelID string
 	threadTS  string
 	ts        string
+	held      string // as pendingChannelMarkState.held
 }
 
 // floor is the read floor the staged mark is checked against and
@@ -1088,6 +1097,15 @@ func (a *App) computeFrame() panelLayoutFrame {
 func (a *App) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmds []tea.Cmd
 
+	// A key, the mouse or a resize may bring a message whose read mark
+	// is held for visibility on screen. Whether it did is known only
+	// from the frame this message produces, so the check is a message
+	// of its own, which bubbletea delivers after that frame is drawn
+	// (see markShownCheckMsg).
+	if c := a.markShownCheck(msg); c != nil {
+		cmds = append(cmds, c)
+	}
+
 	// Phase 4 reducer chain (extension point — see internal/ui/reducers.go).
 	// Each reducer owns a cohesive family of message types and either
 	// claims the message (returning its cmd, true) or passes (nil,
@@ -1176,7 +1194,7 @@ func (a *App) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.confirmPrompt.SetWidth(msg.Width)
 		a.confirmPrompt.SetHeight(msg.Height)
 		a.keepFocusOnScreen()
-		return a, nil
+		return a, tea.Batch(cmds...)
 
 	case scrollFlushMsg:
 		if cmd := a.applyScrollFlush(); cmd != nil {
@@ -2505,37 +2523,125 @@ func (a *App) scheduleThreadsDirty() tea.Cmd {
 // is about to (readFloors: an earlier flush, an entry mark, another
 // client), is ignored, so out-of-order arrivals (a held message released
 // after newer ones were marked) can never roll the cursor backward.
-func (a *App) recordChannelMark(channelID, ts string) {
+//
+// shown says the user has the message on screen. One they do not
+// (it landed below the fold) is staged as held: flushes leave it alone
+// until releaseShownMarks sees it on screen. A shown ts at or past the
+// held one makes the held one moot.
+func (a *App) recordChannelMark(channelID, ts string, shown bool) {
 	if channelID == "" || ts == "" || messages.IsLocalTS(ts) {
 		return
 	}
-	if a.pendingChannelMark.channelID == channelID && messages.CompareTS(a.pendingChannelMark.ts, ts) >= 0 {
+	p := a.pendingChannelMark
+	if p.channelID != channelID || p.teamID != a.activeTeamID {
+		p = pendingChannelMarkState{teamID: a.activeTeamID, channelID: channelID}
+	}
+	if !stageAhead(p.ts, p.held, ts, shown) {
 		return
 	}
 	if a.readFloors.behind(a.channelFloor(channelID), ts) {
 		debuglog.Cache("recordChannelMark: channel=%s ts=%s decision=behind_read_floor", channelID, ts)
 		return
 	}
-	a.pendingChannelMark = pendingChannelMarkState{teamID: a.activeTeamID, channelID: channelID, ts: ts}
+	p.ts, p.held = stage(p.ts, p.held, ts, shown)
+	a.pendingChannelMark = p
 }
 
 // recordThreadMark stages a thread read-cursor advance. Newest-wins for
-// the same (channel, thread), and never behind the thread's read floor
-// (see recordChannelMark); a different thread replaces the slot.
-func (a *App) recordThreadMark(channelID, threadTS, ts string) {
+// the same (channel, thread), never behind the thread's read floor, and
+// held while the reply is not on screen (see recordChannelMark); a
+// different thread replaces the slot.
+func (a *App) recordThreadMark(channelID, threadTS, ts string, shown bool) {
 	if channelID == "" || threadTS == "" || ts == "" || messages.IsLocalTS(ts) || messages.IsLocalTS(threadTS) {
 		return
 	}
-	if a.pendingThreadMark.channelID == channelID &&
-		a.pendingThreadMark.threadTS == threadTS &&
-		messages.CompareTS(a.pendingThreadMark.ts, ts) >= 0 {
+	p := a.pendingThreadMark
+	if p.channelID != channelID || p.threadTS != threadTS || p.teamID != a.activeTeamID {
+		p = pendingThreadMarkState{teamID: a.activeTeamID, channelID: channelID, threadTS: threadTS}
+	}
+	if !stageAhead(p.ts, p.held, ts, shown) {
 		return
 	}
 	if a.readFloors.behind(a.threadFloor(channelID, threadTS), ts) {
 		debuglog.Cache("recordThreadMark: channel=%s thread_ts=%s ts=%s decision=behind_read_floor", channelID, threadTS, ts)
 		return
 	}
-	a.pendingThreadMark = pendingThreadMarkState{teamID: a.activeTeamID, channelID: channelID, threadTS: threadTS, ts: ts}
+	p.ts, p.held = stage(p.ts, p.held, ts, shown)
+	a.pendingThreadMark = p
+}
+
+// stageAhead reports whether ts moves a slot holding staged and held
+// (either "" for none): a shown ts must be past staged, a held one past
+// both.
+func stageAhead(staged, held, ts string, shown bool) bool {
+	if staged != "" && messages.CompareTS(staged, ts) >= 0 {
+		return false
+	}
+	return shown || held == "" || messages.CompareTS(held, ts) < 0
+}
+
+// stage is the slot after ts, which stageAhead let through, is staged:
+// a shown ts becomes the one to issue, and drops a held ts it reaches;
+// one not shown becomes the held ts.
+func stage(staged, held, ts string, shown bool) (string, string) {
+	if !shown {
+		return staged, ts
+	}
+	if held != "" && messages.CompareTS(held, ts) <= 0 {
+		held = ""
+	}
+	return ts, held
+}
+
+// releaseShownMarks moves a held mark to the issuable slot once the
+// pane its message is in shows it whole (messages.Model.Shows,
+// thread.Model.Shows): the channel pane while it is on that channel,
+// the thread pane while it is open on that thread, in the workspace
+// the mark was staged in. A held mark for a conversation the user has
+// left stays held, so the conversation stays unread. Reports whether
+// anything was released; the caller schedules the flush.
+func (a *App) releaseShownMarks() bool {
+	released := false
+	if pc := &a.pendingChannelMark; pc.held != "" && pc.teamID == a.activeTeamID &&
+		pc.channelID == a.activeChannelID && a.view == ViewChannels && a.messagepane.Shows(pc.held) {
+		debuglog.Cache("releaseShownMarks: channel=%s ts=%s decision=on_screen", pc.channelID, pc.held)
+		pc.ts, pc.held = pc.held, ""
+		released = true
+	}
+	if pt := &a.pendingThreadMark; pt.held != "" && pt.teamID == a.activeTeamID && a.threadVisible &&
+		pt.channelID == a.threadPanel.ChannelID() && pt.threadTS == a.threadPanel.ThreadTS() &&
+		a.threadPanel.Shows(pt.held) {
+		debuglog.Cache("releaseShownMarks: channel=%s thread_ts=%s ts=%s decision=on_screen", pt.channelID, pt.threadTS, pt.held)
+		pt.ts, pt.held = pt.held, ""
+		released = true
+	}
+	return released
+}
+
+// marksHeld reports whether a mark is held for visibility.
+func (a *App) marksHeld() bool {
+	return a.pendingChannelMark.held != "" || a.pendingThreadMark.held != ""
+}
+
+// markShownCheck returns the command that asks, once the frame msg
+// produces is drawn, whether a held mark's message is now on screen
+// (markShownCheckMsg), or nil when nothing is held or msg cannot move
+// a pane: only keys, the mouse, a resize and the held-key scroll flush
+// scroll the panes or move their cursors.
+func (a *App) markShownCheck(msg tea.Msg) tea.Cmd {
+	if !a.marksHeld() {
+		return nil
+	}
+	switch msg.(type) {
+	case tea.KeyMsg, tea.MouseMsg, tea.WindowSizeMsg, scrollFlushMsg:
+		return markShownCheckCmd(false)
+	}
+	return nil
+}
+
+// markShownCheckCmd yields a markShownCheckMsg; see it for notify.
+func markShownCheckCmd(notify bool) tea.Cmd {
+	return func() tea.Msg { return markShownCheckMsg{notify: notify} }
 }
 
 // autoMarkArmed reports whether arrival-driven read-marking may fire.
@@ -2562,7 +2668,8 @@ func (a *App) autoMarkArmed() bool {
 // scheduleMarkFlush returns a tick that flushes the pending marks after
 // the debounce interval, or nil when nothing is staged, a tick is
 // already in flight, the terminal is blurred, or auto-marking is not
-// yet armed (see autoMarkArmed).
+// yet armed (see autoMarkArmed). A mark held for visibility is not
+// staged for this: it waits for releaseShownMarks.
 //
 // The markFlushScheduled arm is what caps the mark rate: while a tick
 // is in flight, further arrivals only update the slots. Drop it and a
@@ -2590,7 +2697,10 @@ func (a *App) scheduleMarkFlush() tea.Cmd {
 // issue their marks, each recorded as in flight on its read floor (the
 // floor rises when Slack accepts it: ChannelMarkedReadMsg,
 // ThreadMarkedLocalMsg). A slot at or behind its floor, or staged in a
-// workspace that is no longer the active one, is dropped unissued.
+// workspace that is no longer the active one, is dropped unissued. A
+// held ts (the message is not on screen) is never issued here; it stays
+// in the slot for releaseShownMarks, unless it is another workspace's
+// or behind its floor.
 // Clearing before issuing is deliberate: a mark Slack rejects is not
 // retried here, it is reconciled by the next arrival, the next channel
 // entry, or reconnect sync. Retrying a rejected mark risks hammering a
@@ -2637,9 +2747,16 @@ func (a *App) flushPendingMarks() tea.Cmd {
 		}
 	}
 	// A slot left is one at or behind its floor, or another
-	// workspace's: drop it.
+	// workspace's: drop it. Only a held ts stays.
+	pc, pt := a.pendingChannelMark, a.pendingThreadMark
 	a.pendingChannelMark = pendingChannelMarkState{}
 	a.pendingThreadMark = pendingThreadMarkState{}
+	if pc.held != "" && pc.teamID == a.activeTeamID && !a.readFloors.behind(pc.floor(), pc.held) {
+		a.pendingChannelMark = pendingChannelMarkState{teamID: pc.teamID, channelID: pc.channelID, held: pc.held}
+	}
+	if pt.held != "" && pt.teamID == a.activeTeamID && !a.readFloors.behind(pt.floor(), pt.held) {
+		a.pendingThreadMark = pendingThreadMarkState{teamID: pt.teamID, channelID: pt.channelID, threadTS: pt.threadTS, held: pt.held}
+	}
 	if len(cmds) == 0 {
 		return nil
 	}

@@ -584,7 +584,7 @@ func (m *Model) AppendMessage(msg MessageItem) {
 // select says the user just sent it, so it is selected wherever the
 // cursor was.
 func (m *Model) insert(msg MessageItem, sel bool) {
-	follow := sel || m.cursorAtEnd()
+	follow := sel || m.CursorAtEnd()
 	rows, ch := Insert(m.messages, msg)
 	if ch.Op == RowNone {
 		return
@@ -595,18 +595,24 @@ func (m *Model) insert(msg MessageItem, sel bool) {
 	m.afterInsert(ch, follow)
 }
 
-// cursorAtEnd reports whether the cursor is on the newest message Slack
+// CursorAtEnd reports whether the cursor is on the newest message Slack
 // knows, or on a placeholder after it, or there is nothing to select:
 // a pane whose user is reading the newest messages, which follows a
-// new one.
-func (m *Model) cursorAtEnd() bool {
+// new one. Right after AppendMessage it says whether the pane followed
+// the message (the App counts it as seen).
+func (m *Model) CursorAtEnd() bool {
 	return len(m.messages) == 0 || m.selected < 0 || m.selected >= len(m.messages) ||
 		IsNewest(m.messages, m.selected)
 }
 
+// Shows reports whether the message with ts was whole on screen in the
+// last frame, clear of "-- more below --" (entrylist.Model.Shown). A
+// message added since that frame is not shown until the next one.
+func (m *Model) Shows(ts string) bool { return m.list.Shown(ts) }
+
 // afterInsert moves the cursor after a row was added at ch.Index. The
 // newest row (IsNewest) is followed when follow is set (the cursor was
-// at the end, cursorAtEnd, or the user sent the row): selecting it
+// at the end, CursorAtEnd, or the user sent the row): selecting it
 // makes View() scroll to it, and reaction navigation, which was on the
 // message selected before, ends so its next Enter cannot act on the new
 // row. Otherwise the cursor stays on the message it was on: a user who
@@ -674,7 +680,7 @@ func (m *Model) afterLocalRemoved(i int) {
 // A replacement that changes the row's height leaves a window at the
 // bottom there (entrylist anchoring).
 func (m *Model) UpsertSelfSent(msg MessageItem) {
-	follow := m.cursorAtEnd()
+	follow := m.CursorAtEnd()
 	rows, ch := Upsert(m.messages, msg)
 	m.messages = rows
 	m.dropCache()
