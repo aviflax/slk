@@ -147,6 +147,8 @@ scrollbars, date formatting, case folding, or ID formatting: it already exists.
 | Apply a reaction add/remove event idempotently; the reaction-pill cursor | `messages.ApplyReaction`, `messages.ReactionNav` |
 | A content pane's per-entry payload next to its `entrylist.Entry` (short-timestamp selected variant, kitty flushes, sixel rows), and the rows to draw for the cursor entry | `messages.EntryPayload`, `(*EntryPayload).SelectedLines`; the emoji-image context both panes take is `messages.EmojiContext` |
 | Date label from a Slack ts | `messages.DateFromTS`, `messages.FormatDateSeparator`, `messages.FormatShortDate` (compact form for a message header: "Today", "Jan 2") |
+| The date labels against a given clock (pure; the exported ones read the package clock `SetNowFunc` sets) | `messages.formatDateSeparatorAt(dateStr, now)`, `formatShortDateAt(dateStr, now)`, `longTimestampAt(ts, short, now)` |
+| A relative-time label ("5m", "2h") against a given clock | `formatRelTimeAt(ts, now)`, one copy each in `activityview` and `threadsview` (see Known duplication) |
 | Date-qualified timestamp for the selected message header | `messages.LongTimestamp(ts, short)`, `messages.SelectedHeader(rendered, header, ts, short, maxWidth)`; any other header timestamp swap that must fit the width budget: `messages.ReplaceHeaderTimestamp(rendered, header, short, replacement, maxWidth)` |
 | Clock layout `<!date` tokens render `{time}`/`{time_secs}` with | `messages.SetDateTokenTimeLayout(layout)` — seeded once at startup from `appearance.timestamp_format` (`cmd/slk/main.go`); empty keeps the default `"3:04 PM"`. Package-level (like theme state) so every render path agrees |
 | mpdm channel name → human name | `slackfmt.FormatMPDMName` |
@@ -159,12 +161,15 @@ scrollbars, date formatting, case folding, or ID formatting: it already exists.
 | Slack permalink parsing | `slackurl.Parse` |
 | Slack ts → `time.Time` (whole seconds, any timezone) | `export.TimeFromTS` |
 | A since/until/overlap date range in a timezone, and "is this ts in it?" | `export.NewWindow`, `export.Window.Contains` |
+| The first instant of a local calendar date, safe in zones that skip midnight (Sao Paulo once did) | `export.dayStart(date, deltaDays, loc)`; `time.Date(y, m, d, 0, 0, 0, 0, loc)` returns the previous evening on such a day |
 | Sleep out a slack-go rate-limit error (ctx-aware) | `slackclient.WaitOutRateLimit` |
 | Page through all channel history in a ts range / a thread's replies in a ts range | `(*slackclient.Client).WalkHistory`, `GetRepliesBetween` |
 | Press a legacy attachment button (`chat.attachmentAction`, payload byte-identical to the web client's) | `(*slackclient.Client).AttachmentAction(ctx, AttachmentActionRequest)`, with `service_id` = the posting app's bot ID |
 | Press a legacy attachment button from the UI | `core.InteractionService.PressAttachmentAction` (App field `a.interactions`); wired in `cmd/slk` via `pressAttachmentAction` to the active workspace's `Client.AttachmentAction` |
 | Run a slash command (`chat.command`, request shape copied from the web client; arguments as rich text via `mrkdwn.Convert`) | `(*slackclient.Client).RunCommand(ctx, CommandRequest)`; a refusal (`unknown_command`, …) is `*slackclient.CommandRejectedError` |
 | Run a slash command from the UI | `core.CommandService.Run` (App field `a.commandSvc`); wired in `cmd/slk` via `runCommand` to the `Client.RunCommand` of the workspace the command was typed in (`teamID`, looked up with `router.ByID`, not the active one). Slack's refusal arrives as `*core.CommandError{Code}` |
+| Turn typed `@name` / `#channel` / `@group` into wire tokens for sending | `compose.translateMentions(text, names, channels, groups)`, a pure function of the three maps; `(*compose.Model).TranslateMentionsForSend` delegates |
+| Count the mentions of the user in a slice of cached messages (DMs and apps count every message from someone else) | `countMentions(msgs, chType, selfUserID)` (`cmd/slk/markread.go`); `countMentionsSince` wraps it with the cache read |
 | A web-client `client_token` (`web-<unix ms>`) for any request that sends one | `newClientToken()` (`internal/slack`); the only generator |
 | Emoji shortcode → glyph | `emoji.Sprint`, `emoji.CodeMap`, `emoji.StripSkinTone` |
 | Emoji shortcode → glyph on any row whose width matters (sidebar, overlays, status glyphs, picker) | `emoji.ResolveShortcodesInText(s)` or `emoji.TextGlyph(glyph)` on a `CodeMap` lookup. base+VS16 (`:heart:`, `:mountain:`) is drawn as the bare base, because terminals and lipgloss disagree on the pair's width but agree on one codepoint; ZWJ, flags, skin tones and keycaps are left as `:shortcode:`. Never call `emoji.Sprint` or read `CodeMap` for display without the gate (#301) |
@@ -209,6 +214,8 @@ scrollbars, date formatting, case folding, or ID formatting: it already exists.
 | Change the theme inside the App | `App.applyTheme(name)` (`internal/ui/theme.go`): applies it, invalidates render caches and pushes fresh styles to components that snapshot them. A component that holds a style snapshot (anything in `internal/bubbles`) gets its push added there, not at each call site. `entrylist` is the exception: its owners (the channel and thread panes) call `SetStyles` at the top of every `View`, so `applyTheme` only invalidates for them. `styles.CurrentTheme()` names the applied one |
 | Status-bar toast that clears itself | `toastWithClear(a, text, d)` (`internal/ui/reducer_io.go`); `toastUntilReplaced(a, text)` only for a toast a later one replaces on purpose (upload progress). Set toasts on the Update goroutine, never inside a `tea.Cmd`; `statusbar.ToastSeq()` identifies the toast showing, so a clear tick leaves a newer toast alone. `TestToastsGoThroughToastSetters` fails on a direct `statusbar.SetToast` with text |
 | Window tree geometry | `ui/wintree` |
+| Sidebar display order, collapsed-section totals, next/previous unread, and page-key geometry, as pure functions | `sidebar.sortFilteredIdx`, `aggregateSection`, `nextUnread`, `pageRows` (`internal/ui/sidebar/model.go`); the `Model` methods are thin wrappers over them |
+| Truncate a styled line with an ellipsis | `ansi.Truncate(s, w, "…")` from `charmbracelet/x/ansi`. It parses OSC 8 hyperlinks; `reflow/truncate.StringWithTail` does not and lets a line with a link overflow by a cell |
 | Sidebar selection across item/filter reorders | Capture `sidebar.Model.currentCursorKey()` **before** mutation, then `rebuildNavWithCursor`; `rebuildNavPreserveCursor` is only safe while old nav indices still identify the same items |
 | Modal geometry / row hit-testing | `chrome.Boxed`, `chrome.Clickable` (list rows; declared in `internal/bubbles/chrome`, asserted by each dialog package) and `pointClickable` (a single glyph, e.g. the profile dialog's 📋; `internal/ui/reducer_modal_click.go`) |
 | Channel/DM destination picker for forwarding | `channelfinder.Model.OpenForForwarding()` (joined conversations only); `Open()` restores the normal switcher |
@@ -305,7 +312,8 @@ greppable by name; no line numbers, because these files move.
 | A slashApp whose conversations.open is recorded and answers with DM D9 | `msgSlashApp(t)`, returning the App, the `*[]runCall` log and the `*[][]string` OpenConversation log (`internal/ui/slash_builtins_test.go`); `failOpenConversation(a)` then makes that open answer `NewMessageFailedMsg` |
 | The draft of a conversation in T1, read by switching the composer to it (changes the composer's draft context) | `draftIn(a, channelID)` (`internal/ui/slash_builtins_test.go`) |
 | Compare a request this repo builds with a scrubbed web-client capture (`{method, form, response}` JSON in `testdata/`) | `capturedForm(t, name)` (the capture's form minus `token` and the `_x_*` envelope) and `assertFormMatchesCapture(t, got, name)` (same fields and values, nothing extra; `client_token` checked for shape) (`internal/slack/command_test.go`, `package slackclient`) |
-| Generate styled terminal text, Slack wire text (mentions, links, code, entities), plain text with wide and combining runes, Slack IDs and timestamps, for a property test | `internal/proptest` (`StyledText`, `StyledTextWith`, `SGR`, `BgSGR`, `OSC8`, `SlackText(users, channels)`, `PlainText`, `Word`, `ID(prefix)`, `TS`); an ordinary package that only `_test.go` files import |
+| Generate styled terminal text, Slack wire text (mentions, links, code, entities), plain text with wide and combining runes, Slack IDs and timestamps, awkward time zones, for a property test | `internal/proptest` (`StyledText`, `StyledTextWith`, `SGR`, `BgSGR`, `OSC8`, `SlackText(users, channels)`, `PlainText`, `Word`, `ID(prefix)`, `TS`, `Zone()` with embedded tzdata); an ordinary package that only `_test.go` files import |
+| Keep a width property clear of the base+VS16 disagreement (#301) | `proptest.NoVS16(s)`; the messages pane's narrower `stripASCIIVS16` covers only an ASCII base |
 | Run the fuzz targets | `scripts/fuzz.sh [fuzztime] [pattern]`, `make fuzz` |
 | Load a config from a TOML string | `loadConfigString(t, body)` (`internal/config/config_test.go`, `package config`) |
 
@@ -319,6 +327,9 @@ them as templates:
   renderer); their differences are `entrylist` options and `RenderOptions`
   fields, each documented where it is declared. Do not add a pane-specific
   copy of either.
+- **`formatRelTimeAt`** is copied in `activityview` and `threadsview`; both
+  carry the same property tests, which keep them in step until one shared
+  home exists.
 - **`convertAndCacheHistory` / `fetchChannelMessages` / `fetchThreadReplies`** in
   `cmd/slk/main.go` have ~85% duplicated bodies.
 
