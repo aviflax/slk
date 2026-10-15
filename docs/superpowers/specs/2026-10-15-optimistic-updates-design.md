@@ -167,7 +167,7 @@ func (a *App) shownSinks(channelID string) rowSinks   // an existing message: ed
 func (a *App) removeFrom(s rowSinks, ts string) []removedRow
 func (a *App) restoreTo(channelID string, removed []removedRow)
 func (a *App) showBody(channelID, ts string, body messages.Body) (prior messages.MessageItem, ok bool) // reducer_send.go
-func (a *App) localRow(localTS, text, threadTS, subtype string) messages.MessageItem
+func (a *App) localRow(localTS string, body messages.Body, threadTS, subtype string) messages.MessageItem
 
 const noWorkspaceReason = "no active workspace"
 var errNoWorkspace = errors.New(noWorkspaceReason)
