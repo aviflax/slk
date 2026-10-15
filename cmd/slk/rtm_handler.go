@@ -154,7 +154,9 @@ func (h *rtmEventHandler) OnMessage(channelID, userID, ts, text, threadTS, subty
 			Attachments:     attachments,
 		}}
 		rawBytes, _ := json.Marshal(synthetic)
-		h.db.UpsertMessage(cache.Message{
+		// UpsertLiveMessage: the event has no reply count or latest
+		// reply, so a cached parent keeps the ones its fetch stored.
+		h.db.UpsertLiveMessage(cache.Message{
 			TS:          ts,
 			ChannelID:   channelID,
 			WorkspaceID: h.workspaceID,

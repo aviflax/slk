@@ -49,6 +49,43 @@ func (db *DB) UpsertMessage(m Message) error {
 	return nil
 }
 
+// UpsertLiveMessage caches a message from a WebSocket event. Unlike
+// UpsertMessage it keeps what such an event cannot carry for a row
+// already cached by a history fetch: a thread parent's reply_count,
+// its latest_reply (in raw_json; the UI reads it to avoid counting a
+// reply Slack already counted) and its thread_ts, which the parent's
+// own events send empty.
+func (db *DB) UpsertLiveMessage(m Message) error {
+	_, err := db.conn.Exec(`
+		INSERT INTO messages (ts, channel_id, workspace_id, user_id, text, thread_ts, reply_count, edited_at, is_deleted, raw_json, created_at, subtype)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		ON CONFLICT(ts, channel_id) DO UPDATE SET
+			user_id=excluded.user_id,
+			text=excluded.text,
+			thread_ts=CASE
+				WHEN excluded.thread_ts = '' AND messages.thread_ts = messages.ts THEN messages.thread_ts
+				ELSE excluded.thread_ts END,
+			reply_count=CASE
+				WHEN excluded.reply_count = 0 THEN messages.reply_count
+				ELSE excluded.reply_count END,
+			edited_at=excluded.edited_at,
+			is_deleted=excluded.is_deleted,
+			raw_json=CASE
+				WHEN json_valid(excluded.raw_json) AND json_valid(messages.raw_json)
+					AND COALESCE(json_extract(excluded.raw_json, '$.latest_reply'), '') = ''
+					AND COALESCE(json_extract(messages.raw_json, '$.latest_reply'), '') != ''
+				THEN json_set(excluded.raw_json, '$.latest_reply', json_extract(messages.raw_json, '$.latest_reply'))
+				ELSE excluded.raw_json END,
+			subtype=excluded.subtype
+	`, m.TS, m.ChannelID, m.WorkspaceID, m.UserID, m.Text, m.ThreadTS,
+		m.ReplyCount, m.EditedAt, boolToInt(m.IsDeleted), m.RawJSON, m.CreatedAt, m.Subtype)
+	if err != nil {
+		debuglog.Cache("UpsertLiveMessage: channel=%s ts=%s ERR=%v", m.ChannelID, m.TS, err)
+		return fmt.Errorf("upserting live message: %w", err)
+	}
+	return nil
+}
+
 // GetMessages returns the NEWEST `limit` messages for a channel,
 // ordered by ts ascending in the result. If beforeTS is non-empty,
 // only considers messages with ts < beforeTS (for pagination).
