@@ -350,6 +350,10 @@ func reducePaste(a *App, m tea.PasteMsg) tea.Cmd {
 	if a.mode != ModeInsert {
 		return nil
 	}
+	// The textarea turns '\r' and '\n' each into a line break, so
+	// CRLF text (copied from Windows apps, some browsers) would paste
+	// with a blank line after every line.
+	m.Content = strings.ReplaceAll(m.Content, "\r\n", "\n")
 	if a.compose.Uploading() || a.threadCompose.Uploading() {
 		// Same in-flight draft invariant as handleInsertMode: a paste
 		// must not alter the uploading composer's caption/attachments.
