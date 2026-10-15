@@ -1003,7 +1003,7 @@ func run() error {
 				if wctx == nil {
 					return nil
 				}
-				ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+				ctx, cancel := context.WithTimeout(context.Background(), requestTimeout)
 				defer cancel()
 				// The UI shows the edit before this returns and sends
 				// one edit of a message at a time; the message_changed
@@ -1021,7 +1021,7 @@ func run() error {
 				if wctx == nil {
 					return nil
 				}
-				ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+				ctx, cancel := context.WithTimeout(context.Background(), requestTimeout)
 				defer cancel()
 				err := wctx.Client.RemoveMessage(ctx, chIDStr, tsStr)
 				if err != nil {
@@ -1038,7 +1038,7 @@ func run() error {
 					return nil
 				}
 				client := wctx.Client
-				ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+				ctx, cancel := context.WithTimeout(context.Background(), requestTimeout)
 				defer cancel()
 
 				var err error
@@ -1187,7 +1187,7 @@ func run() error {
 				client := wctx.Client
 				teamID := wctx.TeamID
 				return func() core.Msg {
-					ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+					ctx, cancel := context.WithTimeout(context.Background(), requestTimeout)
 					defer cancel()
 					// markThreadRead persists the cursor only after
 					// Slack accepts; see its doc comment.

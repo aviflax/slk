@@ -63,8 +63,10 @@ func TestEphemeralThreadReply_ShownButNotCountedOrMarked(t *testing.T) {
 	}
 }
 
-// A pending send adopts the WS echo of the user's own chat.postMessage.
-// An ephemeral is never such an echo, even when it carries the user's ID.
+// While a send is pending in a conversation, the user's own messages
+// echoed there are held until it ends (pendingOps.HoldEcho). An
+// ephemeral is never such an echo, even when it carries the user's ID:
+// it shows at once.
 func TestEphemeralFromSelf_ShownWhileSendPending(t *testing.T) {
 	app, _ := markCapture(t)
 	app.activeChannelID = "C1"

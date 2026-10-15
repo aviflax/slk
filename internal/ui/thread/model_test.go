@@ -1024,14 +1024,10 @@ func TestScrollAnchorAtTopOfThreadPreservedAcrossWidthResize(t *testing.T) {
 	}
 }
 
-// TestScrollAnchorInsideParentPrefixNotPreservedAcrossWidthResize pins the
-// CURRENT, known-limited behavior (gammons/slk#254): the thread's
-// entrylist.ReanchorPolicy (AnchorRefsOnly) finds no reply entry to anchor
-// on for a line inside the parent-message prefix, so the pre-resize
-// YOffset carries through unchanged into the rewrapped content -- landing on
-// whatever reply now falls at that stale line number. This documents the
-// gap rather than asserting the desired behavior; flip it to assert
-// preservation once #254 is fixed.
+// A window whose top line is inside a long parent keeps that parent on
+// top across a width change (gammons/slk#254, fixed by entrylist
+// anchoring, which anchors on any entry with an ID, the parent
+// included).
 func TestScrollAnchorInsideParentPreservedAcrossWidthResize(t *testing.T) {
 	// #254: a window whose top line is inside a long parent keeps the
 	// parent on top across a resize, at the same row of it or its last
