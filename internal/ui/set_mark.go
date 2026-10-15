@@ -41,6 +41,9 @@ func (a *App) setMark(letter string) tea.Cmd {
 	if !ok {
 		return toastWithClear(a, "No message selected to mark", 2*time.Second)
 	}
+	if cmd, blocked := a.sendingGuard(string(loc.MessageTS)); blocked {
+		return cmd
+	}
 	m := Mark{
 		Location: loc,
 		Letter:   letter,

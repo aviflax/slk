@@ -88,6 +88,11 @@ func handleNormalMode(a *App, msg tea.KeyMsg) tea.Cmd {
 			return cmd
 		}
 	}
+	if a.isMessageOpKey(msg) || key.Matches(msg, a.keys.Edit, a.keys.Delete) {
+		if cmd, blocked := a.sendingSelectionGuard(); blocked {
+			return cmd
+		}
+	}
 
 	switch {
 	case key.Matches(msg, a.keys.InsertMode):

@@ -2036,6 +2036,9 @@ func (a *App) openThreadForSelectedMessage() tea.Cmd {
 	if cmd, blocked := ephemeralGuard(msg); blocked {
 		return cmd
 	}
+	if cmd, blocked := a.sendingGuard(msg.TS); blocked {
+		return cmd
+	}
 	// Use the message's own TS as the thread parent. If it's a thread
 	// reply (a thread_broadcast row in the channel feed), the selected
 	// row is NOT the parent: resolve the real parent from the pane
