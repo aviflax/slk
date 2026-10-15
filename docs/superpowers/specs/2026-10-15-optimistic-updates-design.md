@@ -448,7 +448,10 @@ history or a link. The guards:
   sending), `setMark`, `openThreadForSelectedMessage` (Enter and
   click), and the `EditMessageMsg`, `DeleteMessageMsg` and
   `MarkUnreadMsg` reducer arms. A pane's append ends reaction
-  navigation, which runs before the key guard.
+  navigation, which runs before the key guard. The `EditMessageMsg`
+  refusal gives the text back (`giveTextBack`) and reports it as a
+  failed edit, "the message is still sending", with the clipboard note
+  when the text went there.
 - Read cursors: `recordChannelMark` and `recordThreadMark` ignore a
   placeholder, and never stage a mark at or behind the cursor Slack
   already holds (`readFloors`, `read_floor.go`): a held message

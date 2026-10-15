@@ -186,3 +186,20 @@ func TestUnsentTextsAreCapped(t *testing.T) {
 		t.Errorf("toast = %q, want the count and that 2 older ones were dropped", toast)
 	}
 }
+
+// An edit of a message still sending is refused. Its text goes back to
+// the composer, or to the clipboard when that is taken, and then the
+// toast says so, as for any failed edit.
+func TestPlaceholderEditRefusalSaysWhereTheTextWent(t *testing.T) {
+	a := typedApp(t)
+	copied := clipboardLog(a)
+	a.compose.SetValue("newer draft")
+	_, cmd := a.Update(EditMessageMsg{ChannelID: "C1", TS: "local:1", NewText: "edited", Typed: "edited", TeamID: "T1"})
+	toast := shownToast(t, a, cmd)
+	if len(*copied) != 1 || (*copied)[0] != "edited" {
+		t.Fatalf("clipboard = %q, want the edit's text", *copied)
+	}
+	if !strings.Contains(toast, "sending") || !strings.Contains(toast, "clipboard") {
+		t.Errorf("toast = %q, want the refusal and that the text is on the clipboard", toast)
+	}
+}

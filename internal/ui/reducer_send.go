@@ -497,9 +497,12 @@ func reduceSendMessage(a *App, m SendMessageMsg) tea.Cmd {
 // once that one ends (reduceMessageEdited), so Slack applies the edits
 // in the order they were made.
 func reduceEditMessage(a *App, m EditMessageMsg) tea.Cmd {
-	if cmd, blocked := a.sendingGuard(m.TS); blocked {
-		copyText, _, _ := a.giveTextBack(commandOrigin{teamID: m.TeamID, channelID: m.ChannelID, threadTS: m.ThreadTS, typed: m.Typed})
-		return tea.Batch(cmd, copyText)
+	if messages.IsLocalTS(m.TS) {
+		// The message is still sending, so it cannot be edited yet.
+		// The text is given back like a failed edit's, and the
+		// refusal is reported the same way, clipboard note included.
+		copyText, _, onClipboard := a.giveTextBack(commandOrigin{teamID: m.TeamID, channelID: m.ChannelID, threadTS: m.ThreadTS, typed: m.Typed})
+		return tea.Batch(copyText, editFailedToast(errStillSending, onClipboard))
 	}
 	body := messages.EditedBody(m.NewText)
 	prior, shown := a.showBody(m.ChannelID, m.TS, body)
@@ -612,6 +615,9 @@ func reduceMessageEdited(a *App, m MessageEditedMsg) tea.Cmd {
 	}
 	return tea.Batch(cmds...)
 }
+
+// errStillSending is why an edit of a placeholder is refused.
+var errStillSending = errors.New("the message is still sending")
 
 // editFailedToast reports a failed edit.
 func editFailedToast(err error, onClipboard bool) tea.Cmd {
