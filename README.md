@@ -3,11 +3,15 @@
 > **A blazingly fast Slack TUI.**
 > Keyboard-driven, beautifully themed, and under 20MB. One static binary. No Electron required.
 >
-> Marketing site: [getslk.sh](https://getslk.sh) · Docs: [Wiki](https://github.com/gammons/slk/wiki)
+> Docs: [wiki/](wiki/Home.md) · Upstream's marketing site: [getslk.sh](https://getslk.sh)
 
 ![slk demo: navigating channels, live messages, a split window and switching workspaces](docs/assets/demo/hero.gif)
 
 `slk` is a daily-driver replacement for the official Slack desktop client, built in Go with [bubbletea](https://github.com/charmbracelet/bubbletea) and [lipgloss](https://github.com/charmbracelet/lipgloss).
+
+## About this fork
+
+This is a fork of [gammons/slk](https://github.com/gammons/slk), maintained by Kira Howe. Thanks to Grant Ammons and the upstream contributors for building it. The fork fixes some papercuts and adds a few things, and what differs is listed in [CHANGELOG.md](CHANGELOG.md). Releases start at v0.27.0, picking up after upstream's v0.26.2.
 
 ## Why slk?
 
@@ -32,7 +36,7 @@
 - 59 themes + drop-in custom themes, live theme switcher
 - OS desktop notifications on DMs, mentions, and configurable keywords
 
-Full feature breakdown: **[Features](https://github.com/gammons/slk/wiki/Features)**
+Full feature breakdown: **[Features](https://github.com/kirahowe/slk/blob/main/wiki/Features.md)**
 
 ## Quick install
 
@@ -42,7 +46,7 @@ Full feature breakdown: **[Features](https://github.com/gammons/slk/wiki/Feature
 brew install --cask kirahowe/tap/slk
 ```
 
-This is a fork of [gammons/slk](https://github.com/gammons/slk); the cask above installs this fork's releases. To build from source instead:
+The cask installs this fork's releases. `go install` is not an option: the Go module path is still `github.com/gammons/slk`, so it would install upstream. To build from source instead:
 
 ```bash
 go build -ldflags="-s -w" -trimpath -o ~/.local/bin/slk ./cmd/slk
@@ -67,7 +71,7 @@ No desktop app (a server, a container, an SSH session)? `slk --add-workspace
 Copy as cURL any request to `/api/` on app.slack.com, and paste it. slk also
 offers this when it cannot read the desktop app's session.
 
-Full walkthrough: [Setup wiki page](https://github.com/gammons/slk/wiki/Setup).
+Full walkthrough: [Setup wiki page](https://github.com/kirahowe/slk/blob/main/wiki/Setup.md).
 
 ## Debugging
 
@@ -80,17 +84,17 @@ the file before relaunching. Log lines are categorized
 
 ## Documentation
 
-Everything lives in the [**wiki**](https://github.com/gammons/slk/wiki):
+Everything lives in the [**wiki/**](wiki/Home.md) directory:
 
-- [Installation](https://github.com/gammons/slk/wiki/Installation) — prebuilt binaries, Go install, build from source
-- [Setup](https://github.com/gammons/slk/wiki/Setup) — desktop-app auth, adding workspaces
-- [Features](https://github.com/gammons/slk/wiki/Features) — full feature breakdown
-- [Keybindings](https://github.com/gammons/slk/wiki/Keybindings) — every key, every mode
-- [Configuration](https://github.com/gammons/slk/wiki/Configuration) — `config.toml`, custom themes, XDG paths
-- [Terminal Compatibility](https://github.com/gammons/slk/wiki/Terminal-Compatibility) — what each terminal supports, including tmux setup (inline images, unread-title forwarding)
-- [Clipboard and OSC 52](https://github.com/gammons/slk/wiki/Clipboard-and-OSC-52) — copy/paste setup notes
-- [Tradeoffs and Non-Goals](https://github.com/gammons/slk/wiki/Tradeoffs-and-Non-Goals) — roadmap, caveats, TOS notice
-- [Architecture](https://github.com/gammons/slk/wiki/Architecture) — service layout, data layer
+- [Installation](https://github.com/kirahowe/slk/blob/main/wiki/Installation.md) — prebuilt binaries, Homebrew, build from source
+- [Setup](https://github.com/kirahowe/slk/blob/main/wiki/Setup.md) — desktop-app auth, adding workspaces
+- [Features](https://github.com/kirahowe/slk/blob/main/wiki/Features.md) — full feature breakdown
+- [Keybindings](https://github.com/kirahowe/slk/blob/main/wiki/Keybindings.md) — every key, every mode
+- [Configuration](https://github.com/kirahowe/slk/blob/main/wiki/Configuration.md) — `config.toml`, custom themes, XDG paths
+- [Terminal Compatibility](https://github.com/kirahowe/slk/blob/main/wiki/Terminal-Compatibility.md) — what each terminal supports, including tmux setup (inline images, unread-title forwarding)
+- [Clipboard and OSC 52](https://github.com/kirahowe/slk/blob/main/wiki/Clipboard-and-OSC-52.md) — copy/paste setup notes
+- [Tradeoffs and Non-Goals](https://github.com/kirahowe/slk/blob/main/wiki/Tradeoffs-and-Non-Goals.md) — roadmap, caveats, TOS notice
+- [Architecture](https://github.com/kirahowe/slk/blob/main/wiki/Architecture.md) — service layout, data layer
 
 ## Contributing
 
@@ -117,7 +121,7 @@ Contributions are welcome. A few ground rules:
 
 `slk` is an independent, unofficial project. It is not affiliated with, endorsed by, or sponsored by Slack Technologies, LLC or Salesforce, Inc. "Slack" is a trademark of Slack Technologies, LLC; it is used here only to describe the service this client interoperates with.
 
-slk talks to Slack via the same internal browser protocol the official web client uses. This is unofficial and not sanctioned by Slack — see [Tradeoffs and Non-Goals](https://github.com/gammons/slk/wiki/Tradeoffs-and-Non-Goals#unofficial--tos-caveat) for details.
+slk talks to Slack via the same internal browser protocol the official web client uses. This is unofficial and not sanctioned by Slack — see [Tradeoffs and Non-Goals](https://github.com/kirahowe/slk/blob/main/wiki/Tradeoffs-and-Non-Goals.md#unofficial--tos-caveat) for details.
 
 ## License
 
