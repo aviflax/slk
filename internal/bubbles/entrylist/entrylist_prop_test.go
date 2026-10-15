@@ -23,7 +23,7 @@ type listGen struct {
 // see the scrollbar tests).
 func (g *listGen) line(t *rapid.T) string {
 	s := proptest.StyledText().Draw(t, "line")
-	s = strings.NewReplacer("\n", " ", "️", "").Replace(s)
+	s = proptest.NoVS16(strings.ReplaceAll(s, "\n", " "))
 	s = ansi.Truncate(s, g.width, "")
 	if w := ansi.StringWidth(s); w < g.width {
 		s += strings.Repeat(" ", g.width-w)

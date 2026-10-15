@@ -86,19 +86,12 @@ func TestFormatRelTimeAtRejectsGarbage(t *testing.T) {
 	})
 }
 
-// noVS16 drops U+FE0F. KNOWN: lipgloss.Width counts base+VS16 ("a\uFE0F") as
-// two cells while ansi.Truncate and the old reflow truncate disagree with
-// it and with each other, so a line holding one can overflow by a cell.
-// AGENTS.md covers this (#301): emoji reach these rows through
-// emoji.ResolveShortcodesInText, which draws the bare base instead.
-func noVS16(s string) string { return strings.ReplaceAll(s, "\uFE0F", "") }
-
 // clipToWidth never draws wider than its limit, and a string that already
 // fits comes back untouched. Text is styled and holds wide runes.
 func TestClipToWidthFits(t *testing.T) {
 	rapid.Check(t, func(t *rapid.T) {
 		s := proptest.StyledText().Draw(t, "text")
-		s = noVS16(strings.ReplaceAll(s, "\n", " "))
+		s = proptest.NoVS16(strings.ReplaceAll(s, "\n", " "))
 		w := rapid.IntRange(-2, 40).Draw(t, "width")
 		got := clipToWidth(s, w)
 		if w <= 0 {
@@ -120,7 +113,7 @@ func TestClipToWidthFits(t *testing.T) {
 // both with the right half flush to the edge.
 func TestLayoutLineFits(t *testing.T) {
 	rapid.Check(t, func(t *rapid.T) {
-		clean := func(s string) string { return noVS16(strings.ReplaceAll(s, "\n", " ")) }
+		clean := func(s string) string { return proptest.NoVS16(strings.ReplaceAll(s, "\n", " ")) }
 		left := clean(proptest.StyledText().Draw(t, "left"))
 		right := clean(proptest.StyledText().Draw(t, "right"))
 		w := rapid.IntRange(1, 60).Draw(t, "width")

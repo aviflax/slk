@@ -4,6 +4,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/gammons/slk/internal/proptest"
 	"pgregory.net/rapid"
 )
 
@@ -12,12 +13,8 @@ import (
 // lands within a minute before 09:00 local on a weekday that is a later
 // calendar day, and no earlier weekday morning was skipped.
 func TestMinutesUntilTomorrowMorning(t *testing.T) {
-	zones := []string{"UTC", "America/New_York", "Europe/London", "Asia/Kolkata", "Australia/Lord_Howe", "Pacific/Auckland", "America/St_Johns"}
 	rapid.Check(t, func(t *rapid.T) {
-		loc, err := time.LoadLocation(rapid.SampledFrom(zones).Draw(t, "zone"))
-		if err != nil {
-			t.Skip("no tzdata")
-		}
+		loc := proptest.Zone().Draw(t, "zone")
 		now := time.Unix(rapid.Int64Range(1_600_000_000, 1_900_000_000).Draw(t, "unix"), 0).In(loc)
 		mins := minutesUntilTomorrowMorning(now)
 		if mins < 1 {

@@ -6,20 +6,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/gammons/slk/internal/proptest"
 	"pgregory.net/rapid"
 )
 
-// propZones are the timezones the date-token tests pin, including a
-// half-hour offset and one either side of the date line.
-var propZones = []string{"UTC", "America/New_York", "Asia/Kolkata", "Pacific/Kiritimati", "Pacific/Pago_Pago"}
-
-func drawZone(t *rapid.T) *time.Location {
-	loc, err := time.LoadLocation(rapid.SampledFrom(propZones).Draw(t, "zone"))
-	if err != nil {
-		t.Skipf("tzdata: %v", err)
-	}
-	return loc
-}
+func drawZone(t *rapid.T) *time.Location { return proptest.Zone().Draw(t, "zone") }
 
 // withDateTokenLayout sets the {time} layout for one test.
 func withDateTokenLayout(t *testing.T, layout string) {

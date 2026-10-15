@@ -15,7 +15,7 @@ import (
 func labels() *rapid.Generator[[]string] {
 	label := rapid.Custom(func(t *rapid.T) string {
 		s := proptest.StyledText().Draw(t, "label")
-		s = strings.NewReplacer("\n", " ", "️", "").Replace(s)
+		s = proptest.NoVS16(strings.ReplaceAll(s, "\n", " "))
 		return s
 	})
 	return rapid.SliceOfN(label, 0, 8)

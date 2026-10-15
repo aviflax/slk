@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/gammons/slk/internal/proptest"
 	"pgregory.net/rapid"
 )
 
@@ -75,12 +76,8 @@ func TestFormatOffsetDeltaRoundTrip(t *testing.T) {
 // formatLocalTime shows the author's wall clock (now seen at tzOffset), the
 // abbreviation when there is one, and the delta against now's own zone.
 func TestFormatLocalTimeProperty(t *testing.T) {
-	zones := []string{"UTC", "America/New_York", "Europe/London", "Asia/Kolkata", "Australia/Lord_Howe", "Pacific/Auckland"}
 	rapid.Check(t, func(t *rapid.T) {
-		loc, err := time.LoadLocation(rapid.SampledFrom(zones).Draw(t, "zone"))
-		if err != nil {
-			t.Skip("no tzdata")
-		}
+		loc := proptest.Zone().Draw(t, "zone")
 		now := time.Unix(rapid.Int64Range(1_500_000_000, 2_000_000_000).Draw(t, "unix"), 0).In(loc)
 		off := rapid.IntRange(-12*3600, 14*3600).Draw(t, "off")
 		abbrev := rapid.SampledFrom([]string{"", "PST", "IST"}).Draw(t, "abbrev")
