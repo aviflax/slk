@@ -17,7 +17,7 @@ import (
 func junk() *rapid.Generator[string] {
 	return rapid.Custom(func(t *rapid.T) string {
 		s := proptest.StyledText().Draw(t, "styled")
-		piece := rapid.SampledFrom([]string{"\xff", "\xc3", "\x1b", "\x1b[", "‍", "\x00", "\xe2\x82", "\t"}).Draw(t, "junk")
+		piece := rapid.SampledFrom([]string{"\xff", "\xc3", "\x1b", "\x1b[", "\u200d", "\x00", "\xe2\x82", "\t"}).Draw(t, "junk")
 		cut := rapid.IntRange(0, len(s)).Draw(t, "cut")
 		return s[:cut] + piece + s[cut:]
 	})
@@ -122,7 +122,7 @@ func TestSliceColumnsWholeLineIsText(t *testing.T) {
 // FuzzPlainLines: no panic on arbitrary bytes, and the structural
 // invariants hold.
 func FuzzPlainLines(f *testing.F) {
-	for _, s := range []string{"", "abc", "\x1b[31mred\x1b[0m", "漢字", "\xff\xfe", "éx", "👨‍👩‍👧", "\x1b", "a\nb\n", "‍a"} {
+	for _, s := range []string{"", "abc", "\x1b[31mred\x1b[0m", "漢字", "\xff\xfe", "éx", "👨\u200d👩\u200d👧", "\x1b", "a\nb\n", "\u200da"} {
 		f.Add(s)
 	}
 	f.Fuzz(func(t *testing.T, s string) {

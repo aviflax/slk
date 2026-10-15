@@ -56,12 +56,12 @@ func TestLayoutFits(t *testing.T) {
 				continue
 			}
 			q := placed[i-1]
-			switch {
-			case p.Row == q.Row:
+			switch p.Row {
+			case q.Row:
 				if p.Col < q.Col+q.Width+gap {
 					t.Fatalf("labels %d,%d overlap or miss the gap: %+v %+v", i-1, i, q, p)
 				}
-			case p.Row == q.Row+1:
+			case q.Row + 1:
 				if p.Col != 0 {
 					t.Fatalf("new row starts at col %d", p.Col)
 				}
