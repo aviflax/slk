@@ -426,11 +426,24 @@ func (m *Model) NextUnread(afterID string, dir int) (id, name, chType string, ok
 	if m.readStateReader == nil {
 		return "", "", "", false
 	}
-	n := len(m.filtered)
-	if n == 0 {
+	if len(m.filtered) == 0 {
 		return "", "", "", false
 	}
-	state := m.readStateReader()
+	item, ok := nextUnread(m.items, m.filtered, m.readStateReader(), afterID, dir)
+	if !ok {
+		return "", "", "", false
+	}
+	return item.ID, item.Name, item.Type, true
+}
+
+// nextUnread is NextUnread's walk over items in filtered order, with
+// the read state passed in: the first visibly-unread item after afterID
+// in direction dir (wrapping), never afterID itself.
+func nextUnread(items []ChannelItem, filtered []int, state map[string]core.ReadState, afterID string, dir int) (ChannelItem, bool) {
+	n := len(filtered)
+	if n == 0 {
+		return ChannelItem{}, false
+	}
 	step := 1
 	if dir < 0 {
 		step = -1
@@ -444,22 +457,22 @@ func (m *Model) NextUnread(afterID string, dir int) (id, name, chType string, ok
 	if step < 0 {
 		start = n
 	}
-	for pos, idx := range m.filtered {
-		if m.items[idx].ID == afterID {
+	for pos, idx := range filtered {
+		if items[idx].ID == afterID {
 			start = pos
 			break
 		}
 	}
 	for off := 1; off <= n; off++ {
-		item := m.items[m.filtered[((start+step*off)%n+n)%n]]
+		item := items[filtered[((start+step*off)%n+n)%n]]
 		if item.ID == afterID {
 			continue
 		}
 		if item.IsVisiblyUnread(state[item.ID]) {
-			return item.ID, item.Name, item.Type, true
+			return item, true
 		}
 	}
-	return "", "", "", false
+	return ChannelItem{}, false
 }
 
 // Invalidate forces the next View() call to re-read read state from
@@ -1000,10 +1013,6 @@ func (m *Model) pageBy(delta int) {
 	if delta == 0 || len(m.nav) == 0 {
 		return
 	}
-	dir := 1
-	if delta < 0 {
-		dir = -1
-	}
 
 	// Without a rendered layout (a key before the first frame) there is
 	// no row geometry to keep; step the cursor by nav items instead.
@@ -1019,11 +1028,31 @@ func (m *Model) pageBy(delta int) {
 		return
 	}
 
-	maxOffset := len(m.cacheRows) - m.lastHeight
+	newCursor, newOffset, ok := pageRows(m.cacheRows, m.cursor, m.yOffset, m.lastHeight, delta)
+	if !ok {
+		return
+	}
+	m.yOffset = newOffset
+	m.cursor = newCursor
+	m.snappedSelection = m.cursor
+	m.hasSnapped = true
+	m.dirty()
+}
+
+// pageRows is pageBy over a rendered layout: rows are the cache rows
+// (navIdx -1 for a row the cursor cannot land on), height the viewport
+// height. It returns the new cursor and offset; ok is false when the
+// cursor is not on any row, and then nothing changes.
+func pageRows(rows []renderRow, cursor, yOffset, height, delta int) (newCursor, newOffset int, ok bool) {
+	dir := 1
+	if delta < 0 {
+		dir = -1
+	}
+	maxOffset := len(rows) - height
 	if maxOffset < 0 {
 		maxOffset = 0
 	}
-	newOffset := m.yOffset + delta
+	newOffset = yOffset + delta
 	if newOffset < 0 {
 		newOffset = 0
 	}
@@ -1032,10 +1061,10 @@ func (m *Model) pageBy(delta int) {
 	}
 
 	var targetLine int
-	if newOffset == m.yOffset {
+	if newOffset == yOffset {
 		// Nothing left to scroll: jump the cursor to the end.
 		if dir > 0 {
-			targetLine = len(m.cacheRows) - 1
+			targetLine = len(rows) - 1
 		} else {
 			targetLine = 0
 		}
@@ -1043,41 +1072,37 @@ func (m *Model) pageBy(delta int) {
 		// Keep the cursor's screen row: shift it by exactly what the
 		// viewport moved.
 		line := -1
-		for i, r := range m.cacheRows {
-			if r.navIdx == m.cursor {
+		for i, r := range rows {
+			if r.navIdx == cursor {
 				line = i
 				break
 			}
 		}
 		if line < 0 {
-			return
+			return cursor, yOffset, false
 		}
-		targetLine = line + (newOffset - m.yOffset)
+		targetLine = line + (newOffset - yOffset)
 	}
 
 	// Land on a navigable row: continue in the scroll direction past
 	// blank separators, and fall back to the other direction at the
 	// list's edge.
-	newCursor := m.nearestNavigable(targetLine, dir)
+	newCursor = nearestNavigable(rows, targetLine, dir)
 	if newCursor < 0 {
-		newCursor = m.nearestNavigable(targetLine, -dir)
+		newCursor = nearestNavigable(rows, targetLine, -dir)
 	}
-
-	m.yOffset = newOffset
-	if newCursor >= 0 {
-		m.cursor = newCursor
+	if newCursor < 0 {
+		newCursor = cursor
 	}
-	m.snappedSelection = m.cursor
-	m.hasSnapped = true
-	m.dirty()
+	return newCursor, newOffset, true
 }
 
-// nearestNavigable returns the nav index of the first navigable cacheRow
+// nearestNavigable returns the nav index of the first navigable row
 // at or beyond line in direction dir (+1 down, -1 up), or -1 if none.
-func (m *Model) nearestNavigable(line, dir int) int {
-	for i := line; i >= 0 && i < len(m.cacheRows); i += dir {
-		if m.cacheRows[i].navIdx >= 0 {
-			return m.cacheRows[i].navIdx
+func nearestNavigable(rows []renderRow, line, dir int) int {
+	for i := line; i >= 0 && i < len(rows); i += dir {
+		if rows[i].navIdx >= 0 {
+			return rows[i].navIdx
 		}
 	}
 	return -1
@@ -1335,21 +1360,29 @@ func (m *Model) rebuildFilter() {
 			}
 		}
 	}
-	sectionOrder := m.modelOrderedSections(m.filtered)
+	sortFilteredIdx(m.items, m.filtered, m.sectionFor, m.modelOrderedSections(m.filtered), stars)
+}
+
+// sortFilteredIdx sorts filtered (indices into items) into the order the
+// sidebar draws them: by the section's position in sectionOrder (each
+// item's section is sectionOf(item)), channels before conversations
+// inside a section named in stars, then ChannelOrder > 0 ascending, then
+// input order.
+func sortFilteredIdx(items []ChannelItem, filtered []int, sectionOf func(ChannelItem) string, sectionOrder []string, stars map[string]bool) {
 	rank := make(map[string]int, len(sectionOrder))
 	for i, name := range sectionOrder {
 		rank[name] = i
 	}
-	sort.SliceStable(m.filtered, func(a, b int) bool {
-		ia, ib := m.filtered[a], m.filtered[b]
-		sa, sb := m.sectionFor(m.items[ia]), m.sectionFor(m.items[ib])
+	sort.SliceStable(filtered, func(a, b int) bool {
+		ia, ib := filtered[a], filtered[b]
+		sa, sb := sectionOf(items[ia]), sectionOf(items[ib])
 		ra, rb := rank[sa], rank[sb]
 		if ra != rb {
 			return ra < rb
 		}
 		if sa == sb && stars[sa] {
-			ca := m.items[ia].Type == "channel" || m.items[ia].Type == "private"
-			cb := m.items[ib].Type == "channel" || m.items[ib].Type == "private"
+			ca := items[ia].Type == "channel" || items[ia].Type == "private"
+			cb := items[ib].Type == "channel" || items[ib].Type == "private"
 			if ca != cb {
 				return ca
 			}
@@ -1357,7 +1390,7 @@ func (m *Model) rebuildFilter() {
 		// Within a section: annotated (ChannelOrder > 0) before
 		// un-annotated; among annotated, lower wins; among
 		// un-annotated, preserve input order via stable sort.
-		oa, ob := m.items[ia].ChannelOrder, m.items[ib].ChannelOrder
+		oa, ob := items[ia].ChannelOrder, items[ib].ChannelOrder
 		if (oa > 0) != (ob > 0) {
 			return oa > 0
 		}
@@ -1504,10 +1537,16 @@ func (m *Model) aggregateForSection(section string) (unread, mentions int, allMu
 	if m.readStateReader != nil {
 		readState = m.readStateReader()
 	}
+	return aggregateSection(m.items, m.filtered, readState, m.sectionFor, section)
+}
+
+// aggregateSection is aggregateForSection over explicit inputs: the
+// items of filtered whose sectionOf is section, against readState.
+func aggregateSection(items []ChannelItem, filtered []int, readState map[string]core.ReadState, sectionOf func(ChannelItem) string, section string) (unread, mentions int, allMuted bool) {
 	allMuted = true
-	for _, idx := range m.filtered {
-		item := m.items[idx]
-		if m.sectionFor(item) != section {
+	for _, idx := range filtered {
+		item := items[idx]
+		if sectionOf(item) != section {
 			continue
 		}
 		state := readState[item.ID]
