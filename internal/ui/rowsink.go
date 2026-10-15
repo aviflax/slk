@@ -22,8 +22,11 @@ type rowSink interface {
 	// InsertLocal adds a placeholder row (append unless its TS is
 	// already shown) and scrolls to it.
 	InsertLocal(item messages.MessageItem)
-	// Settle replaces the placeholder localTS with item, or, when the
-	// placeholder is not there, upserts item by its TS.
+	// Settle lands item, the authoritative message, by
+	// messages.Settle: it replaces the placeholder localTS, or, when
+	// a row with item.TS is already shown, replaces that row and drops
+	// the placeholder, so the message is never shown twice. When the
+	// placeholder is not there it upserts item by its TS.
 	Settle(localTS string, item messages.MessageItem)
 	// RemoveLocal drops the placeholder localTS, reporting whether it
 	// was there.

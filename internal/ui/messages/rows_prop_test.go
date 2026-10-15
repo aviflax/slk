@@ -63,10 +63,12 @@ func assertDistinctTS(t *rapid.T, rows []MessageItem) {
 	}
 }
 
-// Settle never leaves two rows with one TS when it was given none:
+// Settle never leaves two rows with one TS when it was given none,
 // whether the authoritative TS is new, already present (the echo landed
 // first), or equal to the placeholder's own, and whether the
-// placeholder is there at all.
+// placeholder is there at all. It reports what it did, and every row
+// other than the placeholder and the row it settles onto is untouched:
+// a replace leaves the rest in place, a removal only closes the gap.
 func TestSettleNeverDuplicatesTS(t *testing.T) {
 	rapid.Check(t, func(t *rapid.T) {
 		rows := drawRows(t)
@@ -75,18 +77,49 @@ func TestSettleNeverDuplicatesTS(t *testing.T) {
 		before := slices.Clone(rows)
 		got, ch := Settle(rows, localTS, item)
 		assertDistinctTS(t, got)
-		hadLocal := IndexOfTS(before, localTS) >= 0
+		i := IndexOfTS(before, localTS)
+		j := IndexOfTS(before, item.TS)
+		var want []MessageItem
+		var wantCh RowChange
 		switch {
-		case !hadLocal:
-			if ch.Op != RowNone || !sameRows(got, before) {
-				t.Fatalf("no placeholder: got %v [%s], want unchanged", ch, tsList(got))
-			}
-		case IndexOfTS(got, item.TS) < 0:
-			t.Fatalf("settled TS %q missing from [%s]", item.TS, tsList(got))
-		case IndexOfTS(got, localTS) >= 0 && localTS != item.TS:
-			t.Fatalf("placeholder %q still in [%s]", localTS, tsList(got))
+		case i < 0:
+			want, wantCh = before, RowChange{Op: RowNone, Index: -1}
+		case j < 0 || j == i:
+			want = slices.Clone(before)
+			want[i] = item
+			wantCh = RowChange{Op: RowReplaced, Index: i}
+		default:
+			want = slices.Clone(before)
+			want[j] = item
+			want = slices.Delete(want, i, i+1)
+			wantCh = RowChange{Op: RowRemoved, Index: i}
+		}
+		if ch != wantCh {
+			t.Fatalf("Settle(%q, %q) reported %v, want %v", localTS, item.TS, ch, wantCh)
+		}
+		if !sameRows(got, want) {
+			t.Fatalf("Settle(%q, %q) = [%s], want [%s]", localTS, item.TS, tsList(got), tsList(want))
 		}
 	})
+}
+
+// Matching is literal, so an empty TS is a TS like any other: settling
+// onto "" when a row already has an empty TS drops the placeholder and
+// leaves one empty-TS row holding the item.
+func TestSettleEmptyTSMatchesLiterally(t *testing.T) {
+	rows := []MessageItem{{TS: "", Text: "old"}, {TS: "local:1", Text: "pending"}, {TS: "1.000002", Text: "other"}}
+	got, ch := Settle(rows, "local:1", MessageItem{TS: "", Text: "settled"})
+	want := []MessageItem{{TS: "", Text: "settled"}, {TS: "1.000002", Text: "other"}}
+	if ch != (RowChange{Op: RowRemoved, Index: 1}) || !sameRows(got, want) {
+		t.Fatalf("got %v [%s], want removed at 1 and [%s]", ch, tsList(got), tsList(want))
+	}
+
+	rows = []MessageItem{{TS: "1.000001", Text: "a"}, {TS: "", Text: "pending"}}
+	got, ch = Settle(rows, "", MessageItem{TS: "1.000003", Text: "settled"})
+	want = []MessageItem{{TS: "1.000001", Text: "a"}, {TS: "1.000003", Text: "settled"}}
+	if ch != (RowChange{Op: RowReplaced, Index: 1}) || !sameRows(got, want) {
+		t.Fatalf("empty localTS: got %v [%s], want replaced at 1 and [%s]", ch, tsList(got), tsList(want))
+	}
 }
 
 // Removing a row and inserting it back at the reported index gives the

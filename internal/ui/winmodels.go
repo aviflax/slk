@@ -90,7 +90,7 @@ func cloneMessageItem(item messages.MessageItem) messages.MessageItem {
 
 // cloneMessageItems deep-copies a message slice for handing to a
 // model: a fresh top-level slice (covers in-place item writes:
-// SwapLocalSent, UpsertSelfSent, PatchUserName, UpdateMessageInPlace,
+// Settle, UpsertSelfSent, PatchUserName, UpdateMessageInPlace,
 // IncrementReplyCount, RemoveMessageByTS) plus a per-item
 // cloneMessageItem.
 //

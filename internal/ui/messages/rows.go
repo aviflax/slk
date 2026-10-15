@@ -1,8 +1,11 @@
 package messages
 
 // Row operations on a pane's []MessageItem, located by TS. Both content
-// panes (messages.Model and thread.Model) write their rows through
-// these, then fix up their own selection and caches from the RowChange.
+// panes (messages.Model and thread.Model) use them, then fix up their
+// own selection and caches from the RowChange. The optimistic send
+// paths (append, settle, roll back, upsert) and the delete path write
+// through them; the edit, reaction and reply-count paths only locate
+// their row with FirstIndexOfTS and write it themselves.
 //
 // The functions write through the input's backing array the way the
 // panes always have (an in-place replace, an append-based remove), so a
@@ -47,9 +50,9 @@ func IndexOfTS(rows []MessageItem, ts string) int {
 
 // FirstIndexOfTS returns the index of the first row with the given TS,
 // or -1. The edit, delete, reaction and reply-count paths have always
-// scanned from the front; they keep doing so because a slice can hold
-// two rows with one TS (a placeholder swapped onto a TS the echo already
-// added), and the direction decides which of them is written.
+// scanned from the front and keep doing so: Settle no longer leaves two
+// rows with one TS, but rows from before that fix, or an empty TS, can
+// still repeat, and the direction decides which of them is written.
 func FirstIndexOfTS(rows []MessageItem, ts string) int {
 	for i, r := range rows {
 		if r.TS == ts {
@@ -82,7 +85,10 @@ func RemoveAt(rows []MessageItem, i int) ([]MessageItem, RowChange) {
 	return append(rows[:i], rows[i+1:]...), RowChange{Op: RowRemoved, Index: i}
 }
 
-// PatchTS applies f to the last row with TS ts, in place.
+// PatchTS applies f to the last row with TS ts, in place. Nothing calls
+// it yet: it is here for the optimistic edit, which will patch a row's
+// text before Slack answers. The edit paths scan from the front
+// (FirstIndexOfTS), so that change has to pick one direction for both.
 func PatchTS(rows []MessageItem, ts string, f func(*MessageItem)) ([]MessageItem, RowChange) {
 	i := IndexOfTS(rows, ts)
 	if i < 0 {
@@ -115,16 +121,22 @@ func Upsert(rows []MessageItem, item MessageItem) ([]MessageItem, RowChange) {
 }
 
 // Settle replaces the placeholder row localTS with item, the
-// authoritative message. When a row with item.TS is already present
-// (the echo got there first), the placeholder is removed instead, so
-// the message never appears twice. A missing placeholder is a no-op.
+// authoritative message, and reports RowReplaced at the placeholder's
+// index. When another row already carries item.TS (the echo got there
+// first), that row takes item and the placeholder is removed instead,
+// reported as RowRemoved at the placeholder's old index, so the message
+// never appears twice. A missing placeholder is a no-op (RowNone).
+// Matching is literal, item.TS "" included.
 func Settle(rows []MessageItem, localTS string, item MessageItem) ([]MessageItem, RowChange) {
 	i := IndexOfTS(rows, localTS)
 	if i < 0 {
 		return rows, noRowChange
 	}
-	if item.TS != "" && item.TS != localTS && IndexOfTS(rows, item.TS) >= 0 {
-		return RemoveAt(rows, i)
+	if item.TS != localTS {
+		if j := IndexOfTS(rows, item.TS); j >= 0 {
+			rows[j] = item
+			return RemoveAt(rows, i)
+		}
 	}
 	rows[i] = item
 	return rows, RowChange{Op: RowReplaced, Index: i}

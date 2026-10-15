@@ -77,21 +77,16 @@ var reduceSend reducerFunc = func(a *App, msg tea.Msg) (tea.Cmd, bool) {
 		return func() tea.Msg { return ToastMsg{Text: "Message forwarded to " + m.destination} }, true
 
 	case MessageSentMsg:
-		// The chat.postMessage HTTP response landed. If a
-		// "local:..." placeholder is in the pane from the
-		// instant-display path (SendMessageMsg above), swap it for
-		// the authoritative message. Otherwise -- e.g. test paths
-		// firing MessageSentMsg directly, or the user navigated
-		// away and back between Enter and the HTTP response --
-		// fall back to UpsertSelfSent which appends-or-replaces
-		// by Slack TS.
-		//
-		// UpsertSelfSent is also the fallback for any racing WS
-		// echo that managed to slip past selfSendInFlight: if
-		// AppendMessage stored the echo's normalised text first,
-		// UpsertSelfSent replaces it with our converted-mrkdwn
-		// text. See internal/ui/messages/model.go for both
-		// methods' contracts.
+		// The chat.postMessage HTTP response landed. Settle (see
+		// rowSink) swaps the "local:..." placeholder from the
+		// instant-display path (SendMessageMsg above) for the
+		// authoritative message. A racing WS echo that slipped past
+		// the in-flight window and stored its own row first takes
+		// the authoritative message instead, and the placeholder
+		// goes, so the message shows once. With no placeholder
+		// (test paths firing MessageSentMsg directly, or the user
+		// navigated away and back between Enter and the HTTP
+		// response) the message is upserted by its Slack TS.
 		if m.Message.TS == "" {
 			return nil, true
 		}

@@ -167,31 +167,35 @@ func TestModelListOperations(t *testing.T) {
 					t.Fatalf("prepend of %d moved index %d to %d", len(kept), before, got)
 				}
 			},
-			"SwapPlaceholder": func(t *rapid.T) {
-				var locals []string
+			"SettlePlaceholder": func(t *rapid.T) {
+				var locals, reals []string
 				for _, ts := range s.ts {
 					if strings.HasPrefix(ts, "local:") {
 						locals = append(locals, ts)
+					} else {
+						reals = append(reals, ts)
 					}
 				}
 				if len(locals) == 0 {
-					if s.m.SwapLocalSent("local:404", MessageItem{TS: s.nextTS()}) {
-						t.Fatalf("swapped a placeholder that is not there")
-					}
 					return
 				}
 				local := rapid.SampledFrom(locals).Draw(t, "local")
-				// KNOWN: the real TS must be new. SwapLocalSent does not
-				// check whether a WebSocket echo already appended a row
-				// with that TS, so a swap after such an echo leaves the
-				// message in the list twice. App's selfSendInFlight
-				// suppresses the echo in the common order; see the report.
-				real := s.nextTS()
-				before := s.m.SelectedIndex()
-				if !s.m.SwapLocalSent(local, MessageItem{TS: real}) {
-					t.Fatalf("SwapLocalSent(%s) found nothing", local)
-				}
 				i := s.index(local)
+				before := s.m.SelectedIndex()
+				// The real TS is new, or one an echo already appended.
+				if len(reals) > 0 && rapid.Bool().Draw(t, "echoFirst") {
+					real := rapid.SampledFrom(reals).Draw(t, "echoed")
+					s.m.Settle(local, MessageItem{TS: real, Text: "settled"})
+					if s.remove(i) {
+						s.selected = ""
+					}
+					if j := s.index(real); j >= len(s.m.Messages()) || s.m.Messages()[j].Text != "settled" {
+						t.Fatalf("echoed row %s was not settled: %+v", real, s.m.Messages())
+					}
+					return
+				}
+				real := s.nextTS()
+				s.m.Settle(local, MessageItem{TS: real})
 				s.ts[i] = real
 				if s.selected == local {
 					s.selected = real

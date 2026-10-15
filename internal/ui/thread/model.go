@@ -332,28 +332,6 @@ func (m *Model) AddReply(msg messages.MessageItem) {
 	m.selected = len(m.replies) - 1
 }
 
-// SwapLocalSentReply replaces an optimistic placeholder identified
-// by localTS (an internal "local:..." id assigned when the user
-// pressed Enter on a thread reply, before chat.postMessage returned
-// the real Slack TS) with the authoritative msg. Returns true if a
-// row matching localTS was found and swapped, false otherwise.
-// Mirrors messages.Model.SwapLocalSent.
-func (m *Model) SwapLocalSentReply(localTS string, msg messages.MessageItem) bool {
-	if localTS == "" {
-		return false
-	}
-	// A plain replace, as in messages.Model.SwapLocalSent. Unlike the
-	// channel pane it does not reset the snap anchor; InvalidateCache
-	// is all it has ever done.
-	rows, ch := messages.ReplaceTS(m.replies, localTS, msg)
-	if ch.Op == messages.RowNone {
-		return false
-	}
-	m.replies = rows
-	m.InvalidateCache()
-	return true
-}
-
 // RemoveLocalSentReply removes an optimistic placeholder reply
 // identified by localTS. Used when the chat.postMessage HTTP call
 // fails and we want to roll back the instant-display add. Returns
@@ -368,11 +346,17 @@ func (m *Model) RemoveLocalSentReply(localTS string) bool {
 	}
 	m.replies = rows
 	m.InvalidateCache()
-	// Keep the cursor on the message it was on (the parent's
-	// sentinel is below every index), and fall back to the
-	// parent when no reply is left. RemoveMessageByTS steps back
-	// on i <= selected instead; both are kept until reconciled.
-	if i := ch.Index; i < m.selected {
+	m.afterLocalRemoved(ch.Index)
+	return true
+}
+
+// afterLocalRemoved fixes the selection after a placeholder at index i
+// left the replies: the cursor stays on the message it was on (the
+// parent's sentinel is below every index), and falls back to the parent
+// when no reply is left. RemoveMessageByTS steps back on i <= selected
+// instead; both are kept until reconciled.
+func (m *Model) afterLocalRemoved(i int) {
+	if i < m.selected {
 		m.selected--
 	}
 	if m.selected >= len(m.replies) {
@@ -381,7 +365,6 @@ func (m *Model) RemoveLocalSentReply(localTS string) bool {
 			m.selected = parentSelected
 		}
 	}
-	return true
 }
 
 // UpsertSelfSentReply is the optimistic-add variant of AddReply for
@@ -407,11 +390,27 @@ func (m *Model) UpsertSelfSentReply(msg messages.MessageItem) {
 // pane (rowSink in package ui).
 func (m *Model) InsertLocal(msg messages.MessageItem) { m.AddReply(msg) }
 
-// Settle lands the sent reply: it swaps out the placeholder localTS,
-// or upserts msg when the placeholder is not in this pane.
+// Settle lands the sent reply (messages.Settle on this pane's
+// replies): the placeholder localTS is replaced by msg in place, or,
+// when a reply with msg.TS is already here (the echo got in first),
+// that reply takes msg and the placeholder is removed, so the reply
+// shows once. With no placeholder in this pane, msg is upserted by its
+// TS. Unlike the channel pane it has never reset a snap anchor;
+// InvalidateCache is all it does.
 func (m *Model) Settle(localTS string, msg messages.MessageItem) {
-	if !m.SwapLocalSentReply(localTS, msg) {
+	if localTS == "" {
 		m.UpsertSelfSentReply(msg)
+		return
+	}
+	rows, ch := messages.Settle(m.replies, localTS, msg)
+	if ch.Op == messages.RowNone {
+		m.UpsertSelfSentReply(msg)
+		return
+	}
+	m.replies = rows
+	m.InvalidateCache()
+	if ch.Op == messages.RowRemoved {
+		m.afterLocalRemoved(ch.Index)
 	}
 }
 

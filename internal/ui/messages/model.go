@@ -589,40 +589,6 @@ func (m *Model) AppendMessage(msg MessageItem) {
 	m.selected = len(m.messages) - 1
 }
 
-// SwapLocalSent replaces an optimistic placeholder identified by
-// localTS (an internal "local:..." id assigned when the user pressed
-// Enter, before the chat.postMessage HTTP response carried back the
-// authoritative Slack TS) with the authoritative msg. The placeholder
-// keeps its position in the list so the rendered order matches what
-// the user saw when they hit Enter, but the entry's contents are
-// fully replaced (text, real TS, attachments, etc.).
-//
-// Returns true if a row matching localTS was found and swapped, false
-// otherwise. Callers that get false should typically fall back to
-// UpsertSelfSent so the message still lands (e.g. the user navigated
-// away from the channel between Enter and the HTTP response, so the
-// placeholder isn't in the current model).
-func (m *Model) SwapLocalSent(localTS string, msg MessageItem) bool {
-	if localTS == "" {
-		return false
-	}
-	// A plain replace: a row already carrying msg.TS (an echo that got
-	// in first) is left beside it. Settle would drop the placeholder
-	// instead; that fix lands on its own.
-	rows, ch := ReplaceTS(m.messages, localTS, msg)
-	if ch.Op == RowNone {
-		return false
-	}
-	m.messages = rows
-	m.dropCache()
-	m.dirty()
-	// Same rationale as UpsertSelfSent's replace branch: the
-	// authoritative entry may differ in height (e.g. server-
-	// rendered blocks) and the snap anchor needs to refresh.
-	m.list.ResetSnap()
-	return true
-}
-
 // RemoveLocalSent removes an optimistic placeholder identified by
 // localTS. Used when the chat.postMessage HTTP call fails and we want
 // to roll back the instant-display add. Returns true if a row was
@@ -639,17 +605,24 @@ func (m *Model) RemoveLocalSent(localTS string) bool {
 	m.dropCache()
 	m.dirty()
 	m.list.ResetSnap()
-	// The selection fix-up differs from RemoveMessageByTS's, which
-	// also steps back when the removed row was the selected one
-	// (i <= selected) and resets to 0 when the list empties. Both
-	// are kept as they are until the two are reconciled.
-	if i := ch.Index; i < m.selected {
+	m.afterLocalRemoved(ch.Index)
+	return true
+}
+
+// afterLocalRemoved fixes the selection after a placeholder at index i
+// left the list, keeping the cursor on the message it was on.
+//
+// The fix-up differs from RemoveMessageByTS's, which also steps back
+// when the removed row was the selected one (i <= selected) and resets
+// to 0 when the list empties. Both are kept as they are until the two
+// are reconciled.
+func (m *Model) afterLocalRemoved(i int) {
+	if i < m.selected {
 		m.selected--
 	}
 	if m.selected >= len(m.messages) && len(m.messages) > 0 {
 		m.selected = len(m.messages) - 1
 	}
-	return true
 }
 
 // UpsertSelfSent is the optimistic-add variant of AppendMessage for
@@ -691,12 +664,33 @@ func (m *Model) UpsertSelfSent(msg MessageItem) {
 // every pane (rowSink in package ui).
 func (m *Model) InsertLocal(msg MessageItem) { m.AppendMessage(msg) }
 
-// Settle lands the sent message: it swaps out the placeholder localTS,
-// or upserts msg when the placeholder is not in this pane (the user
-// left the channel and came back before the post returned).
+// Settle lands the sent message (messages.Settle on this pane's rows).
+// The placeholder localTS is replaced by msg in place, so the order
+// matches what the user saw at Enter. When a row with msg.TS is already
+// here (the echo got in first), that row takes msg and the placeholder
+// is removed, so the message shows once. With no placeholder in this
+// pane (the user left the channel and came back before the post
+// returned, or an earlier Settle already replaced it), msg is upserted
+// by its TS.
 func (m *Model) Settle(localTS string, msg MessageItem) {
-	if !m.SwapLocalSent(localTS, msg) {
+	if localTS == "" {
 		m.UpsertSelfSent(msg)
+		return
+	}
+	rows, ch := Settle(m.messages, localTS, msg)
+	if ch.Op == RowNone {
+		m.UpsertSelfSent(msg)
+		return
+	}
+	m.messages = rows
+	m.dropCache()
+	m.dirty()
+	// The settled entry may differ in height from the placeholder
+	// (server-rendered blocks), so the snap anchor needs a refresh, as
+	// in UpsertSelfSent's replace branch.
+	m.list.ResetSnap()
+	if ch.Op == RowRemoved {
+		m.afterLocalRemoved(ch.Index)
 	}
 }
 
