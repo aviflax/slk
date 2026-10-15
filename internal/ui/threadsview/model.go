@@ -788,6 +788,11 @@ func (m *Model) resolveUser(uid string) string {
 // returns a coarse "Nm ago" / "Nh ago" / "Nd ago" string. Empty / unparseable
 // inputs return "".
 func formatRelTime(ts string) string {
+	return formatRelTimeAt(ts, time.Now())
+}
+
+// formatRelTimeAt is formatRelTime measured against now.
+func formatRelTimeAt(ts string, now time.Time) string {
 	if ts == "" {
 		return ""
 	}
@@ -799,7 +804,7 @@ func formatRelTime(ts string) string {
 	if err != nil {
 		return ""
 	}
-	d := time.Since(time.Unix(sec, 0))
+	d := now.Sub(time.Unix(sec, 0))
 	switch {
 	case d < time.Minute:
 		return "now"
