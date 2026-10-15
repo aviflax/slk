@@ -65,7 +65,8 @@ func IsStale(item ChannelItem, hasUnread bool, lastReadTS string, threshold time
 }
 
 // parseSlackTS converts a Slack timestamp string ("1700000001.000000")
-// to a time.Time. Returns ok=false on empty or malformed input.
+// to a time.Time. Returns ok=false on empty or malformed input,
+// including a fractional part above 999999 microseconds.
 //
 // Slack uses the sentinel "0000000000.000000" (or bare "0") for the
 // last_read field of channels/mpims the user has never opened. We
@@ -83,8 +84,10 @@ func parseSlackTS(ts string) (time.Time, bool) {
 	}
 	var nsec int64
 	if len(parts) == 2 && parts[1] != "" {
+		// The fraction is microseconds. A larger value is malformed, and
+		// multiplying it by 1000 can overflow into a date before 1970.
 		us, err := strconv.ParseInt(parts[1], 10, 64)
-		if err != nil || us < 0 {
+		if err != nil || us < 0 || us >= 1_000_000 {
 			return time.Time{}, false
 		}
 		nsec = us * 1000

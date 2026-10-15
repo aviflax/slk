@@ -572,3 +572,32 @@ func TestSelectionSurvivesReorder(t *testing.T) {
 		}
 	})
 }
+
+// FuzzParseSlackTS feeds arbitrary last_read strings: parseSlackTS never
+// panics or yields a time before the epoch, formatTSPair's output always
+// reads back to the same instant, and IsStale never hides a channel
+// whose non-empty last_read does not parse.
+func FuzzParseSlackTS(f *testing.F) {
+	for _, s := range []string{"", "0", "0000000000.000000", "1700000001.000123", "1700000001.", "-1.5", "1.-5", "x.1", "99999999999999999999.1", "1.2.3"} {
+		f.Add(s)
+	}
+	now := time.Unix(1_800_000_000, 0)
+	f.Fuzz(func(t *testing.T, ts string) {
+		got, ok := parseSlackTS(ts)
+		if ok && got.Before(time.Unix(0, 0)) {
+			t.Fatalf("parseSlackTS(%q) = %v, before the epoch", ts, got)
+		}
+		if ts != "" && !ok && IsStale(ChannelItem{Type: "channel"}, false, ts, time.Hour, now) {
+			t.Fatalf("unparsable %q made a channel stale", ts)
+		}
+		if ok {
+			sec, usec := got.Unix(), got.Nanosecond()/1000
+			if usec < 1_000_000 {
+				back, ok2 := parseSlackTS(formatTSPair(sec, usec))
+				if !ok2 || !back.Equal(time.Unix(sec, int64(usec)*1000)) {
+					t.Fatalf("formatTSPair(%d, %d) read back as %v %v", sec, usec, back, ok2)
+				}
+			}
+		}
+	})
+}
