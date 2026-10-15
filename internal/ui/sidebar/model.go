@@ -206,14 +206,15 @@ func orderedSectionsLegacy(items []ChannelItem, filtered []int) []string {
 	for _, c := range customs {
 		out = append(out, c.name)
 	}
-	if hasDMs {
-		out = append(out, defaultDMSection)
-	}
-	if hasApps {
-		out = append(out, defaultAppsSection)
-	}
-	if hasChannels {
-		out = append(out, defaultChannelsSection)
+	// A custom section may share a built-in's name ([sections.Channels]);
+	// it is one section, listed where the custom one sorts.
+	for _, b := range []struct {
+		name string
+		has  bool
+	}{{defaultDMSection, hasDMs}, {defaultAppsSection, hasApps}, {defaultChannelsSection, hasChannels}} {
+		if _, custom := customSeen[b.name]; b.has && !custom {
+			out = append(out, b.name)
+		}
 	}
 	return out
 }

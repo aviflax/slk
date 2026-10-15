@@ -12,7 +12,8 @@ import (
 	"pgregory.net/rapid"
 )
 
-// customSections are the [sections.*] names items draw from.
+// customSections are the [sections.*] names items draw from. Built-in
+// names are not among them: see TestOrderedSectionsCustomNamedLikeBuiltIn.
 var customSections = []string{"Eng", "Ops", "Starred", "Design"}
 
 // channelItems draws 0..n items with unique IDs (C0, C1, ...), a mix of
@@ -208,6 +209,29 @@ func TestOrderedSectionsLegacy(t *testing.T) {
 			if ba || minOrder[a] != minOrder[b] {
 				t.Fatalf("shuffled input gave %v, was %v", again, got)
 			}
+		}
+	})
+}
+
+// A custom section that shares a built-in's name is still one section:
+// [sections.Channels] holding #general must not list "Channels" twice
+// when other channels fall back to it.
+func TestOrderedSectionsCustomNamedLikeBuiltIn(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		items := channelItems(10).Draw(t, "items")
+		name := rapid.SampledFrom([]string{defaultDMSection, defaultAppsSection, defaultChannelsSection}).Draw(t, "name")
+		for i := range items {
+			if rapid.IntRange(0, 2).Draw(t, "rename") == 0 {
+				items[i].Section = name
+			}
+		}
+		got := orderedSectionsLegacy(items, allIdx(items))
+		seen := map[string]bool{}
+		for _, s := range got {
+			if seen[s] {
+				t.Fatalf("section %q listed twice: %v", s, got)
+			}
+			seen[s] = true
 		}
 	})
 }
