@@ -1450,8 +1450,9 @@ func goldenScenarios() []goldenScenario {
 		},
 		{
 			// The default 120-column terminal, thread focused: the
-			// thread takes over the channel pane's space (#223).
-			name: "thread_open", w: 120, h: 30, layout: goldenStackedThread,
+			// sidebar yields so the thread sits beside the channel
+			// (the narrowest side-by-side width).
+			name: "thread_open", w: 120, h: 30, layout: goldenSideBySide,
 			build: func(t *testing.T) *App {
 				a := goldenThreadApp(t, 120, 30)
 				a.focusedPanel = PanelThread
@@ -1464,7 +1465,7 @@ func goldenScenarios() []goldenScenario {
 			// Pins the selected parent's tint and its padding to the pane
 			// width, which Phase 3 PR 2+3 moves from an outer wrapper to
 			// the parent row itself.
-			name: "thread_parent_selected", w: 120, h: 30, layout: goldenStackedThread,
+			name: "thread_parent_selected", w: 120, h: 30, layout: goldenSideBySide,
 			build: func(t *testing.T) *App {
 				a := goldenThreadApp(t, 120, 30)
 				a.focusedPanel = PanelThread

@@ -675,7 +675,7 @@ func TestNormalModeKeys(t *testing.T) {
 		},
 		{
 			name:     "shift+tab moves focus messages -> sidebar",
-			opts:     normalOpts(),
+			opts:     append(normalOpts(), withSize(200, 30)),
 			setup:    func(t *testing.T, a *App) { focusThreadPanel(t, a); focusMessages(t, a) },
 			key:      keyMod(tea.KeyTab, tea.ModShift),
 			wantMode: ModeNormal,
@@ -928,7 +928,7 @@ func TestNormalModeKeys(t *testing.T) {
 		// -------------------------------------------------------------
 		{
 			name:     "h focuses the previous panel (messages -> sidebar)",
-			opts:     normalOpts(),
+			opts:     append(normalOpts(), withSize(200, 30)),
 			setup:    func(t *testing.T, a *App) { focusThreadPanel(t, a); focusMessages(t, a) },
 			key:      keyPress('h'),
 			wantMode: ModeNormal,

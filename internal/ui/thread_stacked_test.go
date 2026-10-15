@@ -40,7 +40,7 @@ func assertFront(t *testing.T, a *App, wantChannel, wantThread bool) {
 }
 
 func TestStacked_FocusDecidesWhichPaneIsDrawn(t *testing.T) {
-	a := stackedApp(t, 120)
+	a := stackedApp(t, 110)
 
 	updateAndRender(t, a, keyCode(tea.KeyEnter))
 	if !a.threadVisible || a.focusedPanel != PanelThread {
@@ -91,8 +91,8 @@ func TestStacked_WideTerminalShowsBoth(t *testing.T) {
 // Credit: the Enter → fetch → replies-land shape is mkozjak's, from
 // PR #246. Before this change the reply was dropped because the render
 // between Enter and the fetch result had auto-hidden the pane (#223).
-func TestStacked_RepliesLandAt120(t *testing.T) {
-	a := stackedApp(t, 120)
+func TestStacked_RepliesLandWhenStacked(t *testing.T) {
+	a := stackedApp(t, 110)
 	selected, _ := a.messagepane.SelectedMessage()
 	reply := messages.MessageItem{TS: "6.0", ThreadTS: selected.TS, UserName: "bob", Text: "a narrow reply"}
 	a.setThreadFetcherForTest(func(ids.ChannelID, ids.ThreadTS) core.Msg {
@@ -120,7 +120,7 @@ func TestStacked_ThreadsViewKeepsTheListInFront(t *testing.T) {
 		ThreadTS: "50.0", ParentTS: "50.0", ParentUserID: "U1",
 		ParentText: "hello", ReplyCount: 1,
 	}}
-	a := stackedApp(t, 120, withThreadsView(sums))
+	a := stackedApp(t, 110, withThreadsView(sums))
 
 	updateAndRender(t, a, ThreadsViewActivatedMsg{})
 	if a.view != ViewThreads || !a.threadVisible || a.focusedPanel != PanelMessages {
@@ -166,7 +166,7 @@ func TestStacked_ResizeAcrossThreshold(t *testing.T) {
 	updateAndRender(t, a, keyMod(tea.KeyTab, tea.ModShift))
 	assertFront(t, a, true, true)
 
-	updateAndRender(t, a, tea.WindowSizeMsg{Width: 120, Height: 30})
+	updateAndRender(t, a, tea.WindowSizeMsg{Width: 110, Height: 30})
 	if !a.threadVisible {
 		t.Fatal("narrowing closed the thread")
 	}
@@ -178,7 +178,7 @@ func TestStacked_ResizeAcrossThreshold(t *testing.T) {
 
 // Review focus 2.
 func TestStacked_ChannelSwitchClosesThread(t *testing.T) {
-	a := stackedApp(t, 120)
+	a := stackedApp(t, 110)
 	updateAndRender(t, a, keyCode(tea.KeyEnter))
 	assertFront(t, a, false, true)
 
@@ -190,13 +190,24 @@ func TestStacked_ChannelSwitchClosesThread(t *testing.T) {
 }
 
 // Review focus 3.
+// At 140 the sidebar yields to put the thread beside the channel.
+// ctrl+b brings it back and the panes stack rather than squeeze below
+// their minima; ctrl+b again unstacks them.
 func TestStacked_SidebarToggleUnstacks(t *testing.T) {
 	a := stackedApp(t, 140)
 	updateAndRender(t, a, keyCode(tea.KeyEnter))
+	assertFront(t, a, true, true)
+	if a.layout.sidebarEnd != testRailW {
+		t.Fatalf("sidebar drawn beside a thread at 140 (sidebarEnd %d)", a.layout.sidebarEnd)
+	}
+
+	updateAndRender(t, a, keyMod('b', tea.ModCtrl))
+	if a.layout.sidebarEnd != testRailW+testSidebarW+2 {
+		t.Fatal("ctrl+b did not show the yielded sidebar")
+	}
 	assertFront(t, a, false, true)
 
-	a.ToggleSidebar()
-	_ = a.View()
+	updateAndRender(t, a, keyMod('b', tea.ModCtrl))
 	assertFront(t, a, true, true)
 }
 
@@ -215,7 +226,7 @@ func TestStacked_InsertModeKeepsThreadInFront(t *testing.T) {
 // alone (stacked, thread in front) must go to the thread compose, not
 // jump the channel back in front.
 func TestStacked_InsertFromSidebarGoesToThreadWhenAlone(t *testing.T) {
-	a := stackedApp(t, 120)
+	a := stackedApp(t, 110)
 	updateAndRender(t, a, keyCode(tea.KeyEnter))
 	updateAndRender(t, a, keyCode(tea.KeyTab)) // thread -> sidebar
 	if a.focusedPanel != PanelSidebar {
@@ -247,7 +258,7 @@ func TestStacked_InsertFromSidebarSideBySideGoesToChannel(t *testing.T) {
 // thread is drawn alone must focus the thread, not force the channel
 // back in front.
 func TestStacked_ToggleSidebarHideKeepsLoneThreadInFront(t *testing.T) {
-	a := stackedApp(t, 120)
+	a := stackedApp(t, 110)
 	updateAndRender(t, a, keyCode(tea.KeyEnter))
 	updateAndRender(t, a, keyCode(tea.KeyTab)) // thread -> sidebar
 	if a.focusedPanel != PanelSidebar {
@@ -258,8 +269,8 @@ func TestStacked_ToggleSidebarHideKeepsLoneThreadInFront(t *testing.T) {
 	if a.focusedPanel != PanelThread {
 		t.Fatalf("ToggleSidebar: focus=%v, want PanelThread", a.focusedPanel)
 	}
-	// At 120 with the sidebar hidden the panes are still stacked
-	// (< 130 needed for both), so the thread stays the lone pane
+	// At 110 with the sidebar hidden the panes are still stacked
+	// (< 120 needed for both), so the thread stays the lone pane
 	// drawn.
 	assertFront(t, a, false, true)
 }

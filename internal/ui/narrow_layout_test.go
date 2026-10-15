@@ -43,6 +43,45 @@ func TestNarrow_SidebarAutoHides(t *testing.T) {
 	}
 }
 
+// Thread open: below 120 the panes stack; from 120 they sit side by
+// side, the sidebar yielding until 152 leaves room for all three.
+func TestNarrow_ThreadSideBySideThresholds(t *testing.T) {
+	tests := []struct {
+		width                   int
+		sideBySide              bool
+		sidebarW, msgW, threadW int
+	}{
+		{80, false, 0, 0, 72},
+		{110, false, 30, 0, 70},
+		{119, false, 30, 0, 79},
+		{120, true, 0, 50, 60},
+		{140, true, 0, 50, 80},
+		{151, true, 0, 61, 80},
+		{152, true, 30, 50, 60},
+		{160, true, 30, 50, 68},
+		{200, true, 30, 78, 80},
+	}
+	for _, tt := range tests {
+		a := stackedApp(t, tt.width)
+		updateAndRender(t, a, keyCode(tea.KeyEnter))
+		if !a.threadVisible || a.focusedPanel != PanelThread {
+			t.Fatalf("width %d: Enter did not open and focus the thread", tt.width)
+		}
+		assertFront(t, a, tt.sideBySide, true)
+		f := a.computeFrame()
+		if f.SidebarWidth != tt.sidebarW || f.MsgWidth != tt.msgW || f.ThreadWidth != tt.threadW {
+			t.Errorf("width %d: sidebar %d msg %d thread %d, want %d / %d / %d",
+				tt.width, f.SidebarWidth, f.MsgWidth, f.ThreadWidth, tt.sidebarW, tt.msgW, tt.threadW)
+		}
+
+		// Closing the thread gives a yielded sidebar back.
+		updateAndRender(t, a, keyCode(tea.KeyEscape))
+		if got, want := a.computeFrame().SidebarWidth > 0, sidebarFits(tt.width, 6, 30, false); got != want {
+			t.Errorf("width %d: after Esc sidebar shown = %v, want %v", tt.width, got, want)
+		}
+	}
+}
+
 // ctrl+b always flips what is on screen. At 80 columns the sidebar is
 // auto-hidden, so ctrl+b shows it (squeezing the channel), and the
 // choice holds until ctrl+b hides it again.

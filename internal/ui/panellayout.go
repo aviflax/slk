@@ -20,7 +20,7 @@
 //     feed PageHeight() which pageSize / halfPageSize consult.
 //
 // Stacking: when a thread is open and there is room for the messages
-// pane (≥40 cols) AND an 80-col thread pane side by side, both are
+// pane (≥50 cols) AND a 60-col thread pane side by side, both are
 // drawn. Otherwise the two stack: only one is drawn, across the whole
 // content area, and the caller's threadFront decides which. Compute is
 // pure geometry; App.threadInFront owns the focus rule.
@@ -35,8 +35,11 @@ const (
 	paneBorder = 2 // left + right border cols of every non-rail pane
 	// minMsgWidth and minThreadW are the side-by-side minima; below
 	// their sum the channel and thread stack.
-	minMsgWidth = 40
-	minThreadW  = 80
+	minMsgWidth = 50
+	minThreadW  = 60
+	// prefThreadW is the width a side-by-side thread grows to before
+	// the channel pane gets any more than its minimum.
+	prefThreadW = 80
 	// minSidebarMsgW is the channel pane width a shown sidebar must
 	// leave; narrower than this and the sidebar is auto-hidden.
 	minSidebarMsgW = 60
@@ -51,17 +54,30 @@ func sideBySide(area int) bool {
 }
 
 // sidebarFits reports whether a sidebar the user has not hidden is
-// drawn at this terminal width: only if the channel pane keeps
-// minSidebarMsgW columns beside it (≥100 cols with the default 6-col
-// rail and 30-col sidebar).
+// drawn at this terminal width. It is the lowest-priority pane:
+//
+//   - with a thread open, it yields whenever hiding it is what lets the
+//     thread sit beside the channel (120–151 cols with the default
+//     30-col sidebar and 6-col rail);
+//   - otherwise it is drawn only if the channel pane keeps
+//     minSidebarMsgW columns (≥100 cols by default).
 //
 // A width of 0 means the terminal has not reported its size yet; the
 // sidebar counts as fitting so nothing flips before the first resize.
-func sidebarFits(width, railWidth, sidebarWidth int) bool {
+func sidebarFits(width, railWidth, sidebarWidth int, threadVisible bool) bool {
 	if width <= 0 {
 		return true
 	}
-	return width-railWidth-sidebarWidth-2*paneBorder >= minSidebarMsgW
+	withSidebar := width - railWidth - sidebarWidth - paneBorder
+	if threadVisible {
+		if sideBySide(withSidebar) {
+			return true
+		}
+		if sideBySide(width - railWidth) {
+			return false
+		}
+	}
+	return withSidebar-paneBorder >= minSidebarMsgW
 }
 
 // panelLayout owns the per-frame layout state.
@@ -107,8 +123,9 @@ type panelLayoutFrame struct {
 //   - sidebar, when visible, consumes sidebarWidth + 2 cols of border.
 //   - thread, when visible and there is room for both panes, consumes
 //     max(35% of (width - rail - sidebar), 80) plus 2 cols of border,
-//     capped so messages keeps 40. Without room, the panes stack and
-//     only the front one (threadFront) is drawn, across the whole area.
+//     capped so messages keeps 50 (the thread is then still ≥60).
+//     Without room, the panes stack and only the front one
+//     (threadFront) is drawn, across the whole area.
 //   - whichever pane is drawn — messages side by side, or whichever
 //     pane is in front when stacked — consumes whatever's left, with
 //     a floor of 10.
@@ -132,7 +149,7 @@ func (l *panelLayout) Compute(width, height, railWidth, sidebarWidth int, sideba
 	case !threadVisible:
 		msgWidth, msgBorder = msgAreaWidth-paneBorder, paneBorder
 	case sideBySide(msgAreaWidth):
-		threadWidth = max(msgAreaWidth*35/100, minThreadW)
+		threadWidth = max(msgAreaWidth*35/100, prefThreadW)
 		threadWidth = min(threadWidth, msgAreaWidth-2*paneBorder-minMsgWidth)
 		threadBorder, msgBorder = paneBorder, paneBorder
 		msgWidth = msgAreaWidth - msgBorder - threadWidth - threadBorder

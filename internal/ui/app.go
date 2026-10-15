@@ -1031,11 +1031,12 @@ func (a *App) threadDrawnAlone() bool {
 // focus cycling, mouse routing) reads this, not sidebarVisible.
 func (a *App) sidebarShown() bool {
 	return a.sidebarVisible && (a.sidebarPinned ||
-		sidebarFits(a.width, a.workspaceRail.Width(), a.sidebar.Width()))
+		sidebarFits(a.width, a.workspaceRail.Width(), a.sidebar.Width(), a.threadVisible))
 }
 
 // keepFocusOnScreen moves focus off a sidebar that is no longer drawn
-// (auto-hidden by a resize), to whichever content pane is: the thread when it is drawn alone,
+// (auto-hidden by a resize or by a thread opening beside the channel),
+// to whichever content pane is: the thread when it is drawn alone,
 // else the channel.
 func (a *App) keepFocusOnScreen() {
 	if a.focusedPanel != PanelSidebar || a.sidebarShown() {

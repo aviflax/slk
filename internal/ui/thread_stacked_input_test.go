@@ -9,12 +9,15 @@ import (
 )
 
 func TestStacked_WindowSplitWithThreadInFront(t *testing.T) {
-	a := stackedApp(t, 150)
+	// Stacked with room to split the channel: at 140 the sidebar would
+	// yield to a side-by-side thread, so show it with ctrl+b.
+	a := stackedApp(t, 140)
 	updateAndRender(t, a, keyCode(tea.KeyEnter))
+	updateAndRender(t, a, keyMod('b', tea.ModCtrl))
 	assertFront(t, a, false, true)
 
 	bands := *a.layout
-	want := wintree.Rect{W: 150 - testRailW - testSidebarW - 2, H: 29}
+	want := wintree.Rect{W: 140 - testRailW - testSidebarW - 2, H: 29}
 	if got := a.windowBounds(); got != want {
 		t.Errorf("windowBounds = %+v, want %+v (the channel-in-front area the windows fill)", got, want)
 	}
@@ -35,7 +38,7 @@ func TestStacked_WindowSplitWithThreadInFront(t *testing.T) {
 }
 
 func TestStacked_MouseRoutesToThePaneInFront(t *testing.T) {
-	a := stackedApp(t, 120)
+	a := stackedApp(t, 110)
 	updateAndRender(t, a, keyCode(tea.KeyEnter))
 	updateAndRender(t, a, keyCode(tea.KeyTab)) // thread → sidebar; thread stays in front
 	assertFront(t, a, false, true)

@@ -89,27 +89,49 @@ hidden. The thread is wider than today on large screens; that is intended.
 
 ### 1a. Narrow terminals (amended 2026-10-15)
 
-QA at 60–80 columns found the sidebar never yielded: an 80-column
-terminal had a 40-column channel pane, 60 columns had 18.
+QA at 60–160 columns found the layout above leaves too little for the
+channel: the sidebar never yielded (an 80-column terminal had a 40-column
+channel pane, 60 columns had 18), and a thread only sat beside the
+channel from 162 columns. The minima and the sidebar rule changed:
 
-- The sidebar now yields (`sidebarFits`). One the user has not hidden
-  is auto-hidden when the channel pane would be narrower than 60
-  columns with it. Its configured width (`[`/`]`, config) is never
-  changed; the threshold moves with it.
+- `minMsgWidth` 40 → **50**, `minThreadW` 80 → **60**. A side-by-side
+  thread still grows to 80 (`prefThreadW`) before the channel gets more
+  than its minimum: thread `max(35% of the content area, 80)`, capped so
+  the channel keeps 50.
+- The sidebar is now the lowest-priority pane (`sidebarFits`). One the
+  user has not hidden is auto-hidden when the channel pane would be
+  narrower than 60 columns with it, and, with a thread open, whenever
+  hiding it is what lets the thread sit beside the channel. Its
+  configured width (`[`/`]`, config) is never changed; the thresholds
+  move with it.
 - `ctrl+b` flips what is on screen, at any width. Showing an
   auto-hidden sidebar pins it: it squeezes the channel (or stacks the
-  thread) until `ctrl+b` hides it again, across resizes. Showing it
-  where it fits does not pin it. Widening it with `]` past what fits
-  pins it too, so it does not vanish under the key. An overlay was
-  considered for the explicit case and rejected: it needs a second
-  compositing and hit-testing path for the same pane, where squeezing
-  reuses the one layout.
-- Focus never stays on a hidden sidebar: a resize that hides it moves
-  focus to the thread if it is drawn alone, else the channel.
+  thread rather than squeezing the panes below their minima) until
+  `ctrl+b` hides it again, across resizes. Showing it where it fits does
+  not pin it. Widening it with `]` past what fits pins it too, so it
+  does not vanish under the key. An overlay was considered for the
+  explicit case and rejected: it needs a second compositing and
+  hit-testing path for the same pane, where squeezing reuses the one
+  layout.
+- Focus never stays on a hidden sidebar: a resize or a thread opening
+  that hides it moves focus to the thread if it is drawn alone, else
+  the channel.
 
-With the default 6-column rail and 30-column sidebar, no thread open:
-60 columns gives a 52-column channel (was 18), 80 gives 72 (was 40),
-and from 100 the sidebar is shown with a channel of at least 60.
+With the default 6-column rail and 30-column sidebar:
+
+| Terminal | No thread | Thread open |
+|---|---|---|
+| 60 | sidebar hidden, channel 52 | stacked, 52 |
+| 80 | sidebar hidden, channel 72 | stacked, 72 |
+| 100–119 | sidebar shown, channel 60–79 | stacked with sidebar, 60–79 |
+| 120 | sidebar shown, channel 80 | sidebar yields: channel 50 / thread 60 |
+| 140 | sidebar shown, channel 100 | sidebar yields: channel 50 / thread 80 |
+| 152 | sidebar shown | all three: channel 50 / thread 60 |
+| 160 | sidebar shown | all three: channel 50 / thread 68 |
+| 200 | sidebar shown | all three: channel 78 / thread 80 |
+
+The tables in section 1 record the original design; this section
+supersedes their thresholds.
 
 ### 2. Which pane is in front
 
