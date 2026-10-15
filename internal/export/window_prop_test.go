@@ -137,22 +137,29 @@ func TestWindowTSRoundTrip(t *testing.T) {
 	})
 }
 
-// An empty until runs through the end of today in the zone: the day
-// after now's local date.
+// An empty until runs through the end of today in the zone: Until is
+// the first instant of the day after now's local date. That is checked
+// as its definition (on tomorrow, and a nanosecond earlier still today)
+// rather than as time.Date(y, m, d+1, 0, 0, 0, 0, loc), which on a day
+// the zone skipped midnight (Sao Paulo until 2018) is the evening before.
 func TestNewWindowEmptyUntil(t *testing.T) {
 	rapid.Check(t, func(t *rapid.T) {
 		c := genWindowCase().Draw(t, "case")
 		loc, _ := time.LoadLocation(c.tz)
-		y, m, d := c.now.In(loc).Date()
-		next := time.Date(y, m, d+1, 0, 0, 0, 0, loc)
-		c.since = next.AddDate(0, 0, -rapid.IntRange(1, 100).Draw(t, "back")).Format(dateLayout)
+		today := c.now.In(loc)
+		// Noon is never skipped, so its date is tomorrow's.
+		tomorrow := time.Date(today.Year(), today.Month(), today.Day()+1, 12, 0, 0, 0, loc)
+		c.since = tomorrow.AddDate(0, 0, -rapid.IntRange(1, 100).Draw(t, "back")).Format(dateLayout)
 		c.until = ""
 		w, err := c.build()
 		if err != nil {
 			t.Fatal(err)
 		}
-		if !w.Until.Equal(next) {
-			t.Fatalf("Until = %v, want %v", w.Until, next)
+		if got := w.Until.In(loc).Format(dateLayout); got != tomorrow.Format(dateLayout) {
+			t.Fatalf("Until = %v, on %s; want the start of %s", w.Until, got, tomorrow.Format(dateLayout))
+		}
+		if got := w.Until.Add(-time.Nanosecond).In(loc).Format(dateLayout); got != today.Format(dateLayout) {
+			t.Fatalf("Until = %v is not the first instant of %s: a nanosecond earlier is %s", w.Until, tomorrow.Format(dateLayout), got)
 		}
 	})
 }
