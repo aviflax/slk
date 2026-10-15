@@ -52,13 +52,19 @@ func wrapInput() *rapid.Generator[string] {
 		// splits " \uFE0F" at the space, so wrapLine measures the word
 		// without it and the rejoined line grows by a cell. The first is a
 		// bug in x/ansi; working around either means wrapLine measuring
-		// graphemes itself. Strip the pair (repeatedly, since stripping
-		// "a\uFE0F\uFE0F" leaves "a\uFE0F").
-		for asciiVS16.MatchString(s) {
-			s = asciiVS16.ReplaceAllString(s, "$1")
-		}
-		return s
+		// graphemes itself.
+		return stripASCIIVS16(s)
 	})
+}
+
+// stripASCIIVS16 removes every VS16 that follows an ASCII byte (see the
+// KNOWN note in wrapInput), repeatedly, since stripping "a\uFE0F\uFE0F"
+// leaves "a\uFE0F".
+func stripASCIIVS16(s string) string {
+	for asciiVS16.MatchString(s) {
+		s = asciiVS16.ReplaceAllString(s, "$1")
+	}
+	return s
 }
 
 // asciiVS16 matches an ASCII byte followed by VS16 (see wrapInput).
