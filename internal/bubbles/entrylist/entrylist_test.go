@@ -6,6 +6,8 @@ import (
 	"testing"
 
 	"github.com/charmbracelet/x/ansi"
+
+	"github.com/gammons/slk/internal/bubbles/scrollbar"
 )
 
 // rows builds n plain rows "<id>-<k>" padded to width w.
@@ -52,7 +54,7 @@ func list(t *testing.T, n, h int, opts ...Option) *Model {
 func strip(rs []string) []string {
 	out := make([]string, len(rs))
 	for i, r := range rs {
-		out[i] = strings.TrimRight(ansi.Strip(r), " │█")
+		out[i] = strings.TrimRight(ansi.Strip(r), " "+scrollbar.TrackGlyph+scrollbar.ThumbGlyph)
 	}
 	return out
 }
@@ -264,7 +266,7 @@ func TestComposePadsAndPlacesIndicators(t *testing.T) {
 func TestComposeDrawsScrollbarOnlyWhenOverflowing(t *testing.T) {
 	m := list(t, 20, 2)
 	out := m.Compose(m.Layout(19, nil), "", "", false)
-	if !strings.ContainsAny(ansi.Strip(out[0]), "│█") {
+	if !strings.ContainsAny(ansi.Strip(out[0]), scrollbar.TrackGlyph+scrollbar.ThumbGlyph) {
 		t.Fatalf("no scrollbar on an overflowing list: %q", ansi.Strip(out[0]))
 	}
 	for _, r := range out {

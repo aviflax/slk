@@ -35,7 +35,7 @@ func TestOverlay_AddsGlyphPerVisibleRow(t *testing.T) {
 		if w := ansi.StringWidth(row); w != 5 {
 			t.Fatalf("row %d width = %d; want 5 (%q)", i, w, row)
 		}
-		if !(strings.Contains(row, "\u2588") || strings.Contains(row, "\u2502")) {
+		if !(strings.Contains(row, ThumbGlyph) || strings.Contains(row, TrackGlyph)) {
 			t.Fatalf("row %d missing scrollbar glyph: %q", i, row)
 		}
 	}
@@ -100,5 +100,23 @@ func TestThumb(t *testing.T) {
 					c.total, c.offset, c.visible, s, e, c.start, c.end)
 			}
 		})
+	}
+}
+
+// Every pane draws its gutter in the last content column, right
+// against the pane's own border (│ or the focused ┃). A solid line
+// track there read as a doubled border, so the track is dotted.
+func TestOverlay_TrackIsNotASolidLine(t *testing.T) {
+	out := Overlay([]string{"a", "b", "c", "d"}, 4, 100, 0, 4, bg, track, thumb)
+	last := ansi.Strip(out[3])
+	glyph := last[len(last)-len(TrackGlyph):]
+	if glyph != TrackGlyph {
+		t.Fatalf("track row ends %q, want the track glyph %q", last, TrackGlyph)
+	}
+	if strings.ContainsAny(TrackGlyph, "│┃║|") {
+		t.Fatalf("track glyph %q is a solid vertical line, which doubles the pane border", TrackGlyph)
+	}
+	if !strings.HasSuffix(ansi.Strip(out[0]), ThumbGlyph) {
+		t.Fatalf("thumb row ends %q, want %q", ansi.Strip(out[0]), ThumbGlyph)
 	}
 }

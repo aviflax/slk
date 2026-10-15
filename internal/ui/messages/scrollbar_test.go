@@ -22,8 +22,8 @@ func TestView_ScrollbarAppearsOnOverflow(t *testing.T) {
 	}
 	m := New(msgs, "general")
 	out := m.View(15, 60)
-	if !strings.Contains(out, "\u2588") && !strings.Contains(out, "\u2502") {
-		t.Fatalf("expected scrollbar glyph (█ or │) in overflow render; got %q", out)
+	if !strings.Contains(out, "\u2588") && !strings.Contains(out, "\u250a") {
+		t.Fatalf("expected scrollbar glyph (█ or ┊) in overflow render; got %q", out)
 	}
 }
 
@@ -35,7 +35,7 @@ func TestView_NoScrollbarWhenContentFits(t *testing.T) {
 	}
 	m := New(msgs, "general")
 	out := m.View(40, 60)
-	if strings.Contains(out, "\u2588") || strings.Contains(out, "\u2502") {
+	if strings.Contains(out, "\u2588") || strings.Contains(out, "\u250a") {
 		t.Fatalf("did not expect scrollbar glyph in non-overflow render; got %q", out)
 	}
 }

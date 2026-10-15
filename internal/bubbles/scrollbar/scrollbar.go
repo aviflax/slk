@@ -2,7 +2,7 @@
 // pre-rendered visible lines, and computes its thumb (Thumb) for callers
 // that draw the gutter themselves. It is the same look used by the modal
 // overlays (channelfinder, workspacefinder, themeswitcher, reactionpicker):
-// a Border-colored track (│) with a Primary-colored thumb (█) sized
+// a Border-colored track (┊) with a Primary-colored thumb (█) sized
 // proportionally to the visible window, positioned proportionally to the
 // scroll offset.
 package scrollbar
@@ -12,6 +12,15 @@ import (
 
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
+)
+
+// The gutter glyphs Overlay draws. The gutter is a pane's last content
+// column, so it always sits against the pane's right border (│, or ┃
+// when focused); a solid │ track there read as a doubled border. The
+// dotted track stays visible as a track without looking like a line.
+const (
+	TrackGlyph = "\u250a" // ┊
+	ThumbGlyph = "\u2588" // █
 )
 
 // Overlay returns visible with a 1-column scrollbar overlaid onto the last
@@ -42,8 +51,8 @@ func Overlay(visible []string, width, total, yOffset, visibleHeight int, bg, tra
 
 	thumbStyle := lipgloss.NewStyle().Background(bg).Foreground(thumbFg)
 	trackStyle := lipgloss.NewStyle().Background(bg).Foreground(trackFg)
-	thumbCell := thumbStyle.Render("\u2588") // █
-	trackCell := trackStyle.Render("\u2502") // │
+	thumbCell := thumbStyle.Render(ThumbGlyph)
+	trackCell := trackStyle.Render(TrackGlyph)
 
 	gutterCol := width - 1
 	if gutterCol < 0 {

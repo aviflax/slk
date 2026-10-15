@@ -777,10 +777,10 @@ func TestThreadView_HasScrollbarWhenOverflowing(t *testing.T) {
 	m.SetThread(parent, replies, "C1", "1.0")
 
 	view := m.View(40, 10)
-	// Scrollbar uses '│' (track) and '█' (thumb). With 30 replies in a
+	// Scrollbar uses '┊' (track) and '█' (thumb). With 30 replies in a
 	// 10-row pane, the list total >> pane height, so scrollbar.Overlay
 	// definitely draws.
-	if !strings.ContainsRune(view, '│') && !strings.ContainsRune(view, '█') {
+	if !strings.ContainsRune(view, '┊') && !strings.ContainsRune(view, '█') {
 		t.Fatalf("expected scrollbar glyph in overflowing thread view; got:\n%s", view)
 	}
 }
