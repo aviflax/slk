@@ -18,6 +18,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -49,19 +50,35 @@ func Each(t *testing.T, zones []string, body func(t *testing.T) string) []string
 		t.SkipNow()
 	}
 	out := make([]string, len(zones))
+	errs := make([]error, len(zones))
 	dir := t.TempDir()
+	// The children run at once: each starts the test binary, which
+	// under -race takes about a second, and they share nothing.
+	var wg sync.WaitGroup
 	for i, zone := range zones {
-		path := filepath.Join(dir, fmt.Sprintf("zone%d", i))
-		cmd := exec.Command(os.Args[0], "-test.run="+runPattern(t.Name()), "-test.count=1", "-test.v")
-		cmd.Env = append(os.Environ(), "TZ="+zone, zoneEnv+"="+zone, outEnv+"="+path)
-		if b, err := cmd.CombinedOutput(); err != nil {
-			t.Fatalf("under TZ=%s: %v\n%s", zone, err, b)
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			path := filepath.Join(dir, fmt.Sprintf("zone%d", i))
+			cmd := exec.Command(os.Args[0], "-test.run="+runPattern(t.Name()), "-test.count=1", "-test.v")
+			cmd.Env = append(os.Environ(), "TZ="+zone, zoneEnv+"="+zone, outEnv+"="+path)
+			if b, err := cmd.CombinedOutput(); err != nil {
+				errs[i] = fmt.Errorf("under TZ=%s: %w\n%s", zone, err, b)
+				return
+			}
+			b, err := os.ReadFile(path)
+			if err != nil && !os.IsNotExist(err) {
+				errs[i] = fmt.Errorf("under TZ=%s: reading the result: %w", zone, err)
+				return
+			}
+			out[i] = string(b)
+		}()
+	}
+	wg.Wait()
+	for _, err := range errs {
+		if err != nil {
+			t.Fatal(err)
 		}
-		b, err := os.ReadFile(path)
-		if err != nil && !os.IsNotExist(err) {
-			t.Fatalf("under TZ=%s: reading the result: %v", zone, err)
-		}
-		out[i] = string(b)
 	}
 	return out
 }
