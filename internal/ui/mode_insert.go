@@ -18,8 +18,10 @@
 //     attachments + uploading flag).
 //   - Ctrl+O (thread compose)    -> toggle "also send to channel" for
 //     the next thread reply.
-//   - Ctrl+E                     -> edit the draft in $VISUAL/$EDITOR
+//   - Ctrl+X                     -> edit the draft in $VISUAL/$EDITOR
 //     (suspends the TUI; see editor.go).
+//   - Ctrl+E / Ctrl+A            -> not handled here: they reach the
+//     textarea, which moves to the end / start of the line.
 //   - Up / Down on first/last line -> jump to start/end of textarea.
 //   - Plain Enter                -> send (or commit edit, or upload-
 //     then-send if attachments present).
@@ -125,7 +127,7 @@ func handleInsertMode(a *App, msg tea.KeyMsg) tea.Cmd {
 	if isPaste {
 		return a.smartPaste()
 	}
-	if code == 'e' && mod == tea.ModCtrl {
+	if code == 'x' && mod == tea.ModCtrl {
 		return a.openComposeInEditor()
 	}
 

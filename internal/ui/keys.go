@@ -77,6 +77,7 @@ type KeyMap struct {
 	WinOnly             key.Binding
 	ToggleBroadcast     key.Binding
 	OpenInEditor        key.Binding
+	ClearCompose        key.Binding
 }
 
 func DefaultKeyMap() KeyMap {
@@ -171,7 +172,11 @@ func DefaultKeyMap() KeyMap {
 		// "Also send to #channel" checkbox for the next reply.
 		// Alt+Enter sends and broadcasts in a single keystroke.
 		ToggleBroadcast: key.NewBinding(key.WithKeys("ctrl+o"), key.WithHelp("ctrl+o / alt+enter", "also send reply to channel")),
-		// Shadows the textarea's own ctrl+e (LineEnd); "End" still works.
-		OpenInEditor: key.NewBinding(key.WithKeys("ctrl+e"), key.WithHelp("ctrl+e", "edit message in $EDITOR")),
+		// ctrl+e is left to the textarea (end of line); ctrl+x hands the
+		// draft to the external editor.
+		OpenInEditor: key.NewBinding(key.WithKeys("ctrl+x"), key.WithHelp("ctrl+x", "edit message in $EDITOR")),
+		// Insert mode: clears every line of the focused composer plus its
+		// pending attachments (handled in mode_insert.go).
+		ClearCompose: key.NewBinding(key.WithKeys("ctrl+u"), key.WithHelp("ctrl+u", "clear message input")),
 	}
 }

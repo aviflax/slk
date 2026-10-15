@@ -828,7 +828,7 @@ func TestSeam_ThreadMarkNilCmd(t *testing.T) {
 	}
 }
 
-// Ctrl+E hands the draft to an external editor through a temp file;
+// Ctrl+X hands the draft to an external editor through a temp file;
 // EditorFinishedMsg reads it back.
 
 func editDraft(a *App, draft string) tea.Cmd {
@@ -836,7 +836,7 @@ func editDraft(a *App, draft string) tea.Cmd {
 	a.SetMode(ModeInsert)
 	_ = a.compose.Focus()
 	a.compose.SetValue(draft)
-	return a.handleKey(tea.KeyPressMsg{Code: 'e', Mod: tea.ModCtrl})
+	return a.handleKey(tea.KeyPressMsg{Code: 'x', Mod: tea.ModCtrl})
 }
 
 func TestSeam_EditorGetsDraftInTempFile(t *testing.T) {

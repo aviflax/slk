@@ -11,7 +11,7 @@
 //	UploadProgressMsg         - in-flight upload progress toast.
 //	UploadResultMsg           - upload finished: clear compose
 //	                            attachments + Sent/Failed toast.
-//	EditorFinishedMsg         - Ctrl+E external-editor session ended:
+//	EditorFinishedMsg         - Ctrl+X external-editor session ended:
 //	                            read the temp file back into the
 //	                            compose it came from, then remove it.
 //	ConnectionStateMsg        - WS connection state changed:

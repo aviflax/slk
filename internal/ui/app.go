@@ -242,11 +242,11 @@ type App struct {
 	// native clipboard initialization.
 	clipboardAvailable bool
 
-	// composeEditor is Ctrl+E's editor argv, resolved once at startup
+	// composeEditor is Ctrl+X's editor argv, resolved once at startup
 	// by ui.ResolveEditor (editor.go). Nil means unconfigured.
 	composeEditor []string
 
-	// editor hands Ctrl+E's draft to composeEditor and back. A no-op
+	// editor hands Ctrl+X's draft to composeEditor and back. A no-op
 	// until wired.
 	editor core.EditorService
 
@@ -2691,12 +2691,12 @@ func (a *App) SetClipboardAvailable(ok bool) {
 	a.clipboardAvailable = ok
 }
 
-// SetComposeEditor sets Ctrl+E's resolved editor argv (see editor.go).
+// SetComposeEditor sets Ctrl+X's resolved editor argv (see editor.go).
 func (a *App) SetComposeEditor(editor []string) {
 	a.composeEditor = editor
 }
 
-// SetEditorService wires Ctrl+E's temp file and editor process. nil
+// SetEditorService wires Ctrl+X's temp file and editor process. nil
 // restores the no-op.
 func (a *App) SetEditorService(s core.EditorService) {
 	if s == nil {

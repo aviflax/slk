@@ -25,7 +25,7 @@
 ![Composing a DM to Sam and getting a live reply](https://github.com/gammons/slk/raw/main/docs/assets/demo/compose.gif)
 
 - Multi-line input, `Shift+Enter` for newlines
-- External editor (`Ctrl+E`) — opens the draft in `$VISUAL`, then `$EDITOR`, then `[compose] editor` from config; the edited text replaces the draft when the editor exits
+- External editor (`Ctrl+X`) — opens the draft in `$VISUAL`, then `$EDITOR`, then `[compose] editor` from config; the edited text replaces the draft when the editor exits
 - Inline `@mention` autocomplete (resolves to `<@UserID>` on send)
 - Special mentions: `@here`, `@channel`, `@everyone`
 - Bracketed paste — paste multi-line text from the system clipboard without it being interpreted as keystrokes

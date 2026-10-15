@@ -61,7 +61,7 @@ quiet_hours = "22:00-08:00"   # planned
 # in a muted channel would still notify.)
 
 [compose]
-editor = "nvim"   # Ctrl+E editor, used when $VISUAL and $EDITOR are unset
+editor = "nvim"   # Ctrl+X editor, used when $VISUAL and $EDITOR are unset
 
 [cache]
 message_retention_days = 30

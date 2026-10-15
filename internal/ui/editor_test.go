@@ -114,7 +114,7 @@ func TestReduceEditorFinished_MissingFileLeavesComposeUntouched(t *testing.T) {
 	}
 }
 
-func TestApp_CtrlEOpensEditorFromInsertMode(t *testing.T) {
+func TestApp_CtrlXOpensEditorFromInsertMode(t *testing.T) {
 	a := newTestAppWithMessages(t)
 	a.setEditorForTest()
 	a.SetMode(ModeInsert)
@@ -123,9 +123,9 @@ func TestApp_CtrlEOpensEditorFromInsertMode(t *testing.T) {
 	_ = a.compose.Focus()
 	a.compose.SetValue("draft before editor")
 
-	cmd := a.handleKey(tea.KeyPressMsg{Code: 'e', Mod: tea.ModCtrl})
+	cmd := a.handleKey(tea.KeyPressMsg{Code: 'x', Mod: tea.ModCtrl})
 	if cmd == nil {
-		t.Fatal("want a non-nil Cmd from Ctrl+E in insert mode")
+		t.Fatal("want a non-nil Cmd from Ctrl+X in insert mode")
 	}
 	if !a.compose.EditingExternally() {
 		t.Fatal("want compose locked while the editor is open")
@@ -203,7 +203,7 @@ func TestReduceEditorFinished_NonZeroExitDoesNotToast(t *testing.T) {
 	}
 }
 
-func TestApp_CtrlEWithNoEditorConfiguredShowsToast(t *testing.T) {
+func TestApp_CtrlXWithNoEditorConfiguredShowsToast(t *testing.T) {
 	a := newTestAppWithMessages(t)
 	a.SetMode(ModeInsert)
 	a.focusedPanel = PanelMessages
@@ -211,7 +211,7 @@ func TestApp_CtrlEWithNoEditorConfiguredShowsToast(t *testing.T) {
 	_ = a.compose.Focus()
 	a.compose.SetValue("draft before editor")
 
-	cmd := a.handleKey(tea.KeyPressMsg{Code: 'e', Mod: tea.ModCtrl})
+	cmd := a.handleKey(tea.KeyPressMsg{Code: 'x', Mod: tea.ModCtrl})
 	if cmd == nil {
 		t.Fatal("want a non-nil Cmd (the toast) even with no editor configured")
 	}
@@ -220,11 +220,11 @@ func TestApp_CtrlEWithNoEditorConfiguredShowsToast(t *testing.T) {
 	}
 }
 
-// TestApp_UpdateRoutesCtrlEThroughFullDispatch exercises the real
+// TestApp_UpdateRoutesCtrlXThroughFullDispatch exercises the real
 // tea.Program entry point (Update, not handleKey directly) — the
 // reducer chain in Update runs before handleKey and could swallow a
-// KeyPressMsg before it ever reaches the Ctrl+E check.
-func TestApp_UpdateRoutesCtrlEThroughFullDispatch(t *testing.T) {
+// KeyPressMsg before it ever reaches the Ctrl+X check.
+func TestApp_UpdateRoutesCtrlXThroughFullDispatch(t *testing.T) {
 	a := newTestAppWithMessages(t)
 	a.setEditorForTest()
 	a.SetMode(ModeInsert)
@@ -232,20 +232,20 @@ func TestApp_UpdateRoutesCtrlEThroughFullDispatch(t *testing.T) {
 	a.composeEditor = []string{"true"}
 	_ = a.compose.Focus()
 
-	_, cmd := a.Update(tea.KeyPressMsg{Code: 'e', Mod: tea.ModCtrl})
+	_, cmd := a.Update(tea.KeyPressMsg{Code: 'x', Mod: tea.ModCtrl})
 	if cmd == nil {
-		t.Fatal("want a non-nil Cmd from a.Update for Ctrl+E in insert mode")
+		t.Fatal("want a non-nil Cmd from a.Update for Ctrl+X in insert mode")
 	}
 	if !a.compose.EditingExternally() {
 		t.Fatal("want compose locked — something upstream of handleKey may be swallowing the key")
 	}
 }
 
-// TestApp_CtrlEWorksWithNumLockModifierBit guards the actual bug:
+// TestApp_CtrlXWorksWithNumLockModifierBit guards the actual bug:
 // some terminals (e.g. Ghostty) report a NumLock/CapsLock bit
 // alongside Mod even when irrelevant to the binding, which broke a
 // bare `mod == tea.ModCtrl` comparison.
-func TestApp_CtrlEWorksWithNumLockModifierBit(t *testing.T) {
+func TestApp_CtrlXWorksWithNumLockModifierBit(t *testing.T) {
 	a := newTestAppWithMessages(t)
 	a.setEditorForTest()
 	a.SetMode(ModeInsert)
@@ -253,11 +253,11 @@ func TestApp_CtrlEWorksWithNumLockModifierBit(t *testing.T) {
 	a.composeEditor = []string{"true"}
 	_ = a.compose.Focus()
 
-	cmd := a.handleKey(tea.KeyPressMsg{Code: 'e', Mod: tea.ModCtrl | tea.ModNumLock})
+	cmd := a.handleKey(tea.KeyPressMsg{Code: 'x', Mod: tea.ModCtrl | tea.ModNumLock})
 	if cmd == nil {
-		t.Fatal("want Ctrl+E to still register with NumLock's Mod bit set")
+		t.Fatal("want Ctrl+X to still register with NumLock's Mod bit set")
 	}
 	if !a.compose.EditingExternally() {
-		t.Fatal("want compose locked — the NumLock bit must not defeat the ctrl+e check")
+		t.Fatal("want compose locked — the NumLock bit must not defeat the ctrl+x check")
 	}
 }

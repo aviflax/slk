@@ -688,6 +688,102 @@ func TestInsertModeKeys(t *testing.T) {
 		},
 
 		// =============================================================
+		// Ctrl+E / Ctrl+A: readline line end / line start. Ctrl+E used
+		// to open the external editor (now Ctrl+X).
+		// =============================================================
+		{
+			name: "ctrl+e moves the channel compose cursor to the end of the line",
+			opts: insertOpts(),
+			setup: func(t *testing.T, a *App) {
+				typeInto(t, &a.compose, "abc")
+				a.compose, _ = a.compose.Update(tea.KeyPressMsg{Code: 'a', Mod: tea.ModCtrl})
+			},
+			key:      keyMod('e', tea.ModCtrl),
+			wantMode: ModeInsert,
+			assert: func(t *testing.T, a *App, cmd tea.Cmd) {
+				if a.compose.EditingExternally() {
+					t.Error("ctrl+e must not open the editor")
+				}
+				if got := afterKeyValue(&a.compose, 'X'); got != "abcX" {
+					t.Errorf("after ctrl+e then X, value = %q, want %q", got, "abcX")
+				}
+			},
+		},
+		{
+			name: "ctrl+e moves the THREAD compose cursor to the end of the line",
+			opts: insertOpts(),
+			setup: func(t *testing.T, a *App) {
+				showThread(t, a)
+				typeInto(t, &a.threadCompose, "abc")
+				a.threadCompose, _ = a.threadCompose.Update(tea.KeyPressMsg{Code: 'a', Mod: tea.ModCtrl})
+			},
+			key:      keyMod('e', tea.ModCtrl),
+			wantMode: ModeInsert,
+			assert: func(t *testing.T, a *App, _ tea.Cmd) {
+				if got := afterKeyValue(&a.threadCompose, 'X'); got != "abcX" {
+					t.Errorf("after ctrl+e then X, value = %q, want %q", got, "abcX")
+				}
+			},
+		},
+		{
+			name: "ctrl+e on a multiline draft goes to the end of the current line only",
+			opts: insertOpts(),
+			setup: func(t *testing.T, a *App) {
+				typeInto(t, &a.compose, "ab")
+				a.compose, _ = a.compose.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+				a.compose, _ = a.compose.Update(tea.KeyPressMsg{Code: 'c', Text: "c"})
+				a.compose, _ = a.compose.Update(tea.KeyPressMsg{Code: tea.KeyUp})
+				a.compose, _ = a.compose.Update(tea.KeyPressMsg{Code: 'a', Mod: tea.ModCtrl})
+			},
+			key:      keyMod('e', tea.ModCtrl),
+			wantMode: ModeInsert,
+			assert: func(t *testing.T, a *App, _ tea.Cmd) {
+				if got := afterKeyValue(&a.compose, 'X'); got != "abX\nc" {
+					t.Errorf("value = %q, want %q", got, "abX\nc")
+				}
+			},
+		},
+		{
+			name:     "ctrl+a moves the cursor to the start of the line",
+			opts:     insertOpts(),
+			setup:    func(t *testing.T, a *App) { typeInto(t, &a.compose, "abc") },
+			key:      keyMod('a', tea.ModCtrl),
+			wantMode: ModeInsert,
+			assert: func(t *testing.T, a *App, _ tea.Cmd) {
+				if got := afterKeyValue(&a.compose, 'X'); got != "Xabc" {
+					t.Errorf("value = %q, want %q", got, "Xabc")
+				}
+			},
+		},
+
+		// =============================================================
+		// Ctrl+U clears every line and pending attachment, and the
+		// stored draft for the conversation ends up empty too.
+		// =============================================================
+		{
+			name: "ctrl+u clears a multiline draft and its stored draft",
+			opts: insertOpts(),
+			setup: func(t *testing.T, a *App) {
+				typeInto(t, &a.compose, "ab")
+				a.compose, _ = a.compose.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+				a.compose, _ = a.compose.Update(tea.KeyPressMsg{Code: 'c', Text: "c"})
+				a.compose.SetDraftContext("T1", "C1", "")
+			},
+			key:      keyMod('u', tea.ModCtrl),
+			wantMode: ModeInsert,
+			assert: func(t *testing.T, a *App, _ tea.Cmd) {
+				if got := a.compose.Value(); got != "" {
+					t.Errorf("compose value = %q, want empty", got)
+				}
+				a.compose.SetDraftContext("T1", "C2", "")
+				a.compose.SetDraftContext("T1", "C1", "")
+				if got := a.compose.Value(); got != "" {
+					t.Errorf("restored draft = %q, want empty", got)
+				}
+			},
+		},
+
+		// =============================================================
 		// Up / Down: jump-to-edge vs picker navigation
 		// (mode_insert.go:136-146)
 		// =============================================================

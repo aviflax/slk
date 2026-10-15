@@ -1,5 +1,5 @@
 // Package editor runs the user's external editor for the compose box's
-// Ctrl+E. cmd/slk wires it into the TUI as its core.EditorService.
+// Ctrl+X. cmd/slk wires it into the TUI as its core.EditorService.
 package editor
 
 import (

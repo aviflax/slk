@@ -28,7 +28,7 @@ type Config struct {
 }
 
 type Compose struct {
-	// Editor is the Ctrl+E fallback when $VISUAL/$EDITOR are unset.
+	// Editor is the Ctrl+X fallback when $VISUAL/$EDITOR are unset.
 	Editor string `toml:"editor"`
 }
 

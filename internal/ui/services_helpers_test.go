@@ -188,7 +188,7 @@ func (a *App) setFilesystemForTest() {
 	a.setDesktopForTest(func(d *core.DesktopServiceFuncs) { d.Stat = os.Stat })
 }
 
-// setEditorForTest gives Ctrl+E the real temp file and editor process.
+// setEditorForTest gives Ctrl+X the real temp file and editor process.
 func (a *App) setEditorForTest() {
 	a.SetEditorService(core.NewEditorService(editor.WriteDraft, editor.Edit, editor.TakeDraft))
 }

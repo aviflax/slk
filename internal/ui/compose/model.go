@@ -119,7 +119,7 @@ type Model struct {
 	// opens, so a high-visibility broadcast never silently repeats.
 	broadcast bool
 
-	// editingExternally is true while Ctrl+E's editor is open. Update()
+	// editingExternally is true while Ctrl+X's editor is open. Update()
 	// refuses all key input while set.
 	editingExternally bool
 
@@ -309,7 +309,7 @@ func (m *Model) SetUploading(on bool) {
 	m.dirty()
 }
 
-// SetEditingExternally sets whether Ctrl+E's editor is open, which
+// SetEditingExternally sets whether Ctrl+X's editor is open, which
 // causes Update() to refuse key input.
 func (m *Model) SetEditingExternally(on bool) {
 	if m.editingExternally == on {
@@ -319,7 +319,7 @@ func (m *Model) SetEditingExternally(on bool) {
 	m.dirty()
 }
 
-// EditingExternally reports whether Ctrl+E's editor is open.
+// EditingExternally reports whether Ctrl+X's editor is open.
 func (m *Model) EditingExternally() bool { return m.editingExternally }
 
 // Uploading reports whether an upload is currently in flight.

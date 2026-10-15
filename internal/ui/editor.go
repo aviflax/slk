@@ -1,6 +1,6 @@
 // internal/ui/editor.go
 //
-// Ctrl+E edits the compose box in an external editor ($VISUAL /
+// Ctrl+X edits the compose box in an external editor ($VISUAL /
 // $EDITOR / compose.editor), resolved once at startup by
 // ResolveEditor (see cmd/slk/main.go) and stored on App — never
 // re-read per keypress.
