@@ -3,7 +3,7 @@ package main
 import (
 	"sync"
 	"testing"
-	"time"
+	"testing/synctest"
 )
 
 // railQueryCall is one call of the thread query, held until the test
@@ -39,29 +39,25 @@ func (f *railQueryFake) count() int {
 	return f.n
 }
 
-// next waits for the next query call.
+// next waits for the next query call. There is no deadline: a query
+// that never comes hangs the test and go test's -timeout names it.
 func (f *railQueryFake) next(t *testing.T) railQueryCall {
 	t.Helper()
-	select {
-	case c := <-f.calls:
-		return c
-	case <-time.After(2 * time.Second):
-		t.Fatal("timed out waiting for a thread query")
-		return railQueryCall{}
-	}
+	return <-f.calls
 }
 
-// expectNoCall fails if another query arrives within d. A worker the
-// cache should not have started is not scheduled on any deadline, so
-// only waiting out a quiet period catches it; d bounds how late it may
-// show up.
-func (f *railQueryFake) expectNoCall(t *testing.T, d time.Duration) {
+// expectNoCall fails if another query is on its way. It must run inside
+// a synctest bubble: Wait returns once every goroutine in the bubble is
+// blocked, so a worker the cache should not have started has either
+// already reached the fake's send by then or does not exist.
+func (f *railQueryFake) expectNoCall(t *testing.T) {
 	t.Helper()
+	synctest.Wait()
 	select {
 	case c := <-f.calls:
 		t.Errorf("unexpected thread query for %s (self %s)", c.team, c.self)
 		c.reply <- false
-	case <-time.After(d):
+	default:
 	}
 }
 
@@ -81,15 +77,10 @@ func (l *notifyLog) notify(teamID string) {
 	l.ch <- teamID
 }
 
+// wait blocks for the next notification, with no deadline.
 func (l *notifyLog) wait(t *testing.T) string {
 	t.Helper()
-	select {
-	case id := <-l.ch:
-		return id
-	case <-time.After(2 * time.Second):
-		t.Fatal("timed out waiting for a change notification")
-		return ""
-	}
+	return <-l.ch
 }
 
 func (l *notifyLog) all() []string {
@@ -98,22 +89,14 @@ func (l *notifyLog) all() []string {
 	return append([]string(nil), l.seen...)
 }
 
-// lookup calls c.Unread and fails the test if it blocks. The lookup runs
-// on the UI goroutine, so if it waits for the query, every keystroke
-// queued behind a read-state event waits too (~820ms per event with
-// 1000 subscribed threads). With the fake query nobody answers until the
-// test does, so a blocking lookup would otherwise hang the test.
+// lookup calls c.Unread. The lookup runs on the UI goroutine, so if it
+// waited for the query, every keystroke queued behind a read-state event
+// would wait too (~820ms per event with 1000 subscribed threads). With
+// the fake query nobody answers until the test does, so a blocking
+// lookup hangs the test and go test's -timeout names it.
 func lookup(t *testing.T, c *railThreadsCache, teamID, selfUserID string) bool {
 	t.Helper()
-	done := make(chan bool, 1)
-	go func() { done <- c.Unread(teamID, selfUserID) }()
-	select {
-	case got := <-done:
-		return got
-	case <-time.After(2 * time.Second):
-		t.Fatal("lookup blocked on the thread query")
-		return false
-	}
+	return c.Unread(teamID, selfUserID)
 }
 
 func TestRailThreadsCache_LookupDoesNotWaitForTheQuery(t *testing.T) {
@@ -175,6 +158,10 @@ func TestRailThreadsCache_ReportsAChangeOnceAndServesIt(t *testing.T) {
 // read-state events while a query runs must cost one more query, run
 // with the newest self user ID.
 func TestRailThreadsCache_BurstWhileQueryingRunsOneMore(t *testing.T) {
+	synctest.Test(t, testRailBurstWhileQueryingRunsOneMore)
+}
+
+func testRailBurstWhileQueryingRunsOneMore(t *testing.T) {
 	q := newRailQueryFake()
 	c := newRailThreadsCache(q.query)
 
@@ -193,7 +180,7 @@ func TestRailThreadsCache_BurstWhileQueryingRunsOneMore(t *testing.T) {
 
 	lookup(t, c, "T1", "U6")
 	q.next(t).reply <- false
-	q.expectNoCall(t, 200*time.Millisecond)
+	q.expectNoCall(t)
 	if got := q.count(); got != 3 {
 		t.Errorf("queries = %d, want 3 (first, one rerun for the burst, the last lookup)", got)
 	}
