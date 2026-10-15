@@ -295,7 +295,11 @@ The flow for a send or reply:
   conversation, it returns the rest in TS order, and the result's arm
   shows each through `showNewMessage` (`releaseHeld`,
   `released_held_echo`), so reply counts, read state and threads-dirty
-  happen as for any message. A send that failed after Slack accepted it
+  happen as for any message. A released reply that a channel refetch
+  already counted is not counted again: `IncrementReplyCount` skips a
+  reply at or before the parent's `LatestReply` (Slack's latest_reply
+  when the parent was loaded), and records nothing when the parent is
+  not shown. A send that failed after Slack accepted it
   (a timeout) then shows once, from its echo, and its text is also
   given back: nothing proves which send the echo belongs to.
 

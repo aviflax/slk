@@ -50,3 +50,25 @@ func TestFetchThreadReplies_PrunesCachedRepliesSlackDidNotReturn(t *testing.T) {
 		t.Errorf("cached thread after fetch = %v, want %v", got, want)
 	}
 }
+
+// A parent's latest_reply reaches its MessageItem from a fetch and from
+// the cache, so the pane knows which replies Slack's reply_count holds.
+func TestFetchedAndCachedParentsCarryLatestReply(t *testing.T) {
+	db := newTestDB(t)
+	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"ok":true,"has_more":false,"messages":[
+			{"type":"message","user":"U1","ts":"1700000000.000100","thread_ts":"1700000000.000100",
+			 "reply_count":2,"latest_reply":"1700000005.000100","text":"parent"}]}`))
+	}))
+	defer srv.Close()
+
+	fetched := fetchChannelMessages(newTestClient(t, srv), "C1", db, newUserNameStore(nil), "15:04", nil, nil)
+	if len(fetched) != 1 || fetched[0].LatestReply != "1700000005.000100" {
+		t.Fatalf("fetched = %+v, want latest_reply carried", fetched)
+	}
+	cached := loadCachedMessages(db, "USELF", "C1", newUserNameStore(nil), "15:04", nil)
+	if len(cached) != 1 || cached[0].LatestReply != "1700000005.000100" {
+		t.Fatalf("cached = %+v, want latest_reply carried", cached)
+	}
+}

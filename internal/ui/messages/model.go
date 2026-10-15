@@ -1015,10 +1015,25 @@ func (m *Model) ClampReactionNav() {
 // IncrementReplyCount finds a message by TS and increments its ReplyCount.
 // Idempotent on (parentTS, replyTS): the optimistic ThreadReplySentMsg path
 // and the WS echo NewMessageMsg path can both fire for the same reply --
-// pass the reply's own TS to dedup. An empty replyTS skips dedup (legacy
-// callers that don't yet pass it).
+// pass the reply's own TS to dedup. A reply at or before the parent's
+// LatestReply is in Slack's count already and is skipped, so a reply
+// shown after a refetch that counted it (a held echo released late) is
+// not counted twice. A parent this pane does not show changes nothing
+// and records nothing. An empty replyTS skips dedup (legacy callers
+// that don't yet pass it).
 func (m *Model) IncrementReplyCount(parentTS, replyTS string) {
+	i := FirstIndexOfTS(m.messages, parentTS)
+	if i < 0 {
+		// No row to count into. Nothing is remembered, so the reply
+		// still counts once the parent shows.
+		return
+	}
 	if replyTS != "" {
+		// Slack's ReplyCount already includes every reply up to the
+		// parent's latest_reply when it was loaded.
+		if latest := m.messages[i].LatestReply; latest != "" && CompareTS(replyTS, latest) <= 0 {
+			return
+		}
 		if m.countedReplies == nil {
 			m.countedReplies = make(map[string]map[string]struct{})
 		}
@@ -1043,10 +1058,6 @@ func (m *Model) IncrementReplyCount(parentTS, replyTS string) {
 		wasAnchoredAtBottom = m.list.YOffset()+m.list.Height() >= m.list.Total()
 	}
 
-	i := FirstIndexOfTS(m.messages, parentTS)
-	if i < 0 {
-		return
-	}
 	m.messages[i].ReplyCount++
 	m.dropCache()
 	m.dirty()
