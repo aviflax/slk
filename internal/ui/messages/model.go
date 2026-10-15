@@ -887,8 +887,15 @@ func (m *Model) PrependMessages(msgs []MessageItem) {
 		debuglog.Cache("messages.Model.PrependMessages: channel=%q count_before=%d count_added=%d added=[%s]",
 			m.channelName, len(m.messages), count, summarizeMessageItems(msgs))
 	}
+	wasEmpty := len(m.messages) == 0
 	m.messages = append(msgs, m.messages...)
-	m.selected += count
+	if wasEmpty {
+		// Nothing was selected; shifting the index would point past the
+		// end. Start at the bottom, as SetMessages does.
+		m.selected = len(m.messages) - 1
+	} else {
+		m.selected += count
+	}
 	m.dropCache()
 	m.dirty()
 }
