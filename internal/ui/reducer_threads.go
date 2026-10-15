@@ -448,7 +448,8 @@ func (a *App) markOpenThreadRead(channelID, threadTS string, replies []messages.
 		latestTS = t
 	}
 	var cmd tea.Cmd
-	if channelID != "" && threadTS != "" {
+	if channelID != "" && threadTS != "" && !a.readFloors.behind(a.threadFloor(channelID, threadTS), latestTS) {
+		a.readFloors.advance(a.threadFloor(channelID, threadTS), latestTS)
 		cmd = teaCmd(a.threads.Mark(
 			ids.ChannelID(channelID),
 			ids.ThreadTS(threadTS),

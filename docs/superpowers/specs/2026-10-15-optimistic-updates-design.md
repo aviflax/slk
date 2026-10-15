@@ -430,7 +430,14 @@ history or a link. The guards:
   `MarkUnreadMsg` reducer arms. A pane's append ends reaction
   navigation, which runs before the key guard.
 - Read cursors: `recordChannelMark` and `recordThreadMark` ignore a
-  placeholder. The thread mark (`newestMarkableReplyTS`) and the
+  placeholder, and never stage a mark at or behind the cursor Slack
+  already holds (`readFloors`, `read_floor.go`): a held message
+  released after newer ones were marked would otherwise move Slack's
+  cursor back. The floor rises with every mark slk issues (flush,
+  channel entry, thread open, the fetcher's `MarkedTS`), the loaded
+  `LastReadTS` and slk's own mark echoes; a mark from another client
+  sets it either way; the user's mark-unread (`markedUnread`) moves it
+  back to the boundary and drops a staged mark of that conversation. The thread mark (`newestMarkableReplyTS`) and the
   mark-unread boundary take the nearest message Slack knows
   (`KnownToSlack`: no placeholder, no ephemeral).
 - Navigation: `currentLocation` and `channelPaneLocation` name a

@@ -215,6 +215,7 @@ var reduceSend reducerFunc = func(a *App, msg tea.Msg) (tea.Cmd, bool) {
 				return statusbar.MarkUnreadFailedMsg{Reason: reason}
 			}, true
 		}
+		a.markedUnread(m.ChannelID, m.ThreadTS, m.BoundaryTS)
 		if m.ThreadTS == "" {
 			a.applyChannelMark(m.ChannelID, m.BoundaryTS, m.UnreadCount)
 		} else {

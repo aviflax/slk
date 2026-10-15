@@ -352,6 +352,11 @@ type App struct {
 	pendingChannelMark pendingChannelMarkState
 	pendingThreadMark  pendingThreadMarkState
 
+	// readFloors is the newest read cursor slk knows Slack holds per
+	// channel and thread; no automatic mark goes out at or behind it
+	// (read_floor.go).
+	readFloors readFloors
+
 	// selfMarks and selfThreadMarks record the channel and thread marks
 	// slk issued itself so their Slack-broadcast echoes can be told
 	// apart from a mark made in another client. Two sets rather than
@@ -881,6 +886,7 @@ func NewApp() *App {
 		view:                  ViewChannels,
 		keys:                  DefaultKeyMap(),
 		pendingOps:            newPendingOps(),
+		readFloors:            readFloors{},
 		bootstrap:             newWorkspaceBootstrap(),
 		windowTitle:           "slk",
 		threadsDirtyDebounce:  defaultThreadsDirtyDebounce,
@@ -2471,29 +2477,38 @@ func (a *App) scheduleThreadsDirty() tea.Cmd {
 }
 
 // recordChannelMark stages a channel read-cursor advance. Newest-wins:
-// an older ts for the same channel is ignored, so out-of-order arrivals
-// can never roll the cursor backward. Slack timestamps are decimal
-// strings of equal shape, so the string comparison orders them
-// correctly without parsing.
+// a ts at or behind the staged one, or behind the cursor Slack already
+// holds (readFloors: an earlier flush, an entry mark, another client),
+// is ignored, so out-of-order arrivals (a held message released after
+// newer ones were marked) can never roll the cursor backward.
 func (a *App) recordChannelMark(channelID, ts string) {
 	if channelID == "" || ts == "" || messages.IsLocalTS(ts) {
 		return
 	}
-	if a.pendingChannelMark.channelID == channelID && a.pendingChannelMark.ts >= ts {
+	if a.pendingChannelMark.channelID == channelID && messages.CompareTS(a.pendingChannelMark.ts, ts) >= 0 {
+		return
+	}
+	if a.readFloors.behind(a.channelFloor(channelID), ts) {
+		debuglog.Cache("recordChannelMark: channel=%s ts=%s decision=behind_read_floor", channelID, ts)
 		return
 	}
 	a.pendingChannelMark = pendingChannelMarkState{channelID: channelID, ts: ts}
 }
 
 // recordThreadMark stages a thread read-cursor advance. Newest-wins for
-// the same (channel, thread); a different thread replaces the slot.
+// the same (channel, thread), and never behind the thread's read floor
+// (see recordChannelMark); a different thread replaces the slot.
 func (a *App) recordThreadMark(channelID, threadTS, ts string) {
 	if channelID == "" || threadTS == "" || ts == "" || messages.IsLocalTS(ts) || messages.IsLocalTS(threadTS) {
 		return
 	}
 	if a.pendingThreadMark.channelID == channelID &&
 		a.pendingThreadMark.threadTS == threadTS &&
-		a.pendingThreadMark.ts >= ts {
+		messages.CompareTS(a.pendingThreadMark.ts, ts) >= 0 {
+		return
+	}
+	if a.readFloors.behind(a.threadFloor(channelID, threadTS), ts) {
+		debuglog.Cache("recordThreadMark: channel=%s thread_ts=%s ts=%s decision=behind_read_floor", channelID, threadTS, ts)
 		return
 	}
 	a.pendingThreadMark = pendingThreadMarkState{channelID: channelID, threadTS: threadTS, ts: ts}
@@ -2548,7 +2563,8 @@ func (a *App) scheduleMarkFlush() tea.Cmd {
 }
 
 // flushPendingMarks clears both slots and returns the commands that
-// issue their marks. Clearing before issuing is deliberate: a mark
+// issue their marks, raising each read floor to its mark. A slot at or
+// behind its floor is dropped unissued. Clearing before issuing is deliberate: a mark
 // Slack rejects is not retried here, it is reconciled by the next
 // arrival, the next channel entry, or reconnect sync. Retrying a
 // rejected mark risks hammering a rate-limited endpoint.
@@ -2567,16 +2583,18 @@ func (a *App) scheduleMarkFlush() tea.Cmd {
 // channel entry.
 func (a *App) flushPendingMarks() tea.Cmd {
 	var cmds []tea.Cmd
-	if pc := a.pendingChannelMark; pc.ts != "" {
+	if pc := a.pendingChannelMark; pc.ts != "" && !a.readFloors.behind(a.channelFloor(pc.channelID), pc.ts) {
 		a.pendingChannelMark = pendingChannelMarkState{}
+		a.readFloors.advance(a.channelFloor(pc.channelID), pc.ts)
 		channels := a.channels
 		chID := ids.ChannelID(pc.channelID)
 		ts := ids.MessageTS(pc.ts)
 		a.selfMarks.record(selfMarkKey{channelID: pc.channelID, ts: pc.ts})
 		cmds = append(cmds, func() tea.Msg { return channels.MarkRead(chID, ts) })
 	}
-	if pt := a.pendingThreadMark; pt.ts != "" {
+	if pt := a.pendingThreadMark; pt.ts != "" && !a.readFloors.behind(a.threadFloor(pt.channelID, pt.threadTS), pt.ts) {
 		a.pendingThreadMark = pendingThreadMarkState{}
+		a.readFloors.advance(a.threadFloor(pt.channelID, pt.threadTS), pt.ts)
 		if c := teaCmd(a.threads.Mark(
 			ids.ChannelID(pt.channelID),
 			ids.ThreadTS(pt.threadTS),
@@ -2596,6 +2614,9 @@ func (a *App) flushPendingMarks() tea.Cmd {
 			cmds = append(cmds, c)
 		}
 	}
+	// A slot left is one at or behind its floor: drop it.
+	a.pendingChannelMark = pendingChannelMarkState{}
+	a.pendingThreadMark = pendingThreadMarkState{}
 	if len(cmds) == 0 {
 		return nil
 	}
@@ -3973,6 +3994,8 @@ func (a *App) notifyReadStateChanged() {
 func (a *App) applyChannelMark(channelID, ts string, unreadCount int) {
 	debuglog.Cache("applyChannelMark: channel=%s ts=%s unread_count=%d active=%s",
 		channelID, ts, unreadCount, a.activeChannelID)
+	// Slack's cursor was put here on purpose, in either direction.
+	a.readFloors.reset(a.channelFloor(channelID), ts)
 	for _, mm := range a.modelsForChannel(channelID) {
 		mm.SetLastReadTS(ts)
 	}
@@ -4004,6 +4027,7 @@ func (a *App) applyChannelMarkEcho(channelID, ts string, unreadCount int) {
 	if a.selfMarks.consume(selfMarkKey{channelID: channelID, ts: ts}) {
 		debuglog.Cache("applyChannelMarkEcho: channel=%s ts=%s self_echo=true (cursor held)",
 			channelID, ts)
+		a.readFloors.advance(a.channelFloor(channelID), ts)
 		a.notifyReadStateChanged()
 		return
 	}
@@ -4023,6 +4047,8 @@ func (a *App) applyChannelMarkEcho(channelID, ts string, unreadCount int) {
 func (a *App) applyThreadMark(channelID, threadTS, lastRead string) {
 	debuglog.Cache("applyThreadMark: channel=%s thread_ts=%s last_read=%s active=%s",
 		channelID, threadTS, lastRead, a.activeChannelID)
+	// A mark made elsewhere: Slack's cursor, in either direction.
+	a.readFloors.reset(a.threadFloor(channelID, threadTS), lastRead)
 	if a.threadVisible &&
 		a.threadPanel.ChannelID() == channelID &&
 		a.threadPanel.ThreadTS() == threadTS {
@@ -4110,6 +4136,7 @@ func (a *App) applyThreadMarkEcho(channelID, threadTS, lastRead string) {
 	}) {
 		debuglog.Cache("applyThreadMarkEcho: channel=%s thread_ts=%s last_read=%s self_echo=true (landmark held)",
 			channelID, threadTS, lastRead)
+		a.readFloors.advance(a.threadFloor(channelID, threadTS), lastRead)
 		a.applyThreadMarkListState(channelID, threadTS, lastRead)
 		return
 	}
