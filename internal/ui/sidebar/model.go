@@ -1347,8 +1347,8 @@ func (m *Model) rebuildFilter() {
 
 	// Sort filtered indices to match the visual section display order so that
 	// j/k navigation traverses items in the same order they're rendered.
-	// Within the real Slack stars section, channels form one block before
-	// people/app/group conversations. Within each block (and other sections):
+	// Within every section, channels form one block before
+	// people/app/group conversations. Within each block:
 	//   1. Channels with ChannelOrder > 0 come first, sorted ascending
 	//      (from SectionDef "<pattern>:<N>" suffixes; config-mode only).
 	//   2. Channels with ChannelOrder == 0 follow.
@@ -1356,25 +1356,15 @@ func (m *Model) rebuildFilter() {
 	//   then by input order.
 	//      users.conversations returns no meaningful order, and Slack's
 	//      own per-section sort preference is not available to us.
-	// Snapshot star identities once per rebuild, not inside the comparator.
-	// Names are presentation only: a custom section named Starred is ordinary.
-	stars := make(map[string]bool)
-	if m.sectionsProvider != nil && m.sectionsProvider.Ready() {
-		for _, sec := range m.sectionsProvider.OrderedSlackSections() {
-			if sec.Type == "stars" {
-				stars[sec.ID] = true
-			}
-		}
-	}
-	sortFilteredIdx(m.items, m.filtered, m.sectionFor, m.modelOrderedSections(m.filtered), stars)
+	sortFilteredIdx(m.items, m.filtered, m.sectionFor, m.modelOrderedSections(m.filtered))
 }
 
 // sortFilteredIdx sorts filtered (indices into items) into the order the
 // sidebar draws them: by the section's position in sectionOrder (each
 // item's section is sectionOf(item)), channels before conversations
-// inside a section named in stars, then ChannelOrder > 0 ascending, then
+// inside each section, then ChannelOrder > 0 ascending, then
 // text.Fold(Name), then input order.
-func sortFilteredIdx(items []ChannelItem, filtered []int, sectionOf func(ChannelItem) string, sectionOrder []string, stars map[string]bool) {
+func sortFilteredIdx(items []ChannelItem, filtered []int, sectionOf func(ChannelItem) string, sectionOrder []string) {
 	rank := make(map[string]int, len(sectionOrder))
 	for i, name := range sectionOrder {
 		rank[name] = i
@@ -1390,12 +1380,10 @@ func sortFilteredIdx(items []ChannelItem, filtered []int, sectionOf func(Channel
 		if ra != rb {
 			return ra < rb
 		}
-		if sa == sb && stars[sa] {
-			ca := items[ia].Type == "channel" || items[ia].Type == "private"
-			cb := items[ib].Type == "channel" || items[ib].Type == "private"
-			if ca != cb {
-				return ca
-			}
+		ca := items[ia].Type == "channel" || items[ia].Type == "private"
+		cb := items[ib].Type == "channel" || items[ib].Type == "private"
+		if ca != cb {
+			return ca
 		}
 		// Within a section: annotated (ChannelOrder > 0) before
 		// un-annotated; among annotated, lower wins; among

@@ -21,7 +21,9 @@ func starredItems() []ChannelItem {
 	}
 }
 
-func TestStarredOrderUsesSectionType(t *testing.T) {
+// Every section lists channels before people, apps and group DMs, whether
+// it is Slack's stars section, a custom section, or a config section.
+func TestSectionsListChannelsFirst(t *testing.T) {
 	for _, tc := range []struct {
 		name, sectionType, label string
 		ready, provider          bool
@@ -30,9 +32,9 @@ func TestStarredOrderUsesSectionType(t *testing.T) {
 		{"stars", "stars", "Starred", true, true, []string{"C2", "C1", "D2", "D1"}},
 		{"empty label", "stars", "", true, true, []string{"C2", "C1", "D2", "D1"}},
 		{"renamed", "stars", "Favorites", true, true, []string{"C2", "C1", "D2", "D1"}},
-		{"custom Starred", "standard", "Starred", true, true, []string{"D2", "C2", "C1", "D1"}},
-		{"not ready", "stars", "Starred", false, true, []string{"D2", "C2", "C1", "D1"}},
-		{"config only", "", "", false, false, []string{"D2", "C2", "C1", "D1"}},
+		{"custom Starred", "standard", "Starred", true, true, []string{"C2", "C1", "D2", "D1"}},
+		{"not ready", "stars", "Starred", false, true, []string{"C2", "C1", "D2", "D1"}},
+		{"config only", "", "", false, false, []string{"C2", "C1", "D2", "D1"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			m := New(starredItems())

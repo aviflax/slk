@@ -267,8 +267,8 @@ func TestMentionBadgeAndVisiblyUnread(t *testing.T) {
 // orderedSectionsLegacy lists):
 //   - permutes filtered;
 //   - leaves each section's items contiguous, sections in sectionOrder;
-//   - inside a section named in stars, channels and private channels
-//     come before everything else;
+//   - inside each section, channels and private channels come before
+//     everything else;
 //   - then ChannelOrder > 0 ascending, then text.Fold(Name), then input
 //     order;
 //   - gives the same result whatever order filtered arrives in (the
@@ -289,15 +289,8 @@ func TestSortFilteredIdx(t *testing.T) {
 		// drawn, but a/A (NextUnread) walks them. Where they should sort is
 		// a product call, so the generator does not drop sections.
 		order := orderedSectionsLegacy(items, filtered)
-		stars := map[string]bool{}
-		for _, s := range order {
-			if rapid.IntRange(0, 3).Draw(t, "star") == 0 {
-				stars[s] = true
-			}
-		}
-
 		got := slices.Clone(filtered)
-		sortFilteredIdx(items, got, sectionForLegacy, order, stars)
+		sortFilteredIdx(items, got, sectionForLegacy, order)
 
 		if !slices.Equal(slices.Sorted(slices.Values(got)), slices.Sorted(slices.Values(filtered))) {
 			t.Fatalf("not a permutation: %v from %v", got, filtered)
@@ -316,9 +309,9 @@ func TestSortFilteredIdx(t *testing.T) {
 				}
 				continue
 			}
-			if stars[sa] && isChannel(a) != isChannel(b) {
+			if isChannel(a) != isChannel(b) {
 				if !isChannel(a) {
-					t.Fatalf("in starred %q, %s (%s) before %s (%s)", sa, a.ID, a.Type, b.ID, b.Type)
+					t.Fatalf("in %q, %s (%s) before %s (%s)", sa, a.ID, a.Type, b.ID, b.Type)
 				}
 				continue
 			}
@@ -336,12 +329,12 @@ func TestSortFilteredIdx(t *testing.T) {
 		}
 
 		reshuffled := rapid.Permutation(filtered).Draw(t, "reshuffled")
-		sortFilteredIdx(items, reshuffled, sectionForLegacy, order, stars)
+		sortFilteredIdx(items, reshuffled, sectionForLegacy, order)
 		if !slices.Equal(reshuffled, got) {
 			t.Fatalf("input order leaked: %v vs %v", reshuffled, got)
 		}
 		again := slices.Clone(got)
-		sortFilteredIdx(items, again, sectionForLegacy, order, stars)
+		sortFilteredIdx(items, again, sectionForLegacy, order)
 		if !slices.Equal(again, got) {
 			t.Fatalf("not idempotent: %v then %v", got, again)
 		}
