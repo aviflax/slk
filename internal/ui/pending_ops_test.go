@@ -468,7 +468,7 @@ func TestPendingSend_HeldEchoEditedOrDeleted(t *testing.T) {
 	a.Update(echo("C1", "10.000002", "", "phone"))
 	a.Update(echo("C1", "10.000003", "", "phone 2"))
 	edited := echo("C1", "10.000002", "", "phone edited")
-	edited.Message.IsEdited = true
+	edited.Changed, edited.Message.IsEdited = true, true
 	a.Update(edited)
 	a.Update(WSMessageDeletedMsg{ChannelID: "C1", TS: "10.000003"})
 	a.Update(MessageSentMsg{ChannelID: "C1", LocalTS: local, Message: messages.MessageItem{TS: "10.000001", UserID: "USELF", Text: "hello"}})

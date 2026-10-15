@@ -318,12 +318,26 @@ func TestPendingEdit_NotFoundRemovesTheRow(t *testing.T) {
 	}
 }
 
+// A message_changed that Slack does not mark edited (an app updating
+// its message, an unfurl, a parent's reply count) shows Slack's body in
+// place, without an "(edited)" mark, and is not taken for a new
+// message.
+func TestMessageChangedWithoutEditIsNotMarkedEdited(t *testing.T) {
+	a := editApp(t, nil)
+	updated := typedRow("1.000000", "updated by an app", "")
+	a.Update(NewMessageMsg{ChannelID: "C1", Changed: true, Message: updated})
+	wantText(t, "channel", a.messagepane.Messages(), "1.000000", "updated by an app", false)
+	if n := len(a.messagepane.Messages()); n != 2 {
+		t.Errorf("channel has %d rows, want the 2 it had", n)
+	}
+}
+
 // The message_changed echo of the user's own edit changes nothing,
 // whether it beats the result or follows it.
 func TestPendingEdit_EchoIsHarmless(t *testing.T) {
 	editEcho := func(text string) NewMessageMsg {
 		m := echo("C1", "1.000000", "", text)
-		m.Message.IsEdited = true
+		m.Changed, m.Message.IsEdited = true, true
 		return m
 	}
 	t.Run("before the result", func(t *testing.T) {
@@ -364,7 +378,7 @@ func TestPendingEdit_EchoIsHarmless(t *testing.T) {
 // newest edit throughout, whatever order the older edit's echo and
 // result arrive in.
 func TestPendingEdit_QuickEdits(t *testing.T) {
-	older := func(m NewMessageMsg) NewMessageMsg { m.Message.IsEdited = true; return m }
+	older := func(m NewMessageMsg) NewMessageMsg { m.Changed, m.Message.IsEdited = true, true; return m }
 	t.Run("both succeed", func(t *testing.T) {
 		a, sent := editAppLog(t, nil)
 		first := editFrom(t, a, PanelMessages, "1.000000", "first")
@@ -440,7 +454,7 @@ func TestPendingEdit_TimeoutAfterSlackStoredIt(t *testing.T) {
 	res := editFrom(t, a, PanelMessages, "1.000000", "fresh words")
 	changed := typedRow("1.000000", "fresh words", "")
 	changed.IsEdited = true
-	a.Update(NewMessageMsg{ChannelID: "C1", Message: changed})
+	a.Update(NewMessageMsg{ChannelID: "C1", Changed: true, Message: changed})
 	_, cmd := a.Update(res)
 	for _, m := range drainMsgs(cmd, 50*time.Millisecond) {
 		if f, ok := m.(statusbar.EditFailedMsg); ok {
@@ -505,7 +519,7 @@ func TestPendingEdit_DrawsTheEditedBody(t *testing.T) {
 		a := editApp(t, nil)
 		changed := typedRow("1.000000", "slack blocks", "")
 		changed.Text, changed.IsEdited = "stale fallback", true
-		a.Update(NewMessageMsg{ChannelID: "C1", Message: changed})
+		a.Update(NewMessageMsg{ChannelID: "C1", Changed: true, Message: changed})
 		ch, _ := drawn(a)
 		wantDrawn(t, "channel", ch, "slack blocks", "one")
 	})

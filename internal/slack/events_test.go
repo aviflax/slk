@@ -57,6 +57,8 @@ type mockEventHandler struct {
 	dndInvalidated    []string
 	userDNDChanges    []userDNDRecord
 	viewsOpened       []string
+	lastChanged       bool
+	lastEdited        *slack.Edited
 }
 
 type userStatusRecord struct {
@@ -96,8 +98,9 @@ type threadSubChangeRecord struct {
 	active                        bool
 }
 
-func (m *mockEventHandler) OnMessage(channelID, userID, ts, text, threadTS, subtype string, edited bool, files []slack.File, blocks slack.Blocks, attachments []slack.Attachment, botID, username string) {
+func (m *mockEventHandler) OnMessage(channelID, userID, ts, text, threadTS, subtype string, changed bool, edited *slack.Edited, files []slack.File, blocks slack.Blocks, attachments []slack.Attachment, botID, username string) {
 	m.messages = append(m.messages, text)
+	m.lastChanged, m.lastEdited = changed, edited
 	m.subtypes = append(m.subtypes, subtype)
 	m.lastBlocks = blocks
 	m.lastAttachments = attachments
@@ -199,7 +202,7 @@ func TestEventHandlerInterface(t *testing.T) {
 	handler := &mockEventHandler{}
 	var _ EventHandler = handler
 
-	handler.OnMessage("C1", "U1", "123.456", "hello", "", "", false, nil, slack.Blocks{}, nil, "", "")
+	handler.OnMessage("C1", "U1", "123.456", "hello", "", "", false, nil, nil, slack.Blocks{}, nil, "", "")
 	if len(handler.messages) != 1 || handler.messages[0] != "hello" {
 		t.Error("expected message to be recorded")
 	}
@@ -316,6 +319,25 @@ func TestDispatchWebSocketMessageChangedEvent(t *testing.T) {
 	}
 	if handler.messages[0] != "edited text" {
 		t.Errorf("expected 'edited text', got %q", handler.messages[0])
+	}
+}
+
+// A message_changed is a change, but only one carrying Slack's edited
+// field is an edit: an unfurl or a parent's reply count update has
+// none, and must not be marked "(edited)".
+func TestDispatchMessageChanged_EditedOnlyWhenSlackSaysSo(t *testing.T) {
+	handler := &mockEventHandler{}
+	dispatchWebSocketEvent([]byte(`{"type":"message","subtype":"message_changed","channel":"C1","message":{"user":"U1","text":"see https://x.test","ts":"123.456","attachments":[{"title":"x"}]}}`), handler)
+	if !handler.lastChanged || handler.lastEdited != nil {
+		t.Errorf("unfurl: changed=%v edited=%+v, want a change with no edited mark", handler.lastChanged, handler.lastEdited)
+	}
+	dispatchWebSocketEvent([]byte(`{"type":"message","subtype":"message_changed","channel":"C1","message":{"user":"U1","text":"fixed","ts":"123.456","edited":{"user":"U1","ts":"124.000000"}}}`), handler)
+	if !handler.lastChanged || handler.lastEdited == nil || handler.lastEdited.Timestamp != "124.000000" || handler.lastEdited.User != "U1" {
+		t.Errorf("edit: changed=%v edited=%+v, want the edited mark of 124.000000 by U1", handler.lastChanged, handler.lastEdited)
+	}
+	dispatchWebSocketEvent([]byte(`{"type":"message","channel":"C1","user":"U1","text":"new","ts":"125.000000"}`), handler)
+	if handler.lastChanged || handler.lastEdited != nil {
+		t.Errorf("new message: changed=%v edited=%+v, want neither", handler.lastChanged, handler.lastEdited)
 	}
 }
 

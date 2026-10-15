@@ -129,7 +129,7 @@ func (h *rtmEventHandler) discoverConversation(channelID string) (sidebar.Channe
 	return h.addConversation(*ch)
 }
 
-func (h *rtmEventHandler) OnMessage(channelID, userID, ts, text, threadTS, subtype string, edited bool, files []slack.File, blocks slack.Blocks, attachments []slack.Attachment, botID, username string) {
+func (h *rtmEventHandler) OnMessage(channelID, userID, ts, text, threadTS, subtype string, changed bool, edited *slack.Edited, files []slack.File, blocks slack.Blocks, attachments []slack.Attachment, botID, username string) {
 	// Bot messages (bot_message) carry no user, only a bot_id + username.
 	// Key the row on the bot_id and resolve its avatar/name via bots.info,
 	// mirroring the fetch path's messageAuthor (cmd/slk/users.go).
@@ -252,7 +252,7 @@ func (h *rtmEventHandler) OnMessage(channelID, userID, ts, text, threadTS, subty
 	channelEligible := !isThreadReply || isBroadcast
 	// Self-sends and edit echoes are excluded because reduceNewMessage
 	// returns BEFORE its read-state tail for both (reducer_send.go, the
-	// IsEdited and IsSelfSent arms). Nothing on the UI side would ever
+	// Changed and IsSelfSent arms). Nothing on the UI side would ever
 	// clear a flag set here, so it would stick until the next channel
 	// entry — the dot would appear on the channel you just posted in.
 	//
@@ -280,11 +280,10 @@ func (h *rtmEventHandler) OnMessage(channelID, userID, ts, text, threadTS, subty
 	// U-prefixed user ID — the choice is about intent, not a
 	// behavioral difference.
 	isSelfMessage := userID != "" && userID == h.currentUserID
-	// edited is true only for message_changed
-	// (internal/slack/events.go:307): a re-delivery of a message the
-	// channel already accounted for. Editing it does not make the
-	// channel unread on Slack.
-	shouldMarkChannel := channelEligible && !isSelfMessage && !edited
+	// changed is true only for message_changed: a re-delivery of a
+	// message the channel already accounted for. Editing it does not
+	// make the channel unread on Slack.
+	shouldMarkChannel := channelEligible && !isSelfMessage && !changed
 	if h.db != nil && shouldMarkChannel {
 		if err := h.db.UpdateChannelReadState(channelID, "", true); err != nil {
 			log.Printf("Warning: failed to set has_unread for %s: %v", channelID, err)
@@ -367,11 +366,11 @@ func (h *rtmEventHandler) OnMessage(channelID, userID, ts, text, threadTS, subty
 		return
 	}
 
-	item := h.messageItemFromEvent(authorID, userID, username, ts, text, threadTS, subtype, edited, files, blocks, attachments)
+	item := h.messageItemFromEvent(authorID, userID, username, ts, text, threadTS, subtype, edited != nil, files, blocks, attachments)
 	debuglog.Cache("OnMessage: team=%s channel=%s ts=%s subtype=%q thread_ts=%s decision=dispatched_to_app",
 		h.workspaceID, channelID, ts, subtype, threadTS)
 	if h.program != nil {
-		h.program.Send(ui.NewMessageMsg{TeamID: h.workspaceID, ChannelID: channelID, Message: item})
+		h.program.Send(ui.NewMessageMsg{TeamID: h.workspaceID, ChannelID: channelID, Changed: changed, Message: item})
 	}
 }
 

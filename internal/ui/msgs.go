@@ -136,7 +136,13 @@ type (
 		// message; "" means the active one.
 		TeamID    string
 		ChannelID string
-		Message   messages.MessageItem
+		// Changed marks Slack's message_changed: a new state of a
+		// message already posted, not a new message. Message.IsEdited
+		// says whether Slack marks it edited; a change may be an
+		// unfurl, a parent's reply count or an app updating its
+		// message.
+		Changed bool
+		Message messages.MessageItem
 	}
 	SendMessageMsg struct {
 		ChannelID string

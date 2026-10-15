@@ -309,7 +309,7 @@ func TestPendingDelete_FailureRestoresTheCurrentBody(t *testing.T) {
 		del := deleteFrom(t, a, PanelMessages, "1.000000")
 		changed := typedRow("1.000000", "slack blocks", "")
 		changed.IsEdited = true
-		a.Update(NewMessageMsg{ChannelID: "C1", Message: changed})
+		a.Update(NewMessageMsg{ChannelID: "C1", Changed: true, Message: changed})
 		a.Update(del)
 		ch, _ := drawn(a)
 		wantDrawn(t, "channel", ch, "slack blocks", "▌one")

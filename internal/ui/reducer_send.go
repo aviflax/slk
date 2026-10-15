@@ -251,10 +251,11 @@ func reduceNewMessage(a *App, m NewMessageMsg) tea.Cmd {
 	}
 	debuglog.Cache("NewMessageMsg: channel=%s ts=%s thread_ts=%s active=%s",
 		m.ChannelID, m.Message.TS, m.Message.ThreadTS, a.activeChannelID)
-	if m.Message.IsEdited {
+	if m.Changed {
 		debuglog.Cache("NewMessageMsg: channel=%s ts=%s decision=skipped_edit_echo",
 			m.ChannelID, m.Message.TS)
-		// Edit echo: update existing message in place rather than
+		// A message_changed (an edit's echo, or a change that is not
+		// an edit): update the existing message in place rather than
 		// appending, in every pane that may show it (shownSinks:
 		// every window viewing the channel, and the thread panel's
 		// reply or parent when the panel is on that channel).
@@ -263,8 +264,8 @@ func reduceNewMessage(a *App, m NewMessageMsg) tea.Cmd {
 		// be silently dropped (the TS is still in selfSentTSes).
 		//
 		// The echo is Slack's stored state: its text, its blocks
-		// (which the body is drawn from) and the edited mark, as they
-		// are. While one of the user's own edits of the message is in
+		// (which the body is drawn from) and the edited mark (set only
+		// when Slack's payload carries one), as they are. While one of the user's own edits of the message is in
 		// flight it is only recorded (EditEcho): it cannot say which
 		// edit it carries, and the edit's result decides what shows.
 		body := messages.BodyOf(m.Message)

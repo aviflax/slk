@@ -65,7 +65,7 @@ func (s *slackModel) change(ts string, body messages.Body, droppable bool) {
 		row.ThreadTS = "5.000000"
 	}
 	body.Apply(&row)
-	s.events = append(s.events, slackEvent{NewMessageMsg{ChannelID: "C1", Message: row}, droppable})
+	s.events = append(s.events, slackEvent{NewMessageMsg{ChannelID: "C1", Changed: true, Message: row}, droppable})
 }
 
 // However the user's edits and deletes of their messages interleave

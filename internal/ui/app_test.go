@@ -1542,6 +1542,7 @@ func TestNewMessageMsg_EditedUpdatesInPlace(t *testing.T) {
 
 	app.Update(NewMessageMsg{
 		ChannelID: "C1",
+		Changed:   true,
 		Message: messages.MessageItem{
 			TS:       "1.0",
 			UserName: "alice",
@@ -1984,6 +1985,7 @@ func TestNewMessageMsg_EditedIgnoresOtherChannel(t *testing.T) {
 
 	app.Update(NewMessageMsg{
 		ChannelID: "C_OTHER",
+		Changed:   true,
 		Message: messages.MessageItem{
 			TS:       "1.0", // coincidentally same TS
 			Text:     "edit from other channel",

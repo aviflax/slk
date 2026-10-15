@@ -369,7 +369,11 @@ The flow for an edit:
 - **State**: per message, `server`, Slack's state as best known: the
   body before the first edit, then each succeeded edit's body and each
   echo's. `known` is false while no pane has shown the message.
-- **Echo**: while an edit is in flight, `message_changed` is recorded
+- **Echo**: a `message_changed` reaches the App as a `NewMessageMsg`
+  with `Changed` set; its `IsEdited` comes from Slack's `edited` field
+  (decoded in `internal/slack/events.go`), so a change that is not an
+  edit (an unfurl, a parent's reply count, an app updating its message)
+  is not marked "(edited)". While an edit is in flight, it is recorded
   (`EditEcho`: `server` becomes the echo; debug log
   `recorded_edit_echo_pending`), not shown, so an older state cannot
   flicker over a newer edit. An echo whose text equals the in-flight

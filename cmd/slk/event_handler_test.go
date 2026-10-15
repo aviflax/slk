@@ -200,7 +200,7 @@ func TestOnMessage_InactiveChannel_SetsHasUnread(t *testing.T) {
 		isActive:        func() bool { return true },
 		activeChannelID: func() string { return "C2" }, // viewing a different channel
 	}
-	h.OnMessage("C1", "U1", "1.001", "hi", "", "", false, nil, slack.Blocks{}, nil, "", "")
+	h.OnMessage("C1", "U1", "1.001", "hi", "", "", false, nil, nil, slack.Blocks{}, nil, "", "")
 
 	s, _ := db.GetChannelReadState("C1")
 	if !s.HasUnread {
@@ -221,7 +221,7 @@ func TestOnMessage_ActiveChannel_StillSetsHasUnread(t *testing.T) {
 		isActive:        func() bool { return true },
 		activeChannelID: func() string { return "C1" },
 	}
-	h.OnMessage("C1", "U1", "1.001", "hi", "", "", false, nil, slack.Blocks{}, nil, "", "")
+	h.OnMessage("C1", "U1", "1.001", "hi", "", "", false, nil, nil, slack.Blocks{}, nil, "", "")
 
 	s, _ := db.GetChannelReadState("C1")
 	if !s.HasUnread {
@@ -244,7 +244,7 @@ func TestOnMessage_SelfMessage_DoesNotSetHasUnread(t *testing.T) {
 		activeChannelID: func() string { return "C1" },
 		currentUserID:   "USELF",
 	}
-	h.OnMessage("C1", "USELF", "1.001", "hi", "", "", false, nil, slack.Blocks{}, nil, "", "")
+	h.OnMessage("C1", "USELF", "1.001", "hi", "", "", false, nil, nil, slack.Blocks{}, nil, "", "")
 
 	s, _ := db.GetChannelReadState("C1")
 	if s.HasUnread {
@@ -266,7 +266,7 @@ func TestOnMessage_BotMessage_WithUnsetCurrentUser_SetsHasUnread(t *testing.T) {
 		activeChannelID: func() string { return "C2" },
 		// currentUserID deliberately left empty, as it is pre-bootstrap
 	}
-	h.OnMessage("C1", "", "1.001", "beep", "", "", false, nil, slack.Blocks{}, nil, "B1", "buildbot")
+	h.OnMessage("C1", "", "1.001", "beep", "", "", false, nil, nil, slack.Blocks{}, nil, "B1", "buildbot")
 
 	s, _ := db.GetChannelReadState("C1")
 	if !s.HasUnread {
@@ -289,11 +289,42 @@ func TestOnMessage_EditEcho_DoesNotSetHasUnread(t *testing.T) {
 	}
 	// edited=true, and from someone else, so only the edit gate can
 	// suppress the write.
-	h.OnMessage("C1", "U1", "1.001", "hi (edited)", "", "", true, nil, slack.Blocks{}, nil, "", "")
+	h.OnMessage("C1", "U1", "1.001", "hi (edited)", "", "", true, nil, nil, slack.Blocks{}, nil, "", "")
 
 	s, _ := db.GetChannelReadState("C1")
 	if s.HasUnread {
 		t.Error("HasUnread = true, want false: editing a message does not make a channel unread")
+	}
+}
+
+// A message_changed reaches the UI as a change; it is marked edited only
+// when Slack's payload carries the edited field, so an unfurl or a
+// reply-count update of a parent does not grow an "(edited)" mark.
+func TestOnMessage_ChangeIsEditedOnlyWithSlacksMark(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		edited *slack.Edited
+	}{
+		{"unfurl", nil},
+		{"edit", &slack.Edited{User: "U1", Timestamp: "1.002"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			sent := &captureSender{}
+			h := &rtmEventHandler{
+				wsCtx:         &WorkspaceContext{},
+				isActive:      func() bool { return true },
+				currentUserID: "USELF",
+				program:       sent,
+			}
+			h.OnMessage("C1", "U1", "1.001", "hi", "", "", true, tc.edited, nil, slack.Blocks{}, nil, "", "")
+			if len(sent.sent) != 1 {
+				t.Fatalf("sent %d messages, want 1", len(sent.sent))
+			}
+			m, ok := sent.sent[0].(ui.NewMessageMsg)
+			if !ok || !m.Changed || m.Message.IsEdited != (tc.edited != nil) {
+				t.Errorf("sent %+v, want a change with IsEdited=%v", sent.sent[0], tc.edited != nil)
+			}
+		})
 	}
 }
 
@@ -307,7 +338,7 @@ func TestOnMessage_InactiveWorkspace_StillSetsHasUnread(t *testing.T) {
 		activeChannelID: func() string { return "" },
 		workspaceID:     "T1",
 	}
-	h.OnMessage("C1", "U1", "1.001", "hi", "", "", false, nil, slack.Blocks{}, nil, "", "")
+	h.OnMessage("C1", "U1", "1.001", "hi", "", "", false, nil, nil, slack.Blocks{}, nil, "", "")
 
 	s, _ := db.GetChannelReadState("C1")
 	if !s.HasUnread {
@@ -325,7 +356,7 @@ func TestOnMessage_ThreadReply_DoesNotSetHasUnread(t *testing.T) {
 		activeChannelID: func() string { return "C2" },
 	}
 	// threadTS != ts and not a broadcast subtype = non-broadcast thread reply.
-	h.OnMessage("C1", "U1", "1.002", "reply", "1.001", "", false, nil, slack.Blocks{}, nil, "", "")
+	h.OnMessage("C1", "U1", "1.002", "reply", "1.001", "", false, nil, nil, slack.Blocks{}, nil, "", "")
 
 	s, _ := db.GetChannelReadState("C1")
 	if s.HasUnread {
@@ -342,7 +373,7 @@ func TestOnMessage_ThreadBroadcast_SetsHasUnread(t *testing.T) {
 		isActive:        func() bool { return true },
 		activeChannelID: func() string { return "C2" },
 	}
-	h.OnMessage("C1", "U1", "1.002", "ALL", "1.001", "thread_broadcast", false, nil, slack.Blocks{}, nil, "", "")
+	h.OnMessage("C1", "U1", "1.002", "ALL", "1.001", "thread_broadcast", false, nil, nil, slack.Blocks{}, nil, "", "")
 
 	s, _ := db.GetChannelReadState("C1")
 	if !s.HasUnread {
@@ -407,8 +438,8 @@ func TestOnMessage_UnknownConversation_AddsItUnread(t *testing.T) {
 		},
 	}
 
-	h.OnMessage("G9", "U2", "1.001", "hi", "", "", false, nil, slack.Blocks{}, nil, "", "")
-	h.OnMessage("G9", "U2", "1.002", "again", "", "", false, nil, slack.Blocks{}, nil, "", "")
+	h.OnMessage("G9", "U2", "1.001", "hi", "", "", false, nil, nil, slack.Blocks{}, nil, "", "")
+	h.OnMessage("G9", "U2", "1.002", "again", "", "", false, nil, nil, slack.Blocks{}, nil, "", "")
 
 	if lookups != 1 {
 		t.Errorf("lookups = %d, want 1", lookups)
@@ -454,7 +485,7 @@ func TestOnMessage_UnknownConversation_RetryDependsOnFailure(t *testing.T) {
 				},
 			}
 			msg := func(ts string) {
-				h.OnMessage("D9", "U2", ts, "hi", "", "", false, nil, slack.Blocks{}, nil, "", "")
+				h.OnMessage("D9", "U2", ts, "hi", "", "", false, nil, nil, slack.Blocks{}, nil, "", "")
 			}
 
 			msg("1.001")
