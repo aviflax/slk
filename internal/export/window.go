@@ -53,16 +53,20 @@ func NewWindow(since, until, timezone string, overlapDays int, now time.Time) (W
 	if since == "" {
 		return Window{}, fmt.Errorf("%w: since date is required", ErrInvalidWindow)
 	}
-	sinceT, err := time.ParseInLocation(dateLayout, since, loc)
+	sinceD, err := time.Parse(dateLayout, since)
 	if err != nil {
 		return Window{}, fmt.Errorf("%w: since %q is not a YYYY-MM-DD date", ErrInvalidWindow, since)
 	}
-	var untilT time.Time
+	sinceT := dayStart(sinceD, 0, loc)
+	var untilT, untilD time.Time
 	if until == "" {
 		y, m, d := now.In(loc).Date()
-		untilT = time.Date(y, m, d+1, 0, 0, 0, 0, loc)
-	} else if untilT, err = time.ParseInLocation(dateLayout, until, loc); err != nil {
+		untilD = time.Date(y, m, d, 0, 0, 0, 0, time.UTC)
+		untilT = dayStart(untilD, 1, loc)
+	} else if untilD, err = time.Parse(dateLayout, until); err != nil {
 		return Window{}, fmt.Errorf("%w: until %q is not a YYYY-MM-DD date", ErrInvalidWindow, until)
+	} else {
+		untilT = dayStart(untilD, 0, loc)
 	}
 	if !sinceT.Before(untilT) {
 		return Window{}, fmt.Errorf("%w: since %s must be before until %s", ErrInvalidWindow, sinceT.Format(dateLayout), untilT.Format(dateLayout))
@@ -70,11 +74,30 @@ func NewWindow(since, until, timezone string, overlapDays int, now time.Time) (W
 	return Window{
 		Since:       sinceT,
 		Until:       untilT,
-		Start:       sinceT.AddDate(0, 0, -overlapDays),
-		End:         untilT.AddDate(0, 0, overlapDays),
+		Start:       dayStart(sinceD, -overlapDays, loc),
+		End:         dayStart(untilD, overlapDays, loc),
 		OverlapDays: overlapDays,
 		Location:    loc,
 	}, nil
+}
+
+// dayStart returns the first instant of the calendar day that is delta
+// days after date's Y-M-D, in loc. That is local midnight, except where
+// the zone skipped midnight (Sao Paulo started DST at 00:00 until 2018):
+// there time.Date answers with the previous evening, an hour early, so
+// the result steps forward until the date matches. Working from the
+// calendar date rather than adding days to an instant keeps every bound
+// on its own day across DST changes.
+func dayStart(date time.Time, delta int, loc *time.Location) time.Time {
+	y, m, d := date.AddDate(0, 0, delta).Date()
+	t := time.Date(y, m, d, 0, 0, 0, 0, loc)
+	for range 96 {
+		if ty, tm, td := t.Date(); ty == y && tm == m && td == d {
+			break
+		}
+		t = t.Add(15 * time.Minute)
+	}
+	return t
 }
 
 // Contains reports whether the Slack timestamp ts falls inside the
