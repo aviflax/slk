@@ -1051,18 +1051,29 @@ func (m *Model) Patch(ts string, f func(*MessageItem)) (prior MessageItem, ok bo
 
 // RemoveMessageByTS removes a message with the given TS, adjusting the
 // selected index so it remains valid. Returns true if the message was
-// found and removed. Invalidates the render cache.
-//
-// Unlike RemoveLocalSent it scans from the front, steps the selection
-// back when the removed row was the selected one, and does not reset
-// the snap anchor. Kept as is until the two are reconciled.
+// found and removed. Invalidates the render cache. It is Remove,
+// without what Remove returns to put the message back.
 func (m *Model) RemoveMessageByTS(ts string) bool {
-	rows, ch := RemoveAt(m.messages, FirstIndexOfTS(m.messages, ts))
-	if ch.Op == RowNone {
-		return false
+	_, ok := m.Remove(ts)
+	return ok
+}
+
+// Remove takes out the first message with TS ts and returns it with its
+// index and whether it was selected, for Restore. A missing TS changes
+// nothing, the selection included.
+//
+// Unlike RemoveLocalSent it steps the selection back when the removed
+// row was the selected one (i <= selected), so deleting the selected
+// message lands on the one before it, and it does not reset the snap
+// anchor.
+func (m *Model) Remove(ts string) (RemovedRow, bool) {
+	i := FirstIndexOfTS(m.messages, ts)
+	if i < 0 {
+		return RemovedRow{}, false
 	}
-	m.messages = rows
-	if i := ch.Index; i <= m.selected && m.selected > 0 {
+	removed := RemovedRow{Item: m.messages[i], Index: i, Selected: i == m.selected}
+	m.messages, _ = RemoveAt(m.messages, i)
+	if i <= m.selected && m.selected > 0 {
 		m.selected--
 	}
 	if m.selected >= len(m.messages) {
@@ -1074,7 +1085,28 @@ func (m *Model) RemoveMessageByTS(ts string) bool {
 	}
 	m.dropCache()
 	m.dirty()
-	return true
+	return removed, true
+}
+
+// Restore puts back a message Remove took out, at its old index
+// (Reinsert: clamped, and nothing when the message is shown again
+// already). A message that was selected is selected again; otherwise
+// the cursor stays on the message it is on.
+func (m *Model) Restore(r RemovedRow) {
+	rows, ch := Reinsert(m.messages, r.Item, r.Index)
+	if ch.Op == RowNone {
+		return
+	}
+	m.messages = rows
+	switch {
+	case r.Selected || len(m.messages) == 1:
+		m.selected = ch.Index
+	case ch.Index <= m.selected:
+		m.selected++
+	}
+	m.dropCache()
+	m.dirty()
+	m.list.ResetSnap()
 }
 
 func (m *Model) UpdateReaction(messageTS, emojiName, userID string, remove bool) {

@@ -534,18 +534,28 @@ func (m *Model) Patch(ts string, f func(*messages.MessageItem)) (prior messages.
 }
 
 // RemoveMessageByTS removes a reply by TS, adjusting the selected
-// index so it remains valid. Returns true if found.
-//
-// Scans from the front and steps the selection back on i <= selected,
-// where RemoveLocalSentReply uses i < selected. Kept as is until the
-// two are reconciled.
+// index so it remains valid. Returns true if found. It is Remove,
+// without what Remove returns to put the reply back.
 func (m *Model) RemoveMessageByTS(ts string) bool {
-	rows, ch := messages.RemoveAt(m.replies, messages.FirstIndexOfTS(m.replies, ts))
-	if ch.Op == messages.RowNone {
-		return false
+	_, ok := m.Remove(ts)
+	return ok
+}
+
+// Remove takes out the first reply with TS ts and returns it with its
+// index and whether it was selected, for Restore. The parent is not a
+// reply and is never removed. A missing TS changes nothing.
+//
+// It steps the selection back on i <= selected, where
+// RemoveLocalSentReply uses i < selected, and falls back to the parent
+// when no reply is left.
+func (m *Model) Remove(ts string) (messages.RemovedRow, bool) {
+	i := messages.FirstIndexOfTS(m.replies, ts)
+	if i < 0 {
+		return messages.RemovedRow{}, false
 	}
-	m.replies = rows
-	if i := ch.Index; i <= m.selected && m.selected > 0 {
+	removed := messages.RemovedRow{Item: m.replies[i], Index: i, Selected: i == m.selected}
+	m.replies, _ = messages.RemoveAt(m.replies, i)
+	if i <= m.selected && m.selected > 0 {
 		m.selected--
 	}
 	if m.selected >= len(m.replies) {
@@ -556,7 +566,26 @@ func (m *Model) RemoveMessageByTS(ts string) bool {
 		}
 	}
 	m.InvalidateCache()
-	return true
+	return removed, true
+}
+
+// Restore puts back a reply Remove took out, at its old index
+// (messages.Reinsert: clamped, and nothing when the reply is shown
+// again already). A reply that was selected is selected again;
+// otherwise the cursor stays where it is.
+func (m *Model) Restore(r messages.RemovedRow) {
+	rows, ch := messages.Reinsert(m.replies, r.Item, r.Index)
+	if ch.Op == messages.RowNone {
+		return
+	}
+	m.replies = rows
+	switch {
+	case r.Selected:
+		m.selected = ch.Index
+	case m.selected != parentSelected && ch.Index <= m.selected:
+		m.selected++
+	}
+	m.InvalidateCache()
 }
 
 // UpdateParentInPlace updates the thread parent's text and marks it

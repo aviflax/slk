@@ -30,6 +30,12 @@
 // edit's text. Success shows the text Slack stored; a failure puts
 // back what was there, and gives the typed text back when no newer
 // edit replaced it.
+//
+// A delete (BeginDelete) takes the message out of every pane at once
+// and keeps the rows to put back at their old index if chat.delete
+// fails (EndDelete). Its message_deleted echo is harmless (removing a
+// missing row is a no-op) and proves the delete went through, so a
+// failure after it restores nothing.
 package ui
 
 import (
@@ -110,8 +116,19 @@ type editShown struct {
 	known  bool
 }
 
-// pendingOps tracks the user's sends and edits from this session. See
-// the package comment.
+// pendingDelete is one optimistic delete waiting for its chat.delete
+// result: the rows it took out, to put back if it fails.
+type pendingDelete struct {
+	channelID string
+	ts        string
+	removed   []removedRow
+	// echoed is set when the message_deleted echo arrives first; the
+	// message is then known to be gone.
+	echoed bool
+}
+
+// pendingOps tracks the user's sends, edits and deletes from this
+// session. See the package comment.
 type pendingOps struct {
 	// inserts are the sends without an HTTP result, oldest first.
 	inserts []*pendingInsert
@@ -119,6 +136,9 @@ type pendingOps struct {
 	// edits holds every message with an edit awaiting its result.
 	edits  map[editKey]*editedMessage
 	editID uint64
+
+	// deletes holds every message with a delete awaiting its result.
+	deletes map[editKey]*pendingDelete
 
 	// sentTSes records authoritative TSes the App has observed via
 	// MessageSentMsg / ThreadReplySentMsg or an adopted echo. WS
@@ -131,7 +151,11 @@ type pendingOps struct {
 }
 
 func newPendingOps() *pendingOps {
-	return &pendingOps{sentTSes: make(map[string]time.Time), edits: make(map[editKey]*editedMessage)}
+	return &pendingOps{
+		sentTSes: make(map[string]time.Time),
+		edits:    make(map[editKey]*editedMessage),
+		deletes:  make(map[editKey]*pendingDelete),
+	}
 }
 
 // BeginInsert records a send whose placeholder is ins.localTS.
@@ -233,6 +257,38 @@ func (p *pendingOps) EndEdit(id uint64, ok bool, result string) (e pendingEdit, 
 // result.
 func (p *pendingOps) EditPending(channelID, ts string) bool {
 	return p.edits[editKey{channelID, ts}] != nil
+}
+
+// BeginDelete records d. A second delete of the same message while the
+// first is pending (another pane still showed it) adds its rows to the
+// first.
+func (p *pendingOps) BeginDelete(d pendingDelete) {
+	k := editKey{d.channelID, d.ts}
+	if e := p.deletes[k]; e != nil {
+		e.removed = append(e.removed, d.removed...)
+		return
+	}
+	p.deletes[k] = &d
+}
+
+// EndDelete removes the pending delete of channelID/ts and returns it;
+// ok is false when there is none.
+func (p *pendingOps) EndDelete(channelID, ts string) (pendingDelete, bool) {
+	k := editKey{channelID, ts}
+	d := p.deletes[k]
+	if d == nil {
+		return pendingDelete{}, false
+	}
+	delete(p.deletes, k)
+	return *d, true
+}
+
+// DeleteEchoed marks the pending delete of channelID/ts, if any, as
+// confirmed by its message_deleted echo.
+func (p *pendingOps) DeleteEchoed(channelID, ts string) {
+	if d := p.deletes[editKey{channelID, ts}]; d != nil {
+		d.echoed = true
+	}
 }
 
 // RecordSent marks a message TS as one the user just posted from this

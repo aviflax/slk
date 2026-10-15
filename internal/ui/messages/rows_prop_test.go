@@ -147,6 +147,30 @@ func TestRemoveTSThenReinsertRestores(t *testing.T) {
 	})
 }
 
+// Reinsert undoes a removal by index: removing a row and reinserting
+// it at the reported index gives the original slice back, and
+// reinserting a row whose TS is still present changes nothing.
+func TestReinsertUndoesRemove(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		rows := drawRows(t)
+		if len(rows) == 0 {
+			return
+		}
+		i := rapid.IntRange(0, len(rows)-1).Draw(t, "i")
+		before := slices.Clone(rows)
+		item := rows[i]
+		got, ch := RemoveAt(rows, i)
+		got, back := Reinsert(got, item, ch.Index)
+		if back != (RowChange{Op: RowAdded, Index: i}) || !sameRows(got, before) {
+			t.Fatalf("reinsert at %d: %v [%s], want [%s]", i, back, tsList(got), tsList(before))
+		}
+		again, ch := Reinsert(slices.Clone(got), item, rapid.IntRange(-2, len(got)+2).Draw(t, "at"))
+		if ch.Op != RowNone || !sameRows(again, before) {
+			t.Fatalf("reinsert of a present row: %v [%s]", ch, tsList(again))
+		}
+	})
+}
+
 // Replace and patch rewrite only the matched row: the length and every
 // other row stay as they were. On an absent TS they change nothing.
 func TestReplaceAndPatchTouchOnlyTheMatch(t *testing.T) {

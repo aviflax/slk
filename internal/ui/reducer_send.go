@@ -29,9 +29,14 @@
 //	                           on failure put back what was there,
 //	                           reopen the edit (or give its text
 //	                           back) + fire EditFailed toast.
-//	DeleteMessageMsg         - user delete: chat.delete call.
-//	MessageDeletedMsg        - delete result: on failure fire
-//	                           DeleteFailed toast.
+//	DeleteMessageMsg         - user delete: remove the message
+//	                           from every pane at once, record a
+//	                           pending delete, chat.delete call.
+//	MessageDeletedMsg        - delete result: on success apply it
+//	                           as the echo does; on failure put
+//	                           the rows back + fire DeleteFailed
+//	                           toast, unless the echo already
+//	                           showed it deleted.
 //	MarkUnreadMsg            - user mark-unread: subscriptions
 //	                           mark call.
 //	MessageMarkedUnreadMsg   - mark-unread result: apply local
@@ -145,11 +150,20 @@ var reduceSend reducerFunc = func(a *App, msg tea.Msg) (tea.Cmd, bool) {
 		return reduceMessageEdited(a, m), true
 
 	case DeleteMessageMsg:
+		// The message leaves every pane that shows it at once; the
+		// rows are kept to put back if the delete fails. A deleted
+		// thread parent's panel closes only once Slack confirms
+		// (applyMessageDeleted), since a closed panel cannot be put
+		// back as it was.
+		a.pendingOps.BeginDelete(pendingDelete{
+			channelID: m.ChannelID, ts: m.TS,
+			removed: a.removeFrom(a.shownSinks(m.ChannelID), m.TS),
+		})
 		messageSvc := a.messageSvc
 		chID, ts := ids.ChannelID(m.ChannelID), ids.MessageTS(m.TS)
-		return func() tea.Msg {
+		return failNilDelete(m.ChannelID, m.TS, func() tea.Msg {
 			return messageSvc.Delete(chID, ts)
-		}, true
+		}), true
 
 	case MarkUnreadMsg:
 		messageSvc := a.messageSvc
@@ -162,8 +176,20 @@ var reduceSend reducerFunc = func(a *App, msg tea.Msg) (tea.Cmd, bool) {
 		}, true
 
 	case MessageDeletedMsg:
+		d, ok := a.pendingOps.EndDelete(m.ChannelID, m.TS)
 		if m.Err == nil {
+			// Slack deleted it: do what its echo does, so the thread
+			// panel closes on a deleted parent even when the echo is
+			// slow. Repeating it after the echo changes nothing.
+			return a.applyMessageDeleted(m.ChannelID, m.TS), true
+		}
+		if ok && d.echoed {
+			// The echo showed the message deleted (the call failed
+			// after Slack accepted it): nothing to put back or report.
 			return nil, true
+		}
+		if ok {
+			a.restoreTo(m.ChannelID, d.removed)
 		}
 		reason := m.Err.Error()
 		return func() tea.Msg {
@@ -189,32 +215,8 @@ var reduceSend reducerFunc = func(a *App, msg tea.Msg) (tea.Cmd, bool) {
 	case WSMessageDeletedMsg:
 		debuglog.Cache("WSMessageDeletedMsg: channel=%s ts=%s active=%s",
 			m.ChannelID, m.TS, a.activeChannelID)
-		for _, mm := range a.modelsForChannel(m.ChannelID) {
-			mm.RemoveMessageByTS(m.TS)
-		}
-		if m.ChannelID == a.threadPanel.ChannelID() {
-			a.threadPanel.RemoveMessageByTS(m.TS)
-		}
-		// If the deleted message is the one currently being
-		// edited, cancel the edit (the message is gone --
-		// submitting would fail).
-		if a.editing.Matches(m.ChannelID, m.TS) {
-			a.cancelEdit()
-		}
-		// If the deleted message was the open thread's parent,
-		// close the thread panel -- Slack deletes the entire
-		// thread when the parent is deleted. Cancel any in-flight
-		// edit first so we don't leave the user in insert mode
-		// with a hidden compose.
-		if a.threadVisible && a.threadPanel.ThreadTS() == m.TS && m.ChannelID == a.threadPanel.ChannelID() {
-			a.cancelEdit()
-			if a.compose.Uploading() || a.threadCompose.Uploading() {
-				a.threadCloseAfterUpload = true
-			} else {
-				a.CloseThread()
-			}
-		}
-		return a.dropActionPrompt(m.ChannelID, m.TS), true
+		a.pendingOps.DeleteEchoed(m.ChannelID, m.TS)
+		return a.applyMessageDeleted(m.ChannelID, m.TS), true
 	}
 	return nil, false
 }
@@ -514,4 +516,37 @@ func reduceMessageEdited(a *App, m MessageEditedMsg) tea.Cmd {
 		return toast
 	}
 	return tea.Batch(toast, reopen)
+}
+
+// applyMessageDeleted shows that Slack deleted message ts of channelID,
+// on its message_deleted echo or the user's own successful delete. It is
+// idempotent: a row already gone (the optimistic delete took it) is a
+// no-op that leaves every selection alone.
+func (a *App) applyMessageDeleted(channelID, ts string) tea.Cmd {
+	for _, mm := range a.modelsForChannel(channelID) {
+		mm.RemoveMessageByTS(ts)
+	}
+	if channelID == a.threadPanel.ChannelID() {
+		a.threadPanel.RemoveMessageByTS(ts)
+	}
+	// If the deleted message is the one currently being
+	// edited, cancel the edit (the message is gone --
+	// submitting would fail).
+	if a.editing.Matches(channelID, ts) {
+		a.cancelEdit()
+	}
+	// If the deleted message was the open thread's parent,
+	// close the thread panel -- Slack deletes the entire
+	// thread when the parent is deleted. Cancel any in-flight
+	// edit first so we don't leave the user in insert mode
+	// with a hidden compose.
+	if a.threadVisible && a.threadPanel.ThreadTS() == ts && channelID == a.threadPanel.ChannelID() {
+		a.cancelEdit()
+		if a.compose.Uploading() || a.threadCompose.Uploading() {
+			a.threadCloseAfterUpload = true
+		} else {
+			a.CloseThread()
+		}
+	}
+	return a.dropActionPrompt(channelID, ts)
 }

@@ -1,5 +1,7 @@
 package messages
 
+import "slices"
+
 // Row operations on a pane's []MessageItem, located by TS. Both content
 // panes (messages.Model and thread.Model) use them, then fix up their
 // own selection and caches from the RowChange. The optimistic send
@@ -96,6 +98,26 @@ func PatchTS(rows []MessageItem, ts string, f func(*MessageItem)) ([]MessageItem
 	}
 	f(&rows[i])
 	return rows, RowChange{Op: RowReplaced, Index: i}
+}
+
+// RemovedRow is a row a pane took out (by Remove), with what it takes
+// to put it back: the index it was at, and whether it was the selected
+// row.
+type RemovedRow struct {
+	Item     MessageItem
+	Index    int
+	Selected bool
+}
+
+// Reinsert puts item back at index i, clamped to the slice, and reports
+// RowAdded there. When a row with item's TS is already present (the
+// pane reloaded it) nothing changes: RowNone.
+func Reinsert(rows []MessageItem, item MessageItem, i int) ([]MessageItem, RowChange) {
+	if item.TS != "" && FirstIndexOfTS(rows, item.TS) >= 0 {
+		return rows, noRowChange
+	}
+	i = max(0, min(i, len(rows)))
+	return slices.Insert(rows, i, item), RowChange{Op: RowAdded, Index: i}
 }
 
 // AppendIfAbsent appends item unless a row with its TS is already

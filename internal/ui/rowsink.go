@@ -12,6 +12,7 @@ package ui
 
 import (
 	"errors"
+	"slices"
 
 	tea "charm.land/bubbletea/v2"
 
@@ -38,6 +39,13 @@ type rowSink interface {
 	// parent as well) and returns that row as it was. ok is false when
 	// the pane does not show ts.
 	Patch(ts string, f func(*messages.MessageItem)) (prior messages.MessageItem, ok bool)
+	// Remove takes out the row with TS ts (never the thread pane's
+	// parent) and returns what Restore needs to put it back. A missing
+	// row changes nothing.
+	Remove(ts string) (messages.RemovedRow, bool)
+	// Restore puts a removed row back at its index, selected again if
+	// it was; nothing when the row is shown already.
+	Restore(r messages.RemovedRow)
 }
 
 var (
@@ -121,6 +129,45 @@ func (s rowSinks) patch(ts string, f func(*messages.MessageItem)) (prior message
 		}
 	}
 	return prior, ok
+}
+
+// removedRow is a row the optimistic delete took out of one pane.
+// threadTS is the thread the pane showed, for the thread pane.
+type removedRow struct {
+	sink     rowSink
+	threadTS string
+	row      messages.RemovedRow
+}
+
+// removeFrom takes the row with TS ts out of every pane in s and returns what
+// each removed, to restore on failure.
+func (a *App) removeFrom(s rowSinks, ts string) []removedRow {
+	var out []removedRow
+	for _, c := range s.channel {
+		if r, ok := c.Remove(ts); ok {
+			out = append(out, removedRow{sink: c, row: r})
+		}
+	}
+	if s.thread != nil {
+		if r, ok := s.thread.Remove(ts); ok {
+			out = append(out, removedRow{sink: s.thread, threadTS: a.threadPanel.ThreadTS(), row: r})
+		}
+	}
+	return out
+}
+
+// restoreTo puts each removed row back into its pane, if that pane
+// still shows the conversation it came from: a window still on the
+// channel, the thread panel still on that thread. A pane that has moved
+// on would take the row into the wrong list.
+func (a *App) restoreTo(channelID string, removed []removedRow) {
+	now := a.shownSinks(channelID)
+	for _, r := range removed {
+		if r.sink == now.thread && r.threadTS == a.threadPanel.ThreadTS() ||
+			slices.Contains(now.channel, r.sink) {
+			r.sink.Restore(r.row)
+		}
+	}
 }
 
 // insertSinks returns the panes showing a pending send's row: the same
@@ -216,5 +263,16 @@ func stampEditID(e pendingEdit, call func() tea.Msg) tea.Cmd {
 		default:
 			return r
 		}
+	}
+}
+
+// failNilDelete wraps a delete's service call so a nil result (no
+// active workspace) becomes a failed delete of channelID/ts.
+func failNilDelete(channelID, ts string, call func() tea.Msg) tea.Cmd {
+	return func() tea.Msg {
+		if r := call(); r != nil {
+			return r
+		}
+		return MessageDeletedMsg{ChannelID: channelID, TS: ts, Err: errors.New(noWorkspaceReason)}
 	}
 }
