@@ -44,6 +44,17 @@ func TestSplitWindow_NoRoomToasts(t *testing.T) {
 	}
 }
 
+func TestCommandQ_LastWindowRaisesQuitConfirm(t *testing.T) {
+	a := newWideTestApp(t)
+	_ = executeCommand(a, "q")
+	if !a.confirmPrompt.IsVisible() {
+		t.Fatal(":q on the last window must raise the same quit confirmation as :quit")
+	}
+	if a.wins.Len() != 1 {
+		t.Fatalf("Len = %d, want 1", a.wins.Len())
+	}
+}
+
 func TestCloseWindow_LastWindowToasts(t *testing.T) {
 	a := newWideTestApp(t)
 	cmd := a.closeWindow()

@@ -42,7 +42,7 @@ var commands = map[string]commandFunc{
 	"delmarks": cmdDelMarks,
 	"sp":       cmdSplit,
 	"vsp":      cmdVSplit,
-	"q":        cmdCloseWindow,
+	"q":        cmdQ,
 	"only":     cmdOnlyWindow,
 	"on":       cmdOnlyWindow,
 	"activity": cmdActivity,
@@ -58,7 +58,6 @@ func cmdHelp(a *App, _ commandArgs) tea.Cmd {
 }
 
 // cmdQuit raises the quit confirmation, the same prompt `Q` opens.
-// :q stays "close window" and never quits (window-management design §Errors).
 func cmdQuit(a *App, _ commandArgs) tea.Cmd {
 	a.openQuitConfirm()
 	return nil
@@ -77,8 +76,14 @@ func cmdActivity(a *App, _ commandArgs) tea.Cmd {
 func cmdSplit(a *App, _ commandArgs) tea.Cmd  { return a.splitWindow(wintree.SplitStacked) }
 func cmdVSplit(a *App, _ commandArgs) tea.Cmd { return a.splitWindow(wintree.SplitSideBySide) }
 
-// cmdCloseWindow closes the focused window (never quits the app).
-func cmdCloseWindow(a *App, _ commandArgs) tea.Cmd { return a.closeWindow() }
+// cmdQ closes the focused window, like vim's :q; on the last window it
+// quits through cmdQuit, so the confirmation matches :quit and Q.
+func cmdQ(a *App, args commandArgs) tea.Cmd {
+	if a.wins.Len() <= 1 {
+		return cmdQuit(a, args)
+	}
+	return a.closeWindow()
+}
 
 // cmdOnlyWindow closes all other windows.
 func cmdOnlyWindow(a *App, _ commandArgs) tea.Cmd {

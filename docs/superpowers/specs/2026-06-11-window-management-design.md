@@ -161,8 +161,11 @@ behavior; reopening is one keypress).
 ## Errors
 
 - Split refused for space → status bar: `Not enough room`.
-- Close/`:q` on last window → status bar: `Cannot close last window`
-  (never quits the app).
+- `:q` on the last window → quits like vim, through the same path as
+  `:quit` (the confirmation `Q` shows). With more than one window it
+  closes the focused window.
+- `ctrl+w c` / `ctrl+w q` on the last window → status bar:
+  `Cannot close last window` (never quits).
 - Unknown `:` command → status bar: `Unknown command: <name>`.
 - Pending `ctrl+w` followed by an unmapped key → cancel silently (vim
   behavior).
