@@ -20,10 +20,10 @@ import (
 	"time"
 
 	"charm.land/lipgloss/v2"
+	"github.com/charmbracelet/x/ansi"
 	"github.com/gammons/slk/internal/core"
 	"github.com/gammons/slk/internal/ui/messages"
 	"github.com/gammons/slk/internal/ui/styles"
-	"github.com/muesli/reflow/truncate"
 )
 
 // Each activity row is a two-line card (line 1: author + context + time;
@@ -861,5 +861,5 @@ func clipToWidth(s string, width int) string {
 	if lipgloss.Width(s) <= width {
 		return s
 	}
-	return truncate.StringWithTail(s, uint(width), "…")
+	return ansi.Truncate(s, width, "…")
 }

@@ -14,11 +14,11 @@ import (
 	"time"
 
 	"charm.land/lipgloss/v2"
+	"github.com/charmbracelet/x/ansi"
 	"github.com/gammons/slk/internal/core"
 	"github.com/gammons/slk/internal/ui/messages"
 	"github.com/gammons/slk/internal/ui/styles"
 	"github.com/gammons/slk/internal/usergroups"
-	"github.com/muesli/reflow/truncate"
 )
 
 // cardStride is the number of lines a single rendered thread card occupies
@@ -722,7 +722,7 @@ func (m *Model) renderCard(s core.ThreadSummary, width int, selected bool) []str
 		if previewMax < 0 {
 			previewMax = 0
 		}
-		previewBody = truncate.StringWithTail(preview, uint(previewMax), "…")
+		previewBody = ansi.Truncate(preview, previewMax, "…")
 	}
 	previewLine := clipToWidth("  > "+previewBody, contentWidth)
 
@@ -829,5 +829,5 @@ func clipToWidth(s string, width int) string {
 	if lipgloss.Width(s) <= width {
 		return s
 	}
-	return truncate.StringWithTail(s, uint(width), "…")
+	return ansi.Truncate(s, width, "…")
 }
